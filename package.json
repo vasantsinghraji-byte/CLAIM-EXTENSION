@@ -1,0 +1,19 @@
+{
+  "name": "claim-autofill-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension to automatically fill approved amounts with claim amounts",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "nodemon --watch src -e js,html,css,json --exec npm run build"
+  },
+  "keywords": [
+    "chrome-extension",
+    "autofill",
+    "claims"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

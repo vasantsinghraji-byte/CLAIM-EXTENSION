@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claim Amount Auto-Fill</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Claim Auto-Fill</h1>
+      <p class="subtitle">Automatically fill approved amounts</p>
+    </div>
+
+    <div class="content">
+      <div class="toggle-section">
+        <label class="toggle-label">
+          <span>Auto-fill enabled</span>
+          <div class="toggle-switch">
+            <input type="checkbox" id="autoFillToggle" checked>
+            <span class="slider"></span>
+          </div>
+        </label>
+      </div>
+
+      <div class="button-section">
+        <button id="fillNowBtn" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M13.5 3.5L6 11L2.5 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Fill Now
+        </button>
+      </div>
+
+      <div id="statusMessage" class="status-message"></div>
+
+      <div class="info-section">
+        <h3>How it works:</h3>
+        <ul>
+          <li>Extension automatically detects claim and approved amount fields</li>
+          <li>Fills empty approved amounts with corresponding claim amounts</li>
+          <li>Works on page load and when new fields appear</li>
+          <li>Click "Fill Now" to manually trigger auto-fill</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>Version 1.0.0</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

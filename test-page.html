@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Page - Claim Auto-Fill Extension</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        .instructions {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Page for Claim Auto-Fill Extension</h1>
+
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Make sure the "Claim Amount Auto-Fill" extension is installed and enabled</li>
+            <li>The extension should automatically fill the "Approved Amount" fields with "Claim Amount" values</li>
+            <li>Or click the extension icon and press "Fill Now" button</li>
+            <li>Check your browser console (F12) to see debug messages</li>
+        </ol>
+    </div>
+
+    <h2>Test Case 1: Table with Header Row (Like Government Form)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Particular</th>
+                <th>Package Code/Package Name</th>
+                <th>Rate</th>
+                <th>Unit/Hour/Days</th>
+                <th>Claim Amount(Rs.)</th>
+                <th>Approved Amount(Rs.)</th>
+                <th>Deductions</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Investigation</td>
+                <td>1439 (Fine Needle Aspiration Cytology)</td>
+                <td>230</td>
+                <td>1</td>
+                <td><input type="text" value="230"></td>
+                <td><input type="text" value="0"></td>
+                <td>230</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>Investigation</td>
+                <td>1443 (CT Scan Whole Abdomen)</td>
+                <td>4658</td>
+                <td>1</td>
+                <td><input type="text" value="4658"></td>
+                <td><input type="text" value="0"></td>
+                <td>4658</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>Investigation</td>
+                <td>1424 (Hepatitis B surface antigen)</td>
+                <td>117</td>
+                <td>1</td>
+                <td><input type="text" value="117"></td>
+                <td><input type="text" value="0"></td>
+                <td>117</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>Investigation</td>
+                <td>1459 (C-reactive Protein)</td>
+                <td>184</td>
+                <td>1</td>
+                <td><input type="text" value="184"></td>
+                <td><input type="text" value="0"></td>
+                <td>184</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>Oxygen Charges</td>
+                <td>512 (Compressed Air / Piped Oxygen)</td>
+                <td>58</td>
+                <td>96</td>
+                <td><input type="text" value="5568"></td>
+                <td><input type="text" value="0"></td>
+                <td>5568</td>
+                <td></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Test Case 2: Simple Table</h2>
+    <table>
+        <tr>
+            <th>Item</th>
+            <th>Claim Amount(Rs.)</th>
+            <th>Approved Amount(Rs.)</th>
+        </tr>
+        <tr>
+            <td>Item 1</td>
+            <td><input type="text" value="1000"></td>
+            <td><input type="text" value="0"></td>
+        </tr>
+        <tr>
+            <td>Item 2</td>
+            <td><input type="text" value="2500"></td>
+            <td><input type="text" value="0"></td>
+        </tr>
+        <tr>
+            <td>Item 3</td>
+            <td><input type="text" value="750"></td>
+            <td><input type="text" value="0"></td>
+        </tr>
+    </table>
+
+    <h2>Test Case 3: Empty Approved Amount (not "0")</h2>
+    <table>
+        <tr>
+            <th>Description</th>
+            <th>Claim Amount</th>
+            <th>Approved Amount</th>
+        </tr>
+        <tr>
+            <td>Service A</td>
+            <td><input type="text" value="500"></td>
+            <td><input type="text" value=""></td>
+        </tr>
+        <tr>
+            <td>Service B</td>
+            <td><input type="text" value="1200"></td>
+            <td><input type="text" value=""></td>
+        </tr>
+    </table>
+
+    <div id="result" style="margin-top: 20px;"></div>
+
+    <script>
+        // Add a test button
+        const button = document.createElement('button');
+        button.textContent = 'Verify Filled Values';
+        button.style.cssText = 'padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 20px 0;';
+        document.body.insertBefore(button, document.getElementById('result'));
+
+        button.addEventListener('click', () => {
+            const tables = document.querySelectorAll('table');
+            let filledCount = 0;
+            let totalCount = 0;
+
+            tables.forEach(table => {
+                const rows = table.querySelectorAll('tr');
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('td, th');
+                    cells.forEach((cell, index) => {
+                        const text = cell.textContent.toLowerCase();
+                        if (text.includes('approved') && text.includes('amount')) {
+                            const approvedInputs = table.querySelectorAll('tbody tr td:nth-child(' + (index + 1) + ') input, tr td:nth-child(' + (index + 1) + ') input');
+                            approvedInputs.forEach(input => {
+                                totalCount++;
+                                if (input.value && input.value !== '0') {
+                                    filledCount++;
+                                }
+                            });
+                        }
+                    });
+                });
+            });
+
+            const resultDiv = document.getElementById('result');
+            if (filledCount === totalCount) {
+                resultDiv.innerHTML = `<div class="success">✅ Success! All ${totalCount} approved amount fields have been filled!</div>`;
+            } else {
+                resultDiv.innerHTML = `<div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px;">⚠️ Only ${filledCount} out of ${totalCount} fields were filled. Try clicking the extension icon and pressing "Fill Now".</div>`;
+            }
+        });
+    </script>
+</body>
+</html>
