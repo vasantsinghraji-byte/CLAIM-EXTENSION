@@ -38,21 +38,42 @@ test('stale, expired, empty, and unacknowledged high-risk previews are blocked',
 
 test('related findings become one decision group with calculated safe and override outcomes', () => {
   const proposals = [
-    { key: 'ptca', groupId: 'CA-01', ruleIds: ['CA-01'], risk: 'high', decisionRole: 'main', claimAmount: 85100, recommendedApproved: 79100 },
-    { key: 'cag', groupId: 'CA-01', ruleIds: ['CA-01'], risk: 'high', decisionRole: 'component', claimAmount: 6325, recommendedApproved: 0 }
+    { key: 'ptca', groupId: 'CA-01', ruleIds: ['CA-01'], risk: 'high', decisionRole: 'main', decisionMethod: 'inclusive-components', claimAmount: 97865, recommendedApproved: 97865, recommendedDeductionCap: null },
+    { key: 'cag', groupId: 'CA-01', ruleIds: ['CA-01'], risk: 'high', decisionRole: 'component', decisionMethod: 'inclusive-components', claimAmount: 6325, recommendedApproved: 0, recommendedDeductionCap: null }
   ];
   const [group] = groupProposals(proposals);
   assert.equal(group.id, 'CA-01');
   assert.deepEqual(decisionForGroup(group, 'recommended'), {
     selectedKeys: ['ptca', 'cag'],
-    approvedOverrides: { ptca: 79100, cag: 0 },
+    approvedOverrides: { ptca: 97865, cag: 0 },
     acknowledgementRequired: false
   });
   assert.deepEqual(decisionForGroup(group, 'approve-all'), {
     selectedKeys: ['ptca', 'cag'],
-    approvedOverrides: { ptca: 85100, cag: 6325 },
+    approvedOverrides: { ptca: 97865, cag: 6325 },
     acknowledgementRequired: true
   });
-  assert.deepEqual(decisionForGroup(group, 'main-only').approvedOverrides, { ptca: 85100, cag: 0 });
+  assert.deepEqual(decisionForGroup(group, 'main-only').approvedOverrides, { ptca: 97865, cag: 0 });
   assert.deepEqual(decisionForGroup(group, 'hold').selectedKeys, []);
+});
+
+test('fixed-deduction recommendations cannot combine package and component deductions', () => {
+  const unsafe = { id: 'FIXED', proposals: [
+    { key: 'main', risk: 'high', decisionRole: 'main', decisionMethod: 'fixed-main-adjustment', claimAmount: 97865, recommendedApproved: 91865, recommendedDeductionCap: 6000 },
+    { key: 'component', risk: 'high', decisionRole: 'component', decisionMethod: 'fixed-main-adjustment', claimAmount: 6325, recommendedApproved: 0, recommendedDeductionCap: 6000 }
+  ] };
+  assert.equal(decisionForGroup(unsafe, 'recommended').invalidReason, 'recommended-method-conflict');
+});
+
+test('inclusive and duplicate recommendations cannot deduct their retained row', () => {
+  const unsafeInclusive = { id: 'BUNDLE', proposals: [
+    { key: 'bundle', risk: 'high', decisionRole: 'main', decisionMethod: 'inclusive-components', claimAmount: 500, recommendedApproved: 400 },
+    { key: 'component', risk: 'high', decisionRole: 'component', decisionMethod: 'inclusive-components', claimAmount: 100, recommendedApproved: 0 }
+  ] };
+  const unsafeDuplicate = { id: 'DUP', proposals: [
+    { key: 'first', risk: 'high', decisionRole: 'primary', decisionMethod: 'duplicate-after-first', claimAmount: 100, recommendedApproved: 0 },
+    { key: 'repeat', risk: 'high', decisionRole: 'component', decisionMethod: 'duplicate-after-first', claimAmount: 100, recommendedApproved: 0 }
+  ] };
+  assert.equal(decisionForGroup(unsafeInclusive, 'recommended').invalidReason, 'recommended-method-conflict');
+  assert.equal(decisionForGroup(unsafeDuplicate, 'recommended').invalidReason, 'recommended-method-conflict');
 });

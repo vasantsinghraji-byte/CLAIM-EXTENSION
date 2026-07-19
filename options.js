@@ -10,6 +10,11 @@ const statusMessage = document.getElementById('statusMessage');
 const resetBtn = document.getElementById('resetOverridesBtn');
 
 let ruleOverrides = {};
+let latestStatsByRule = new Map();
+
+function normalizeRuleOverrides(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
 
 function showStatus(message) {
   statusMessage.textContent = message;
@@ -76,9 +81,18 @@ function render(statsByRule) {
       ? 'Review-only rule - cannot auto-deduct'
       : 'Allow this rule to auto-deduct (deduct mode only)';
     toggle.addEventListener('change', () => {
-      ruleOverrides[rule.ruleId] = { autoDeductEligible: toggle.checked };
-      chrome.storage.sync.set({ ruleOverrides }, () => {
-        showStatus(`${rule.ruleId} auto-deduct ${toggle.checked ? 'enabled' : 'disabled'}`);
+      const enabled = toggle.checked;
+      chrome.runtime.sendMessage({
+        action: 'setRuleOverride',
+        ruleId: rule.ruleId,
+        autoDeductEligible: enabled
+      }, response => {
+        if (!response?.success) {
+          showStatus(`Unable to update ${rule.ruleId}; reload and try again`);
+          load();
+          return;
+        }
+        showStatus(`${rule.ruleId} auto-deduct ${enabled ? 'enabled' : 'disabled'}`);
       });
     });
     toggleTd.appendChild(toggle);
@@ -97,23 +111,32 @@ function render(statsByRule) {
 }
 
 function load() {
-  chrome.storage.local.get(['rghsAuditLog', 'rghsAuditFeedback'], local => {
-    chrome.storage.sync.get(['ruleOverrides'], sync => {
-      ruleOverrides = sync.ruleOverrides && typeof sync.ruleOverrides === 'object' ? sync.ruleOverrides : {};
-      const log = Array.isArray(local.rghsAuditLog) ? local.rghsAuditLog : [];
-      const feedback = Array.isArray(local.rghsAuditFeedback) ? local.rghsAuditFeedback : [];
-      const statsByRule = new Map(AuditCore.summarizeAudit(log, feedback).map(stat => [stat.ruleId, stat]));
-      render(statsByRule);
-    });
+  chrome.storage.local.get(['rghsAuditLog', 'rghsAuditFeedback', 'ruleOverrides'], local => {
+    ruleOverrides = normalizeRuleOverrides(local.ruleOverrides);
+    const log = Array.isArray(local.rghsAuditLog) ? local.rghsAuditLog : [];
+    const feedback = Array.isArray(local.rghsAuditFeedback) ? local.rghsAuditFeedback : [];
+    latestStatsByRule = new Map(AuditCore.summarizeAudit(log, feedback).map(stat => [stat.ruleId, stat]));
+    render(latestStatsByRule);
   });
 }
 
 resetBtn.addEventListener('click', () => {
-  ruleOverrides = {};
-  chrome.storage.sync.set({ ruleOverrides }, () => {
+  chrome.runtime.sendMessage({ action: 'resetRuleOverrides' }, response => {
+    if (!response?.success) {
+      showStatus('Unable to reset overrides; reload and try again');
+      return;
+    }
     showStatus('All overrides reset to the generated defaults');
-    load();
   });
 });
 
-load();
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes.ruleOverrides) return;
+  ruleOverrides = normalizeRuleOverrides(changes.ruleOverrides.newValue);
+  render(latestStatsByRule);
+});
+
+chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
+  void chrome.runtime.lastError;
+  load();
+});

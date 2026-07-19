@@ -237,6 +237,7 @@
       ack.hidden = true;
       applyButton.disabled = true;
       const messages = {
+        'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         'unsupported-layout': 'BLOCKED: The RGHS process-sheet layout is not compatible with this extension version.',
         'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.'
       };
@@ -311,13 +312,14 @@
       if (group.proposals.some(proposal => proposal.recommendedApproved !== null)) {
         const hasPackageDeduction = group.proposals.some(proposal =>
           proposal.decisionRole === 'main' && proposal.recommendedApproved < proposal.claimAmount);
-        modes.push([hasPackageDeduction ? 'Apply package deduction' : 'Recommended', 'recommended']);
+        modes.push([hasPackageDeduction || group.id === 'CA-01' ? 'Apply package deduction' : 'Recommended', 'recommended']);
       }
       modes.push(['Approve both/all', 'approve-all']);
       if (group.proposals.some(proposal => ['main', 'primary'].includes(proposal.decisionRole))) {
         modes.push(['Approve main only', 'main-only']);
       }
       modes.push(['Hold', 'hold']);
+      let recommendedButton = null;
       for (const [label, mode] of modes) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -329,6 +331,11 @@
           }
           exceptionalGroups.delete(group.id);
           const decision = Review.decisionForGroup(group, mode);
+          if (decision.invalidReason) {
+            showStatus('BLOCKED: This recommendation conflicts with its configured deduction method or limit.', 'error');
+            updateReviewState();
+            return;
+          }
           for (const key of decision.selectedKeys) selectedKeys.add(key);
           Object.assign(approvedOverrides, decision.approvedOverrides);
           if (decision.acknowledgementRequired) exceptionalGroups.add(group.id);
@@ -337,10 +344,12 @@
           button.classList.add('selected');
           updateReviewState();
         });
+        if (mode === 'recommended') recommendedButton = button;
         buttons.appendChild(button);
       }
       card.append(title, lines, buttons);
       reviewList.appendChild(card);
+      if (group.id === 'CA-01' && recommendedButton) recommendedButton.click();
     }
     ackCheck.checked = false;
     undoButton.disabled = !result.hasUndo;
@@ -406,6 +415,7 @@
     })) return;
     if (result.blocked) {
       const messages = {
+        'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         stale: 'BLOCKED: The process sheet changed after Preview. Preview again.',
         expired: 'BLOCKED: Preview expired. Preview again.',
         'empty-selection': 'BLOCKED: Select at least one row.',

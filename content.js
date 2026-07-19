@@ -18,28 +18,47 @@ const ruleSetValidation = Audit && AuditRules && Audit.validateRuleSet
   ? Audit.validateRuleSet(AuditRules)
   : { ok: false, errors: ['Audit rule engine is unavailable'] };
 const APPLIED_SESSION_KEY = 'claimExtensionAppliedSummary';
+const DEBUG = globalThis.CLAIM_EXTENSION_DEBUG === true;
+let lastAuditBadgeCount = null;
+
+function debugLog(...args) {
+  if (DEBUG) console.log(...args);
+}
 
 // Load settings from storage
-chrome.storage.sync.get(['autoFillEnabled', 'auditMode', 'ruleOverrides'], (result) => {
+chrome.storage.sync.get(['autoFillEnabled', 'auditMode'], (result) => {
   isAutoFillEnabled = result.autoFillEnabled !== false;
   auditMode = AUDIT_MODES.includes(result.auditMode) ? result.auditMode : 'flag';
-  ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' ? result.ruleOverrides : {};
   window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
     detail: { enabled: isAutoFillEnabled }
   }));
+  schedulePassiveAudit([document]);
+});
+
+chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
+  void chrome.runtime.lastError;
+  chrome.storage.local.get(['ruleOverrides'], result => {
+    ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' && !Array.isArray(result.ruleOverrides)
+      ? result.ruleOverrides
+      : {};
+    schedulePassiveAudit([document]);
+  });
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.ruleOverrides) {
+    ruleOverrides = changes.ruleOverrides.newValue && typeof changes.ruleOverrides.newValue === 'object'
+      && !Array.isArray(changes.ruleOverrides.newValue)
+      ? changes.ruleOverrides.newValue
+      : {};
+    schedulePassiveAudit([document]);
+    return;
+  }
   if (area !== 'sync') return;
 
   if (changes.auditMode) {
     auditMode = AUDIT_MODES.includes(changes.auditMode.newValue) ? changes.auditMode.newValue : 'flag';
-  }
-
-  if (changes.ruleOverrides) {
-    ruleOverrides = changes.ruleOverrides.newValue && typeof changes.ruleOverrides.newValue === 'object'
-      ? changes.ruleOverrides.newValue
-      : {};
+    schedulePassiveAudit([document]);
   }
 
   if (changes.autoFillEnabled) {
@@ -49,6 +68,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
       detail: { enabled: isAutoFillEnabled }
     }));
+    schedulePassiveAudit([document]);
   }
 });
 
@@ -59,6 +79,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
       detail: { enabled: isAutoFillEnabled }
     }));
+    schedulePassiveAudit([document]);
     sendResponse({ success: true });
   } else if (request.action === 'fillNow') {
     const result = applyReviewedPreview(request);
@@ -168,7 +189,18 @@ function collectTables(roots) {
     if (parentTable) tables.add(parentTable);
     if (root.querySelectorAll) root.querySelectorAll('table').forEach(table => tables.add(table));
   }
-  return [...tables];
+  return [...tables].filter(table => {
+    const parentTable = table.parentElement?.closest?.('table');
+    return !parentTable || !tables.has(parentTable);
+  });
+}
+
+function getDirectTableRows(table) {
+  return [...table.querySelectorAll(':scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr, :scope > tr')];
+}
+
+function getDirectRowCells(row) {
+  return [...row.querySelectorAll(':scope > th, :scope > td')];
 }
 
 function collectInputs(roots) {
@@ -243,6 +275,7 @@ function blockedFillResult(reason, details = []) {
     blockReason: reason,
     blockDetails: details,
     count: 0,
+    changedFieldCount: 0,
     approvedCount: 0,
     remarksCount: 0,
     auditFlagged: 0,
@@ -255,7 +288,7 @@ function blockedFillResult(reason, details = []) {
 // Fill all approved amounts on the page
 function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowKeys = null, approvedOverrides = {} } = {}) {
   if (!isAutoFillEnabled && apply) {
-    return { count: 0, approvedCount: 0, remarksCount: 0, auditFlagged: 0, auditDeducted: 0 };
+    return blockedFillResult('autofill-disabled');
   }
 
   if (location.pathname.startsWith('/RGHS/processSheetSearch/')) {
@@ -264,7 +297,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     if (!ruleSetValidation.ok) return blockedFillResult('invalid-rule-set', ruleSetValidation.errors);
   }
 
-  console.log('[Claim Auto-Fill] Starting auto-fill process...');
+  debugLog('[Claim Auto-Fill] Starting auto-fill process...');
 
   let approvedCount = 0;
   let remarksCount = 0;
@@ -275,10 +308,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   const proposals = [];
   const rowElements = new Map();
   const tables = collectTables(roots);
-  console.log(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
+  debugLog(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
 
   tables.forEach((table, tableIndex) => {
-    const allRows = table.querySelectorAll('tr');
+    const allRows = getDirectTableRows(table);
     let headerRow = null;
     let headerCellCount = 0;
     let particularIdx = -1;
@@ -292,7 +325,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
     // Find header row
     for (const row of allRows) {
-      const cells = row.querySelectorAll('th, td');
+      const cells = getDirectRowCells(row);
       for (let i = 0; i < cells.length; i++) {
         const text = cells[i].textContent.toLowerCase().trim();
 
@@ -327,7 +360,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       if (claimIdx !== -1 && approvedIdx !== -1) {
         headerRow = row;
         headerCellCount = cells.length;
-        console.log(`[Claim Auto-Fill] Header found: Particular@${particularIdx}, Package@${packageIdx}, Claim@${claimIdx}, Approved@${approvedIdx}, Remarks@${remarksIdx} (${headerCellCount} cells)`);
+        debugLog(`[Claim Auto-Fill] Header found: Particular@${particularIdx}, Package@${packageIdx}, Claim@${claimIdx}, Approved@${approvedIdx}, Remarks@${remarksIdx} (${headerCellCount} cells)`);
         break;
       } else {
         particularIdx = -1;
@@ -354,7 +387,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         continue;
       }
 
-      const cells = row.querySelectorAll('td, th');
+      const cells = getDirectRowCells(row);
       dataRowNum++;
 
       const approvedControl = row.querySelector('[name="packageFinalAmounts"], [id^="packageFinalAmount_"]');
@@ -467,13 +500,20 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (primaryFinding?.type === 'UNBUNDLING_FIXED') {
           recommendedApproved = isMain
             ? Math.max(0, (Core.parseAmount(record.claimValue) || 0) - primaryFinding.fixedDeduction.amount)
-            : 0;
+            : Core.parseAmount(record.claimValue) || 0;
         } else if (primaryFinding?.type === 'UNBUNDLING') {
           recommendedApproved = isMain ? Core.parseAmount(record.claimValue) || 0 : 0;
         } else if (primaryFinding?.type === 'DUPLICATE') {
           recommendedApproved = isPrimary ? Core.parseAmount(record.claimValue) || 0 : 0;
         }
         const decisionRole = isMain ? 'main' : isPrimary ? 'primary' : isComponent ? 'component' : 'member';
+        const decisionMethod = primaryFinding?.type === 'UNBUNDLING_FIXED'
+          ? 'fixed-main-adjustment'
+          : primaryFinding?.type === 'UNBUNDLING'
+            ? 'inclusive-components'
+            : primaryFinding?.type === 'DUPLICATE'
+              ? 'duplicate-after-first'
+              : null;
         const displayRemarkTexts = [...new Set(actions.map(action => action.remark))];
         const remarkTexts = [...new Set(actions
           .filter(action => action.appendRemark !== false)
@@ -497,7 +537,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           ruleIds: [...new Set(actions.map(action => action.ruleId))],
           groupId: actions[0]?.ruleId || key,
           decisionRole,
-          recommendedApproved
+          decisionMethod,
+          recommendedApproved,
+          recommendedDeductionCap: primaryFinding?.type === 'UNBUNDLING_FIXED'
+            ? Number(primaryFinding.fixedDeduction.amount)
+            : null
         });
         rowElements.set(key, record.rowEl);
         if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
@@ -531,7 +575,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             auditLogEntries.push(Audit.buildAuditEntry(action, { ...context, amountBefore: record.approvedValue }));
           }
         }
-        console.log(`[RGHS-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
+        debugLog(`[RGHS-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
       }
     }
 
@@ -577,26 +621,27 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       if (plan.approvedValue !== null) {
         if (apply) setCellValue(record.approvedCell, plan.approvedValue, batch);
         approvedCount++;
-        console.log(`[Claim Auto-Fill] Row ${record.index}: Planned approved amount "${plan.approvedValue}"`);
+        debugLog(`[Claim Auto-Fill] Row ${record.index}: Planned approved amount "${plan.approvedValue}"`);
       }
 
       // Fill remarks for medicine rows
       if (record.remarksCell && plan.remarksValue !== null) {
         if (apply) setCellValue(record.remarksCell, plan.remarksValue, batch);
         remarksCount++;
-        console.log(`[Claim Auto-Fill] Row ${record.index}: Planned deduction remark`);
+        debugLog(`[Claim Auto-Fill] Row ${record.index}: Planned deduction remark`);
       }
     }
 
-    console.log(`[Claim Auto-Fill] Processed ${dataRowNum} data rows from table ${tableIndex + 1}`);
+    debugLog(`[Claim Auto-Fill] Processed ${dataRowNum} data rows from table ${tableIndex + 1}`);
   });
 
   // Fallback: Find by input name/id attributes
-  if (approvedCount === 0 && remarksCount === 0 && auditFlagged === 0 && auditDeducted === 0) {
-    console.log('[Claim Auto-Fill] Table strategy found nothing, trying input name/id matching...');
+  if (proposals.length === 0) {
+    debugLog('[Claim Auto-Fill] Table strategy found nothing, trying input name/id matching...');
     const inputs = collectInputs(roots);
+    const proposedApprovedInputs = new Set();
 
-    inputs.forEach(input => {
+    inputs.forEach((input, inputIndex) => {
       const name = (input.name || '').toLowerCase();
       const id = (input.id || '').toLowerCase();
       const placeholder = (input.placeholder || '').toLowerCase();
@@ -606,19 +651,42 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (!parent) return;
 
         const siblings = parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea');
-        for (const sib of siblings) {
+        for (const [siblingIndex, sib] of [...siblings].entries()) {
           if (sib === input) continue;
           const sName = (sib.name || '').toLowerCase();
           const sId = (sib.id || '').toLowerCase();
           if (sName.includes('approved') || sName.includes('sanctioned') ||
               sId.includes('approved') || sId.includes('sanctioned')) {
+            if (proposedApprovedInputs.has(sib)) continue;
             const claimVal = input.value.trim();
             const appVal = sib.value.trim();
             const amount = Core.parseAmount(claimVal);
             if (amount !== null && amount > 0 && Core.isEmptyApprovedValue(appVal)) {
+              const key = `fallback-${inputIndex}-${siblingIndex}`;
+              proposals.push({
+                key,
+                tableIndex: null,
+                rowIndex: inputIndex,
+                label: input.getAttribute('aria-label') || input.name || input.id || `Claim field ${inputIndex + 1}`,
+                packageText: '',
+                claimAmount: amount,
+                beforeApproved: Core.parseAmount(appVal) || 0,
+                proposedApproved: amount,
+                beforeRemarks: '',
+                proposedRemarks: null,
+                risk: 'low',
+                reason: 'Copy eligible claim amount into the empty approved amount',
+                ruleIds: []
+              });
+              proposedApprovedInputs.add(sib);
+              rowElements.set(key, parent);
+              if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
               if (apply) {
                 batch.push({ element: sib, value: getElementValue(sib) });
-                setElementValue(sib, claimVal);
+                const approvedValue = Object.prototype.hasOwnProperty.call(approvedOverrides, key)
+                  ? String(approvedOverrides[key])
+                  : String(amount);
+                setElementValue(sib, approvedValue);
               }
               approvedCount++;
             }
@@ -632,16 +700,22 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   if (apply && batch.length > 0) persistRecoverySnapshot(batch);
   if (apply && auditLogEntries.length > 0) appendAuditLog(auditLogEntries);
   const count = approvedCount + remarksCount + auditFlagged + auditDeducted;
-  console.log(`[Claim Auto-Fill] Done. ${apply ? 'Filled' : 'Previewed'} ${approvedCount} approved amount(s), ${remarksCount} remark(s); audit: ${auditDeducted} deducted, ${auditFlagged} flagged`);
+  debugLog(`[Claim Auto-Fill] Done. ${apply ? 'Filled' : 'Previewed'} ${approvedCount} approved amount(s), ${remarksCount} remark(s); audit: ${auditDeducted} deducted, ${auditFlagged} flagged`);
   updateAuditBadge(auditFlagged + auditDeducted);
   return { count, changedFieldCount: batch.length, approvedCount, remarksCount, auditFlagged, auditDeducted, proposals, rowElements };
 }
 
 // Best-effort tab badge showing how many audit findings are open on this page.
 function updateAuditBadge(count) {
+  const normalizedCount = Math.max(0, Number(count) || 0);
+  if (normalizedCount === lastAuditBadgeCount) return;
+  lastAuditBadgeCount = normalizedCount;
   try {
-    chrome.runtime.sendMessage({ action: 'setAuditBadge', count }, () => void chrome.runtime.lastError);
+    chrome.runtime.sendMessage({ action: 'setAuditBadge', count: normalizedCount }, () => {
+      if (chrome.runtime.lastError) lastAuditBadgeCount = null;
+    });
   } catch (error) {
+    lastAuditBadgeCount = null;
     // Extension context may be gone (page outliving a reload); badge is optional.
   }
 }
@@ -725,6 +799,10 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
     selectedRowKeys: new Set(selectedKeys),
     approvedOverrides
   });
+  if (result.blocked) {
+    appendClaimActivity('apply-blocked', { blockReason: result.blockReason });
+    return { ...result, rowElements: undefined, proposals: undefined };
+  }
   const ruleIds = [...new Set(selected.flatMap(proposal => proposal.ruleIds || []))];
   lastAppliedSummary = {
     createdAt: Date.now(),
@@ -760,6 +838,7 @@ function ensureAuditStyles() {
     'tr.rghs-audit-review td { background-color: #fff3cd !important; }',
     'tr.rghs-audit-candidate td { background-color: #ffe0b2 !important; }',
     'tr.rghs-audit-deduct td { background-color: #f8d7da !important; }',
+    'tr.rghs-audit-passive td { background-color: #fef3c7 !important; box-shadow: inset 0 2px #d97706, inset 0 -2px #d97706; }',
     'tr.rghs-decision-approve td { background-color: #dcfce7 !important; box-shadow: inset 0 2px #16a34a, inset 0 -2px #16a34a; }',
     'tr.rghs-decision-deduct td { background-color: #fee2e2 !important; box-shadow: inset 0 2px #dc2626, inset 0 -2px #dc2626; }',
     '.rghs-audit-feedback { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }',
@@ -787,13 +866,65 @@ function highlightDecisionRows(approvedByKey = {}) {
   }
 }
 
+function refreshPassiveAuditHighlights() {
+  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  for (const row of document.querySelectorAll('tr.rghs-audit-passive')) {
+    row.classList.remove('rghs-audit-passive');
+  }
+  if (!isAutoFillEnabled || auditMode === 'off') return;
+  const preview = fillAllApprovedAmounts({ apply: false });
+  if (preview.blocked) return;
+  for (const proposal of preview.proposals) {
+    if (proposal.risk !== 'high') continue;
+    const row = preview.rowElements.get(proposal.key);
+    if (row) row.classList.add('rghs-audit-passive');
+  }
+}
+
+const schedulePassiveAudit = Core.createDebouncedProcessor(
+  () => refreshPassiveAuditHighlights(),
+  150
+);
+
+function installPassiveAuditObserver() {
+  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  const observer = new MutationObserver(mutations => {
+    const addedNodes = mutations.flatMap(mutation => [...mutation.addedNodes]);
+    if (addedNodes.length) schedulePassiveAudit(addedNodes);
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  schedulePassiveAudit([document]);
+}
+
 let cachedTid;
 function findTid() {
   if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
   const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i);
-  cachedTid = match ? match[1] : '';
-  return cachedTid;
+  if (match) cachedTid = match[1];
+  return match ? match[1] : '';
+}
+
+let localStorageMutationChain = Promise.resolve();
+
+function queueStorageMutation(message) {
+  localStorageMutationChain = localStorageMutationChain
+    .catch(() => undefined)
+    .then(() => new Promise(resolve => {
+      try {
+        chrome.runtime.sendMessage(message, response => {
+          void chrome.runtime.lastError;
+          resolve(response?.success === true);
+        });
+      } catch (_) {
+        resolve(false);
+      }
+    }));
+  return localStorageMutationChain;
+}
+
+function appendStorageEntries(key, entries) {
+  return queueStorageMutation({ action: 'appendStorageEntries', key, entries });
 }
 
 function appendClaimActivity(event, details = {}) {
@@ -814,13 +945,7 @@ function appendClaimActivity(event, details = {}) {
     highRiskCount: Number(totals.highRiskCount) || 0,
     ruleIds: [...new Set((details.ruleIds || []).map(String))]
   };
-  chrome.storage.local.get(['claimActivityLog'], result => {
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const log = (Array.isArray(result.claimActivityLog) ? result.claimActivityLog : [])
-      .filter(item => Date.parse(item.timestamp) >= cutoff);
-    log.push(entry);
-    chrome.storage.local.set({ claimActivityLog: log.slice(-500) });
-  });
+  appendStorageEntries('claimActivityLog', [entry]);
 }
 
 function clearAppliedSummary() {
@@ -828,10 +953,32 @@ function clearAppliedSummary() {
   sessionStorage.removeItem(APPLIED_SESSION_KEY);
 }
 
+function normalizeNonnegativeNumber(value, integer = false) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return 0;
+  return integer ? Math.floor(number) : number;
+}
+
+function normalizeAppliedSummary(saved) {
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
+  return {
+    createdAt: normalizeNonnegativeNumber(saved.createdAt, true),
+    path: String(saved.path || ''),
+    tid: String(saved.tid || ''),
+    selectedRows: normalizeNonnegativeNumber(saved.selectedRows, true),
+    changedFields: normalizeNonnegativeNumber(saved.changedFields, true),
+    highRiskCount: normalizeNonnegativeNumber(saved.highRiskCount, true),
+    proposedApprovedTotal: normalizeNonnegativeNumber(saved.proposedApprovedTotal),
+    deductionTotal: normalizeNonnegativeNumber(saved.deductionTotal),
+    ruleIds: Array.isArray(saved.ruleIds) ? saved.ruleIds.map(String).slice(0, 100) : []
+  };
+}
+
 function restoreAppliedSummary() {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null');
-    if (saved && saved.path === location.pathname && Date.now() - saved.createdAt < 24 * 60 * 60 * 1000) {
+    const saved = normalizeAppliedSummary(JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null'));
+    const age = saved ? Date.now() - saved.createdAt : -1;
+    if (saved && saved.path === location.pathname && age >= 0 && age < 24 * 60 * 60 * 1000) {
       lastAppliedSummary = saved;
     } else {
       sessionStorage.removeItem(APPLIED_SESSION_KEY);
@@ -845,7 +992,18 @@ function isPortalSubmitControl(target) {
   const control = target?.closest?.('button, input[type="submit"], input[type="button"]');
   if (!control) return false;
   const label = String(control.textContent || control.value || '').replace(/\s+/g, ' ').trim();
-  return control.type === 'submit' || /^submit$/i.test(label);
+  if (/\bsubmit\b/i.test(label)) return true;
+
+  // Do not trust control.type: HTML gives <button> without a type attribute the
+  // computed type "submit", which would intercept unrelated portal buttons.
+  const isExplicitSubmit = control.matches?.('input[type="submit"], button[type="submit"]') === true;
+  const form = control.form;
+  if (!isExplicitSubmit || !form) return false;
+  const formIdentity = `${form.id || ''} ${form.name || ''} ${form.getAttribute?.('action') || ''}`;
+  const containsClaimAmounts = Boolean(form.querySelector?.(
+    '[name="packageFinalAmounts"], [id^="packageFinalAmount_"]'
+  ));
+  return containsClaimAmounts || /\b(?:claim|process.?sheet)\b/i.test(formIdentity);
 }
 
 function showSubmissionInterlock() {
@@ -863,10 +1021,21 @@ function showSubmissionInterlock() {
     <section class="card" role="alertdialog" aria-modal="true" aria-labelledby="guard-title">
       <div class="title" id="guard-title">Final claim review required</div>
       <p>Claim Extension changed fields on this process sheet. Submission remains blocked until you acknowledge the final review.</p>
-      <div class="summary">Selected rows: <strong>${summary.selectedRows}</strong><br>Changed fields: <strong>${summary.changedFields}</strong><br>Proposed approved total: <strong>Rs. ${summary.proposedApprovedTotal}</strong><br>Claim-proposed difference: <strong>Rs. ${summary.deductionTotal}</strong><br>High-risk rows: <strong>${summary.highRiskCount}</strong></div>
+      <div class="summary">Selected rows: <strong data-summary="selectedRows"></strong><br>Changed fields: <strong data-summary="changedFields"></strong><br>Proposed approved total: <strong data-summary="proposedApprovedTotal"></strong><br>Claim-proposed difference: <strong data-summary="deductionTotal"></strong><br>High-risk rows: <strong data-summary="highRiskCount"></strong></div>
       <label class="ack"><input type="checkbox">I reviewed the approved amounts, deductions, remarks, and high-risk findings.</label>
       <div class="actions"><button class="cancel" type="button">Return to claim</button><button class="continue" type="button" disabled>Allow next Submit click</button></div>
     </section>`;
+  const summaryValues = {
+    selectedRows: summary.selectedRows,
+    changedFields: summary.changedFields,
+    proposedApprovedTotal: summary.proposedApprovedTotal,
+    deductionTotal: summary.deductionTotal,
+    highRiskCount: summary.highRiskCount
+  };
+  for (const [key, value] of Object.entries(summaryValues)) {
+    const prefix = key === 'proposedApprovedTotal' || key === 'deductionTotal' ? 'Rs. ' : '';
+    shadow.querySelector(`[data-summary="${key}"]`).textContent = prefix + String(value);
+  }
   const checkbox = shadow.querySelector('input');
   const continueButton = shadow.querySelector('.continue');
   checkbox.addEventListener('change', () => { continueButton.disabled = !checkbox.checked; });
@@ -947,21 +1116,11 @@ function recordAuditFeedback(record, ruleIds, verdict, context) {
     rowNumber: record.index,
     verdict
   }));
-  chrome.storage.local.get(['rghsAuditFeedback'], result => {
-    const feedback = Array.isArray(result.rghsAuditFeedback) ? result.rghsAuditFeedback : [];
-    feedback.push(...entries);
-    chrome.storage.local.set({ rghsAuditFeedback: feedback.slice(-2000) });
-  });
+  appendStorageEntries('rghsAuditFeedback', entries);
 }
 
 function appendAuditLog(entries) {
-  chrome.storage.local.get(['rghsAuditLog'], result => {
-    const log = Array.isArray(result.rghsAuditLog) ? result.rghsAuditLog : [];
-    // Re-running the fill on the same sheet must not inflate the log.
-    log.push(...Audit.dedupeLogEntries(log, entries));
-    // Keep the most recent 2000 entries.
-    chrome.storage.local.set({ rghsAuditLog: log.slice(-2000) });
-  });
+  appendStorageEntries('rghsAuditLog', Audit.dedupeLogEntries([], entries));
 }
 
 function persistRecoverySnapshot(batch) {
@@ -978,20 +1137,13 @@ function persistRecoverySnapshot(batch) {
     version: chrome.runtime.getManifest().version,
     entries
   };
-  chrome.storage.local.get(['claimRecoverySnapshots'], result => {
-    const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
-    snapshots.push(snapshot);
-    chrome.storage.local.set({ claimRecoverySnapshots: snapshots.slice(-20) });
-  });
+  appendStorageEntries('claimRecoverySnapshots', [snapshot]);
 }
 
 function getMatchingRecoverySnapshot(callback) {
   chrome.storage.local.get(['claimRecoverySnapshots'], result => {
     const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
     const activeSnapshots = snapshots.filter(item => Date.now() - item.createdAt <= 24 * 60 * 60 * 1000);
-    if (activeSnapshots.length !== snapshots.length) {
-      chrome.storage.local.set({ claimRecoverySnapshots: activeSnapshots });
-    }
     const tid = findTid();
     const snapshot = [...activeSnapshots].reverse().find(item => item.url === location.href || (tid && item.tid === tid));
     callback(snapshot || null, activeSnapshots);
@@ -1000,22 +1152,23 @@ function getMatchingRecoverySnapshot(callback) {
 
 function restorePersistentSnapshot() {
   return new Promise(resolve => {
-    getMatchingRecoverySnapshot((snapshot, snapshots) => {
+    getMatchingRecoverySnapshot(snapshot => {
       if (!snapshot) return resolve({ count: 0, hasRecovery: false });
       let count = 0;
       for (const entry of snapshot.entries) {
         const element = document.getElementById(entry.id);
-        if (!element) continue;
+        if (!element?.isConnected) continue;
         setElementValue(element, entry.before);
         count++;
       }
-      const remaining = snapshots.filter(item => item.id !== snapshot.id);
-      chrome.storage.local.set({ claimRecoverySnapshots: remaining });
-      if (count > 0) {
+      if (count === 0) return resolve({ count: 0, hasRecovery: true });
+      const fullyRestored = count === snapshot.entries.length;
+      if (fullyRestored) {
+        queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
         clearAppliedSummary();
-        appendClaimActivity('restore', { fieldCount: count });
       }
-      resolve({ count, hasRecovery: false });
+      appendClaimActivity('restore', { fieldCount: count });
+      resolve({ count, hasRecovery: !fullyRestored });
     });
   });
 }
@@ -1027,17 +1180,23 @@ function hasPersistentRecovery(callback) {
 function undoLastFill() {
   const batch = undoBatch;
   undoBatch = [];
+  let count = 0;
   for (let index = batch.length - 1; index >= 0; index--) {
-    setElementValue(batch[index].element, batch[index].value);
+    const element = batch[index].element;
+    if (!element?.isConnected) continue;
+    setElementValue(element, batch[index].value);
+    count++;
   }
-  if (batch.length > 0) {
+  if (count > 0) {
     clearAppliedSummary();
-    appendClaimActivity('undo', { fieldCount: batch.length });
-    getMatchingRecoverySnapshot((snapshot, snapshots) => {
-      if (snapshot) chrome.storage.local.set({ claimRecoverySnapshots: snapshots.filter(item => item.id !== snapshot.id) });
-    });
+    appendClaimActivity('undo', { fieldCount: count });
+    if (count === batch.length) {
+      getMatchingRecoverySnapshot(snapshot => {
+        if (snapshot) queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
+      });
+    }
   }
-  return batch.length;
+  return count;
 }
 
 globalThis.ClaimAutoFillActions = {
@@ -1075,3 +1234,4 @@ globalThis.ClaimAutoFillActions = {
 };
 
 installSubmissionInterlock();
+installPassiveAuditObserver();

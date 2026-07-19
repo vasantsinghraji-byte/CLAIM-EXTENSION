@@ -168,7 +168,7 @@ Medicine rows matching the configured RGHS descriptions receive a 12% deduction.
 - **No Data Collection**: This extension does not collect, store, or transmit any data
 - **Local Processing**: All operations happen locally in your browser
 - **No External Servers**: No communication with external servers
-- **Restricted Access**: The content script runs only on the official `rghs.rajasthan.gov.in` portal and localhost development pages
+- **Restricted Production Access**: The distributed extension runs only on the official `rghs.rajasthan.gov.in` portal; localhost access exists only in the source manifest for unpacked development
 - **Open Source**: Code is fully visible and auditable
 
 ## Browser Compatibility
@@ -211,7 +211,7 @@ npm run check
 npm run build
 ```
 
-The build copies an explicit production allowlist to `dist/` and creates `claim-autofill-extension.zip`. File ordering and ZIP timestamps are fixed, so identical sources produce an identical package.
+The build copies an explicit production allowlist to `dist/`, generates a production manifest without `localhost` or `127.0.0.1` content-script/web-resource matches, and creates `claim-autofill-extension.zip`. The build fails if a development origin appears in either production artifact. File ordering and ZIP timestamps are fixed, so identical sources produce an identical package.
 
 ### Claim Spark review workflow
 
@@ -219,11 +219,13 @@ The build copies an explicit production allowlist to `dist/` and creates `claim-
 2. Click **Apply Safe Rows Now** to fill ordinary eligible rows immediately; audit findings remain untouched.
 3. Related audit findings appear as one decision card. Use Jump to inspect each portal row.
 4. Choose **Apply package deduction**, **Approve main only**, **Approve both/all**, or **Hold**. The card calculates each resulting approved amount.
+   - For CA-01, **Apply package deduction** is preselected as the recommended decision: PTCA remains fully approved and only the separately billed CAG becomes zero. Preview does not write either value; the user must still press Apply.
 5. Recommended actions do not require acknowledgement. An acknowledgement is required only for exceptional overrides such as approving every flagged line.
 6. Confirm the selected totals reconcile, then Apply Selected. If the sheet changed after Preview, Apply is blocked.
 7. Use Undo in the same page session or the two-step saved-snapshot recovery after a refresh.
 
 The widget title shows the active manifest version. When claim tools are disabled, an obvious `Claim Extension OFF` badge remains near the portal header while the mascot stays hidden.
+Popup status messages use one resettable hide timer, so a newer result always remains visible for its complete three-second interval.
 
 ### Live browser smoke test
 
@@ -238,11 +240,23 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 ### Safety and release controls
 
 - Real RGHS process sheets must match the supported header and input mapping before Preview or Apply is allowed.
+- If Claim Extension is turned off after Preview, Apply returns an explicit `autofill-disabled` block; it records no applied summary and cannot arm the submission interlock with empty or undefined counts.
+- On compatible non-table layouts, claim/approved name and ID matching emits ordinary low-risk review proposals with stable keys; it never bypasses Preview, selection, Apply, Undo, or recovery.
+- Table scanning assigns nested markup to one owning table and enumerates only direct rows and cells, preventing duplicate proposals or writes against the same nested DOM controls.
+- Approved money fields receive normalized numeric text from the validated amount (`1,23,450.00` becomes `123450`), avoiding grouped-digit ambiguity in portal validation and server parsing.
+- The submission interlock guards labelled submit controls and explicit submitters attached to the claim form. Native programmatic `form.submit()` does not emit a submit event and cannot be intercepted by a content-script event listener; this remains a documented portal-integration limitation.
+- Activity, audit, feedback, and recovery appends are serialized by the background service worker with a queue per storage key, preventing concurrent RGHS tabs from overwriting one another's entries.
+- Saved recovery snapshots are removed only after every saved control is restored. Zero-field and partial restores retain the snapshot so an SPA can finish rendering before another recovery attempt.
+- TID detection retries after early SPA misses and caches only a successfully detected identifier, preserving TID-based audit and recovery matching when claim details render late.
+- Passive audit passes reuse entity regexes through an object-identity cache, suppress scan logs unless `CLAIM_EXTENSION_DEBUG` is enabled, and send badge updates only when the finding count changes.
+- Auto-deduct override edits are serialized through the service worker, merged against current profile-local storage, and reflected in every open options page. A one-time migration copies legacy synced overrides locally and then removes the legacy sync key; adjudication policy no longer propagates to other Chrome profiles.
+- Content scripts deliberately use `all_frames: false`: RGHS process sheets are currently supported only in the top-level portal document, avoiding unnecessary iframe access. A future iframe portal layout requires an explicit compatibility review before enabling frame injection.
 - Audit rules carry `schemaVersion`, `version`, and `effectiveDate`; invalid or duplicate rule definitions block claim processing.
 - Fixed unbundling findings reserve both the main package and every separately billed component from ordinary autofill; only the configured target can receive a deduction after explicit high-risk review.
 - `tools/matrix-coverage.json` maps every one of the 47 workbook Risk Matrix rows to executable rules. The build fails if a workbook row, title, or rule mapping drifts.
 - Documentation-dependent upcoding risks (fracture extent, radical hysterectomy, fusion/fixation, burns severity, radiotherapy fractions, multi-trauma extent, cataract/SFIOL technique, and pacemaker/CRT configuration) create review-only proposals even when no second billed component is present.
 - After extension-applied changes, Submit is intercepted until the reviewer acknowledges a final totals summary. The extension never clicks or submits the portal form.
+- Restored submission summaries are type-normalized from page-origin session storage, checked for valid age/path, and rendered into the safety dialog only with `textContent`; stored markup cannot alter the trusted review UI.
 - The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
 - Use `npm run release -- patch`, `minor`, or `major` to align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256.
 
@@ -260,7 +274,7 @@ data-driven decision backed by auditor feedback:
    feedback, and the resulting false-positive rate.
 3. When a rule shows a clean record (FP rate green, meaningful sample size),
    switch its **Auto-deduct** toggle on. The override is stored in
-   `chrome.storage.sync` and applied over the generated rules at runtime — no
+   `chrome.storage.local` and applied over the generated rules at runtime — no
    rebuild needed. **Reset all overrides** returns to the generated defaults.
 4. Deductions additionally require the popup mode "Flag + auto-deduct",
    code-confirmed matches, an empty approved field, and the per-sheet safety cap.
@@ -269,7 +283,8 @@ data-driven decision backed by auditor feedback:
    run `python tools/generate-audit-rules.py`.
 
 The toolbar icon shows a per-tab badge with the number of open audit findings
-on the current process sheet.
+on the current process sheet. It is cleared when the tab begins a new navigation,
+so page transitions cannot leave a stale count visible.
 
 ## Contributing
 

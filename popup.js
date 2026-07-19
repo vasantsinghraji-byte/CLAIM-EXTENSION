@@ -14,6 +14,7 @@ let previewCount = 0;
 let previewToken = null;
 let previewRowKeys = [];
 let clearArmed = false;
+let statusHideTimer = null;
 document.getElementById('versionLabel').textContent = `Version ${chrome.runtime.getManifest().version}`;
 
 function setFillButton(label = 'Preview Fill') {
@@ -90,6 +91,15 @@ function describeCounts(response) {
   return parts.join(', ');
 }
 
+function blockedMessage(reason) {
+  const messages = {
+    'autofill-disabled': 'Claim Extension is OFF. Turn it on, then preview again.',
+    'unsupported-layout': 'Unsupported RGHS portal layout. No fields were changed.',
+    'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.'
+  };
+  return messages[reason] || 'Apply was blocked because the preview is stale or unsafe. Preview again.';
+}
+
 // Handle Fill Now button
 fillNowBtn.addEventListener('click', async () => {
   fillNowBtn.disabled = true;
@@ -100,10 +110,7 @@ fillNowBtn.addEventListener('click', async () => {
       const response = await sendToActiveTab({ action: 'preview' });
       if (response?.blocked) {
         setFillButton();
-        const reason = response.blockReason === 'unsupported-layout'
-          ? 'Unsupported RGHS portal layout. No fields were changed.'
-          : 'Audit rule validation failed. Reload a verified build.';
-        showStatus(reason, 'error');
+        showStatus(blockedMessage(response.blockReason), 'error');
         return;
       }
       const proposals = response?.proposals || [];
@@ -139,7 +146,7 @@ fillNowBtn.addEventListener('click', async () => {
         previewToken = null;
         previewRowKeys = [];
         setFillButton();
-        showStatus('Apply blocked because the preview is stale or unsafe. Preview again.', 'error');
+        showStatus(blockedMessage(response.blockReason), 'error');
         return;
       }
       previewCount = 0;
@@ -177,7 +184,7 @@ exportLogBtn.addEventListener('click', () => {
       return;
     }
     const csv = AuditCore.auditLogToCsv(log);
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -240,8 +247,9 @@ function showStatus(message, type = 'info') {
   statusMessage.className = `status-message ${type}`;
   statusMessage.style.display = 'block';
 
-  // Hide after 3 seconds
-  setTimeout(() => {
+  if (statusHideTimer !== null) clearTimeout(statusHideTimer);
+  statusHideTimer = setTimeout(() => {
     statusMessage.style.display = 'none';
+    statusHideTimer = null;
   }, 3000);
 }

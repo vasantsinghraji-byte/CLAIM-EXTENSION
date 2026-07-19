@@ -154,10 +154,9 @@
       "components": [
         { "label": "Coronary angiography", "codes": ["601"], "patterns": ["coronary angiograph"] }
       ],
-      "fixedDeduction": { "amount": 6000, "appliesTo": "bundle" },
       "exceptionKeywords": ["staged", "different date", "second sitting"],
-      "remarkReason": "PTCA package is inclusive of diagnostic angiogram; Rs.6000 deducted from PTCA when CAG booked separately per package master",
-      "reference": "Risk Matrix: PTCA 2831-MC011A (6000 deducted from 40000 if CAG booked separately)"
+      "remarkReason": "PTCA package is inclusive of diagnostic angiogram; retain PTCA and disallow the separately billed CAG unless an exception is documented",
+      "reference": "Risk Matrix: PTCA 2831-MC011A with separately billed CAG 601"
     },
     {
       "ruleId": "CA-02", "category": "Cardiology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,

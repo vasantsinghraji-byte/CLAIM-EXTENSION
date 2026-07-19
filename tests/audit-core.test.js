@@ -184,26 +184,57 @@ test('name-only matches never auto-deduct even when allowlisted', () => {
   assert.equal(esrAction.downgradeReason, 'name-only-match');
 });
 
-test('PTCA + separately booked CAG applies the fixed Rs.6000 deduction to the package', () => {
+test('PTCA + separately booked CAG retains PTCA and zeroes only CAG', () => {
   const rules = rulesWith({ 'CA-01': { autoDeductEligible: true } });
   const lines = [
     line(1, '2831-MC011A (PTCA, inclusive of diagnostic angiogram)', 'Procedure', '40000'),
     line(2, '601 (Coronary angiography)', 'Procedure', '6000')
   ];
   const findings = AuditCore.analyzeClaim(lines, rules);
-  const fixed = findings.find(f => f.type === 'UNBUNDLING_FIXED');
-  assert.equal(fixed.ruleId, 'CA-01');
-  assert.equal(fixed.bundleRow.index, 1);
+  const finding = findings.find(f => f.ruleId === 'CA-01');
+  assert.equal(finding.type, 'UNBUNDLING');
+  assert.equal(finding.bundleRow.index, 1);
   const { rowActions } = AuditCore.planAuditActions(findings, lines, { mode: 'deduct', settings: rules.settings });
   const bundleAction = rowActions.find(action => action.rowIndex === 1 && action.ruleId === 'CA-01');
-  assert.equal(bundleAction.setApproved, '34000');
-  assert.equal(bundleAction.deductionAmount, 6000);
-  assert.match(bundleAction.remark, /Rs\.6000 deducted from the main package/);
+  assert.equal(bundleAction.setApproved, null);
+  assert.equal(bundleAction.deductionAmount, 0);
   const cagAction = rowActions.find(action => action.rowIndex === 2 && action.ruleId === 'CA-01');
   assert.ok(cagAction, 'the separately billed CAG row must remain reserved from ordinary autofill');
-  assert.equal(cagAction.setApproved, null);
-  assert.match(cagAction.remark, /included in PTCA package/);
+  assert.equal(cagAction.setApproved, '0');
+  assert.equal(cagAction.deductionAmount, 6000);
+  assert.match(cagAction.remark, /included in PTCA package.*has not been allowed separately/);
   assert.doesNotMatch(cagAction.remark, /RGHS-AUDIT|Rule CA-01/);
+});
+
+test('entity regexes are compiled once and reused across audit passes', () => {
+  let patternReads = 0;
+  const bundle = { label: 'Cached bundle', codes: [] };
+  Object.defineProperty(bundle, 'patterns', {
+    enumerable: true,
+    get() { patternReads++; return ['cached bundle']; }
+  });
+  const rules = {
+    bundles: [{
+      ruleId: 'CACHE-01', risk: 'high', action: 'flag', bundle,
+      components: [{ label: 'Cached component', codes: [], patterns: ['cached component'] }],
+      remarkReason: 'Cache test'
+    }],
+    mutuallyExclusive: [], addOnDependencies: [], combinedAvailable: [],
+    adjunctClusters: [], reviewTriggers: [], duplicateMMGroups: []
+  };
+  const lines = [
+    line(1, 'Cached bundle', 'Procedure', '1000'),
+    line(2, 'Cached component', 'Procedure', '100')
+  ];
+
+  assert.equal(AuditCore.analyzeClaim(lines, rules).filter(finding => finding.ruleId === 'CACHE-01').length, 1);
+  assert.equal(AuditCore.analyzeClaim(lines, rules).filter(finding => finding.ruleId === 'CACHE-01').length, 1);
+  assert.equal(patternReads, 1);
+});
+
+test('no fixed-main-deduction rule can reintroduce the opposite CA-01 calculation', () => {
+  const fixedRules = AuditRules.bundles.filter(rule => rule.fixedDeduction);
+  assert.deepEqual(fixedRules.map(rule => rule.ruleId), []);
 });
 
 test('live PTCA 544 plus CAG 601 flags and reserves both rows in review mode', () => {
