@@ -13,11 +13,14 @@ const customRulesBody = document.getElementById('customRulesBody');
 const ruleForm = document.getElementById('ruleEditorForm');
 const ruleType = document.getElementById('customRuleType');
 const importFile = document.getElementById('importRulesFile');
+const builtInRemarkDialog = document.getElementById('builtInRemarkDialog');
+const builtInRemarkForm = document.getElementById('builtInRemarkForm');
 
 let ruleOverrides = {};
 let latestStatsByRule = new Map();
 let customRuleConfig = CustomRules.normalizeConfig(null);
 let editingRuleId = null;
+let editingBuiltInRuleId = null;
 
 function normalizeRuleOverrides(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -37,13 +40,23 @@ function formatFpRate(stat) {
   return span;
 }
 
+function listBuiltInRules() {
+  return ['bundles', 'mutuallyExclusive', 'addOnDependencies', 'combinedAvailable', 'adjunctClusters', 'reviewTriggers']
+    .flatMap(collection => (Rules[collection] || []).map(rule => ({ ...rule, collection })));
+}
+
+function builtInRuleLabel(rule) {
+  return rule.bundle?.label || rule.label || rule.entity?.label || rule.addOn?.label ||
+    rule.combined?.label || rule.members?.map(member => member.label).filter(Boolean).join(' + ') || rule.ruleId;
+}
+
 function render(statsByRule) {
   rulesBody.textContent = '';
   rulesMeta.textContent =
     `Rules version ${Rules.version} - generated from ${Rules.source}. ` +
-    `${Rules.bundles.length} bundle rules shown below.`;
+    `${listBuiltInRules().length} editable built-in rules shown below.`;
 
-  for (const rule of Rules.bundles) {
+  for (const rule of listBuiltInRules()) {
     const stat = statsByRule.get(rule.ruleId);
     const override = ruleOverrides[rule.ruleId];
     const effective = rule.action === 'deduct-eligible'
@@ -54,8 +67,8 @@ function render(statsByRule) {
 
     const cells = {
       ruleId: rule.ruleId,
-      label: rule.bundle.label,
-      category: rule.category,
+      label: builtInRuleLabel(rule),
+      category: rule.category || rule.collection,
       risk: rule.risk,
       cls: rule.action === 'deduct-eligible' ? 'deduct-eligible' : 'review-only'
     };
@@ -104,6 +117,16 @@ function render(statsByRule) {
     });
     toggleTd.appendChild(toggle);
     row.appendChild(toggleTd);
+
+    const remarksTd = document.createElement('td');
+    const remarksButton = document.createElement('button');
+    remarksButton.type = 'button';
+    const hasRemarkOverride = Boolean(customRuleConfig.builtInRemarkOverrides?.[rule.ruleId]);
+    remarksButton.textContent = hasRemarkOverride ? 'Edited' : 'Edit remarks';
+    remarksButton.title = hasRemarkOverride ? 'This rule has custom remark wording' : 'Override remarks for this rule only';
+    remarksButton.addEventListener('click', () => openBuiltInRemarkEditor(rule));
+    remarksTd.appendChild(remarksButton);
+    row.appendChild(remarksTd);
 
     rulesBody.appendChild(row);
   }
@@ -196,7 +219,7 @@ function renderRuleEditor() {
   }
 }
 
-function saveCustomConfig(config, successMessage) {
+function saveCustomConfig(config, successMessage, onSuccess = null) {
   const normalized = CustomRules.normalizeConfig(config, CustomRules.collectRuleIds(Rules));
   if (normalized.errors.length) {
     showStatus(normalized.errors[0]);
@@ -210,7 +233,19 @@ function saveCustomConfig(config, successMessage) {
     customRuleConfig = normalized;
     render(latestStatsByRule);
     showStatus(successMessage);
+    if (onSuccess) onSuccess();
   });
+}
+
+function openBuiltInRemarkEditor(rule) {
+  editingBuiltInRuleId = rule.ruleId;
+  const templates = customRuleConfig.builtInRemarkOverrides?.[rule.ruleId] || {};
+  document.getElementById('builtInRemarkTitle').textContent = `Edit ${rule.ruleId} remarks`;
+  setValue('builtInApproved', templates.approved);
+  setValue('builtInDeducted', templates.deducted);
+  setValue('builtInRejected', templates.rejected);
+  setValue('builtInHold', templates.hold);
+  builtInRemarkDialog.showModal();
 }
 
 function updateRuleTypeFields() {
@@ -332,6 +367,40 @@ importFile.addEventListener('change', async () => {
     importFile.value = '';
   }
 });
+
+builtInRemarkForm.addEventListener('submit', event => {
+  if (event.submitter?.value !== 'save') return;
+  event.preventDefault();
+  if (!editingBuiltInRuleId) return;
+  const templates = {
+    approved: value('builtInApproved'),
+    deducted: value('builtInDeducted'),
+    rejected: value('builtInRejected'),
+    hold: value('builtInHold')
+  };
+  const overrides = { ...(customRuleConfig.builtInRemarkOverrides || {}) };
+  const nonempty = Object.fromEntries(Object.entries(templates).filter(([, text]) => String(text).trim()));
+  if (Object.keys(nonempty).length) overrides[editingBuiltInRuleId] = nonempty;
+  else delete overrides[editingBuiltInRuleId];
+  saveCustomConfig(
+    { ...customRuleConfig, builtInRemarkOverrides: overrides },
+    `${editingBuiltInRuleId} remarks saved`,
+    () => builtInRemarkDialog.close()
+  );
+});
+
+document.getElementById('resetBuiltInRemarksBtn').addEventListener('click', () => {
+  if (!editingBuiltInRuleId) return;
+  const overrides = { ...(customRuleConfig.builtInRemarkOverrides || {}) };
+  delete overrides[editingBuiltInRuleId];
+  saveCustomConfig(
+    { ...customRuleConfig, builtInRemarkOverrides: overrides },
+    `${editingBuiltInRuleId} restored to default remarks`,
+    () => builtInRemarkDialog.close()
+  );
+});
+
+builtInRemarkDialog.addEventListener('close', () => { editingBuiltInRuleId = null; });
 
 ruleToForm(null);
 

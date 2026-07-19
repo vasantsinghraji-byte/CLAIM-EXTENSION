@@ -40,6 +40,7 @@
           <th>Dismissed</th>
           <th>FP&nbsp;rate</th>
           <th>Auto-deduct</th>
+          <th>Remarks</th>
         </tr>
       </thead>
       <tbody id="rulesBody"></tbody>
@@ -95,6 +96,22 @@
         <div class="editor-actions"><button type="submit">Save finding</button><button id="cancelRuleEditBtn" type="button">Clear</button></div>
       </form>
     </section>
+
+    <dialog id="builtInRemarkDialog">
+      <form id="builtInRemarkForm" method="dialog" class="remark-dialog-form">
+        <h2 id="builtInRemarkTitle">Edit rule remarks</h2>
+        <p class="hint">Only this built-in rule will be changed. Leave a field blank to inherit its specialized built-in or global wording.</p>
+        <label>Approved<textarea id="builtInApproved" rows="2"></textarea></label>
+        <label>Deducted<textarea id="builtInDeducted" rows="3"></textarea></label>
+        <label>Rejected<textarea id="builtInRejected" rows="3"></textarea></label>
+        <label>Hold / review<textarea id="builtInHold" rows="3"></textarea></label>
+        <div class="editor-actions">
+          <button id="saveBuiltInRemarksBtn" type="submit" value="save">Save for this rule</button>
+          <button id="resetBuiltInRemarksBtn" type="button">Restore this rule</button>
+          <button type="submit" value="cancel">Cancel</button>
+        </div>
+      </form>
+    </dialog>
   </div>
 
   <script src="audit-rules.js"></script>

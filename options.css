@@ -128,3 +128,8 @@ textarea { resize: vertical; }
 .rule-form { padding: 16px; background: #f8f9fa; border-radius: 8px; }
 .empty-row { color: #777; text-align: center; }
 @media (max-width: 760px) { .template-grid, .form-grid { grid-template-columns: 1fr; } .form-grid .wide { grid-column: auto; } .section-heading { flex-direction: column; } }
+
+dialog { width: min(680px, calc(100vw - 32px)); border: 0; border-radius: 10px; padding: 0; box-shadow: 0 12px 40px rgba(0, 0, 0, .25); }
+dialog::backdrop { background: rgba(15, 23, 42, .5); }
+.remark-dialog-form { display: flex; flex-direction: column; gap: 10px; padding: 20px; }
+.remark-dialog-form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; }

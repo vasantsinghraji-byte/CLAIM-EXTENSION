@@ -131,13 +131,38 @@
         if (Object.prototype.hasOwnProperty.call(source.remarkTemplates, key)) templates[key] = cleanText(source.remarkTemplates[key], 1000);
       }
     }
-    return { schemaVersion: SCHEMA_VERSION, rules, remarkTemplates: templates, errors };
+    const builtInRemarkOverrides = {};
+    const knownBuiltIns = new Set(builtInIds.map(id => String(id).toUpperCase()));
+    const rawOverrides = source.builtInRemarkOverrides;
+    if (rawOverrides && (typeof rawOverrides !== 'object' || Array.isArray(rawOverrides))) {
+      errors.push('builtInRemarkOverrides must be an object');
+    } else {
+      for (const [rawRuleId, rawTemplates] of Object.entries(rawOverrides || {})) {
+        const ruleId = cleanText(rawRuleId, 50).toUpperCase();
+        if (!knownBuiltIns.has(ruleId)) {
+          errors.push(`unknown built-in ruleId: ${ruleId}`);
+          continue;
+        }
+        const ruleTemplates = {};
+        validateTemplates(rawTemplates, errors);
+        for (const key of ALLOWED_TEMPLATE_KEYS) {
+          const text = cleanText(rawTemplates?.[key], 1000);
+          if (text) ruleTemplates[key] = text;
+        }
+        if (Object.keys(ruleTemplates).length) builtInRemarkOverrides[ruleId] = ruleTemplates;
+      }
+    }
+    return { schemaVersion: SCHEMA_VERSION, rules, remarkTemplates: templates, builtInRemarkOverrides, errors };
   }
 
   function mergeRuleSet(builtIn, config) {
     const normalized = normalizeConfig(config, collectRuleIds(builtIn));
-    const bundles = [...(builtIn.bundles || [])];
-    const reviewTriggers = [...(builtIn.reviewTriggers || [])];
+    const applyRemarkOverride = rule => {
+      const override = normalized.builtInRemarkOverrides[rule.ruleId];
+      return override ? { ...rule, remarkTemplates: { ...(rule.remarkTemplates || {}), ...override } } : rule;
+    };
+    const bundles = (builtIn.bundles || []).map(applyRemarkOverride);
+    const reviewTriggers = (builtIn.reviewTriggers || []).map(applyRemarkOverride);
     for (const rule of normalized.rules.filter(item => item.enabled)) {
       if (rule.type === 'unbundling') {
         bundles.push({
@@ -155,7 +180,16 @@
         });
       }
     }
-    return { ...builtIn, bundles, reviewTriggers, remarkTemplates: normalized.remarkTemplates };
+    return {
+      ...builtIn,
+      bundles,
+      reviewTriggers,
+      mutuallyExclusive: (builtIn.mutuallyExclusive || []).map(applyRemarkOverride),
+      addOnDependencies: (builtIn.addOnDependencies || []).map(applyRemarkOverride),
+      combinedAvailable: (builtIn.combinedAvailable || []).map(applyRemarkOverride),
+      adjunctClusters: (builtIn.adjunctClusters || []).map(applyRemarkOverride),
+      remarkTemplates: normalized.remarkTemplates
+    };
   }
 
   function collectRuleIds(rules) {

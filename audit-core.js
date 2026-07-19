@@ -306,7 +306,9 @@
         autoDeductEligible: false,
         rows,
         remarkReason: `${rule.label} billed together - variants are mutually exclusive`,
-        reference: rule.reference
+        reference: rule.reference,
+        remarkTemplates: rule.remarkTemplates,
+        globalRemarkTemplates: rules.remarkTemplates
       });
     }
   }
@@ -329,7 +331,9 @@
         autoDeductEligible: false,
         rows: addOnHits.map(line => line.index),
         remarkReason: `${rule.label} - no qualifying base package found on this sheet`,
-        reference: rule.reference
+        reference: rule.reference,
+        remarkTemplates: rule.remarkTemplates,
+        globalRemarkTemplates: rules.remarkTemplates
       });
     }
   }
@@ -354,7 +358,9 @@
         autoDeductEligible: false,
         rows,
         remarkReason: `${rule.label} - use the combined package or apply the multiple-procedure rule`,
-        reference: rule.reference
+        reference: rule.reference,
+        remarkTemplates: rule.remarkTemplates,
+        globalRemarkTemplates: rules.remarkTemplates
       });
     }
   }
@@ -378,7 +384,9 @@
         autoDeductEligible: false,
         rows,
         remarkReason: `${rule.label}: ${matchedMembers.map(m => m.label).join(' + ')} - require lesion-specific evidence for each`,
-        reference: rule.reference
+        reference: rule.reference,
+        remarkTemplates: rule.remarkTemplates,
+        globalRemarkTemplates: rules.remarkTemplates
       });
     }
   }

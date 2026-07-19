@@ -26,6 +26,9 @@ Custom findings are stored under `customRuleConfig` in `chrome.storage.local`.
 They may extend only the unbundling and upcoding-review families, are validated
 before persistence, and merge as review-only rules. Never add a path that lets
 an imported custom rule set `autoDeductEligible`.
+Per-built-in-rule remark overrides live in the same object under
+`builtInRemarkOverrides`; they alter only presentation and never rule matching,
+eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
 `tests/fixtures/rghs-process-sheet.html` mirrors the live RGHS hidden-leading/trailing-cell structure. Its integration test covers mapping, normal and medicine proposals, selective reconciliation, Apply validation, and stale-preview detection without requiring a network session.
 - `manifest.json`: permissions and official RGHS origin scope

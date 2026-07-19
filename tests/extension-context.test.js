@@ -68,6 +68,9 @@ test('options updates are serialized and refresh from storage changes', () => {
   assert.match(options, /ruleOverrides = normalizeRuleOverrides\(changes\.ruleOverrides\.newValue\)/);
   assert.doesNotMatch(options, /chrome\.storage\.sync\.set\(\{ ruleOverrides \}/);
   assert.match(options, /ensureRuleOverridesMigration/);
+  assert.match(options, /Edit remarks/);
+  assert.match(options, /builtInRemarkOverrides/);
+  assert.match(options, /openBuiltInRemarkEditor/);
 });
 
 test('navigation clears stale badges and popup BOM is explicit', () => {

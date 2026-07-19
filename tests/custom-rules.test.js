@@ -87,3 +87,38 @@ test('custom upcoding triggers are review-only and may be disabled', () => {
     { index: 1, packageText: 'CM-9003 Higher package', particularText: 'Procedure', claimValue: '5000' }
   ], disabled).some(item => item.ruleId === 'CUSTOM-UP-001'), false);
 });
+
+test('per-built-in-rule remark overrides affect only the selected rule', () => {
+  const merged = CustomRules.mergeRuleSet(AuditRules, {
+    builtInRemarkOverrides: {
+      'CA-01': {
+        deducted: 'Separate {component} ({component_code}) is not payable with {main_package} ({main_code}).'
+      }
+    }
+  });
+  const caFinding = AuditCore.analyzeClaim([
+    { index: 1, packageText: '544 PTCA package', particularText: 'Procedure', claimValue: '97865', approvedValue: '' },
+    { index: 2, packageText: '601 Coronary angiography', particularText: 'Investigation', claimValue: '6325', approvedValue: '' }
+  ], merged).find(item => item.ruleId === 'CA-01');
+  assert.equal(
+    AuditCore.formatRemark(caFinding, 'deduct', 2),
+    'Separate Coronary angiography (601) is not payable with PTCA package (inclusive of diagnostic angiogram) (544).'
+  );
+
+  const cbcFinding = AuditCore.analyzeClaim([
+    { index: 1, packageText: '1394 CBC', particularText: 'Investigation', claimValue: '460', approvedValue: '' },
+    { index: 2, packageText: '1392 ESR', particularText: 'Investigation', claimValue: '80', approvedValue: '' }
+  ], merged).find(item => item.ruleId === 'BI-01');
+  assert.match(AuditCore.formatRemark(cbcFinding, 'deduct', 2), /has not been allowed separately/);
+});
+
+test('per-rule overrides reject unknown built-in IDs and unsafe template tokens', () => {
+  const config = CustomRules.normalizeConfig({
+    builtInRemarkOverrides: {
+      'NOT-A-RULE': { deducted: 'No' },
+      'CA-01': { deducted: 'Invalid {patient_name}' }
+    }
+  }, CustomRules.collectRuleIds(AuditRules));
+  assert.match(config.errors.join(' | '), /unknown built-in ruleId/);
+  assert.match(config.errors.join(' | '), /unknown token/);
+});

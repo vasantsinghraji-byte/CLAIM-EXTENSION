@@ -303,6 +303,12 @@ keeps the specialized built-in wording. Configuration is stored in
 as schema-versioned JSON without claim or patient data. Built-in generated rules
 remain immutable and the editor can reset all custom configuration safely.
 
+Every generated built-in rule listed on **Rules & Stats** also has an
+**Edit remarks** action. Per-rule text takes precedence over the global template
+only for that rule; for example, CA-01 can use different CAG wording without
+changing BI-01 CBC remarks. **Restore this rule** removes the override and
+immediately returns to the specialized generated wording.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the required workflow: GitHub Flow
