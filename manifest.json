@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claim Amount Auto-Fill",
-  "version": "1.4.20",
+  "version": "1.5.0",
   "description": "Fills approved amounts from claim amounts and audits bundled RGHS packages for unbundling and duplicate billing",
   "permissions": [
     "activeTab",
@@ -31,6 +31,7 @@
       ],
       "js": [
         "audit-rules.js",
+        "custom-rules.js",
         "audit-core.js",
         "claim-core.js",
         "review-core.js",

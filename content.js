@@ -5,6 +5,7 @@ const AUDIT_MODES = ['off', 'flag', 'deduct'];
 let isAutoFillEnabled = true;
 let auditMode = 'flag';
 let ruleOverrides = {};
+let customRuleConfig = null;
 let undoBatch = [];
 let lastPreview = null;
 let previewRowElements = new Map();
@@ -37,22 +38,26 @@ chrome.storage.sync.get(['autoFillEnabled', 'auditMode'], (result) => {
 
 chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
   void chrome.runtime.lastError;
-  chrome.storage.local.get(['ruleOverrides'], result => {
+  chrome.storage.local.get(['ruleOverrides', 'customRuleConfig'], result => {
     ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' && !Array.isArray(result.ruleOverrides)
       ? result.ruleOverrides
       : {};
+    customRuleConfig = result.customRuleConfig || null;
     schedulePassiveAudit([document]);
   });
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.customRuleConfig) {
+    customRuleConfig = changes.customRuleConfig.newValue || null;
+    schedulePassiveAudit([document]);
+  }
   if (area === 'local' && changes.ruleOverrides) {
     ruleOverrides = changes.ruleOverrides.newValue && typeof changes.ruleOverrides.newValue === 'object'
       && !Array.isArray(changes.ruleOverrides.newValue)
       ? changes.ruleOverrides.newValue
       : {};
     schedulePassiveAudit([document]);
-    return;
   }
   if (area !== 'sync') return;
 
@@ -286,7 +291,7 @@ function blockedFillResult(reason, details = []) {
 }
 
 // Fill all approved amounts on the page
-function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowKeys = null, approvedOverrides = {} } = {}) {
+function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowKeys = null, approvedOverrides = {}, remarkOverrides = {} } = {}) {
   if (!isAutoFillEnabled && apply) {
     return blockedFillResult('autofill-disabled');
   }
@@ -462,7 +467,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         unitValue: record.unitValue,
         dateValue: record.dateValue
       }));
-      const effectiveRules = Audit.applyRuleOverrides(AuditRules, ruleOverrides);
+      const editableRules = globalThis.RGHSCustomRules
+        ? globalThis.RGHSCustomRules.mergeRuleSet(AuditRules, customRuleConfig)
+        : AuditRules;
+      const effectiveRules = Audit.applyRuleOverrides(editableRules, ruleOverrides);
       const findings = Audit.analyzeClaim(lines, effectiveRules);
       const { rowActions } = Audit.planAuditActions(findings, lines, {
         mode: auditMode,
@@ -538,6 +546,12 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           groupId: actions[0]?.ruleId || key,
           decisionRole,
           decisionMethod,
+          decisionRemarks: primaryFinding ? {
+            approved: Audit.formatRemark(primaryFinding, 'approved', record.index),
+            deducted: Audit.formatRemark(primaryFinding, 'deduct', record.index),
+            rejected: Audit.formatRemark(primaryFinding, 'rejected', record.index),
+            hold: Audit.formatRemark(primaryFinding, 'flag', record.index)
+          } : {},
           recommendedApproved,
           recommendedDeductionCap: primaryFinding?.type === 'UNBUNDLING_FIXED'
             ? Number(primaryFinding.fixedDeduction.amount)
@@ -561,8 +575,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           auditFlagged++;
         }
 
-        if (record.remarksCell && remarkTexts.length > 0 && apply) {
-          setCellValue(record.remarksCell, existing + remarkTexts.join('; '), batch);
+        const hasRemarkOverride = Object.prototype.hasOwnProperty.call(remarkOverrides, key);
+        const appliedRemark = hasRemarkOverride ? String(remarkOverrides[key] || '').trim() : remarkTexts.join('; ');
+        if (record.remarksCell && appliedRemark && apply) {
+          setCellValue(record.remarksCell, existing + appliedRemark, batch);
         }
 
         if (apply) {
@@ -754,7 +770,7 @@ function createReviewedPreview() {
   return preview;
 }
 
-function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, acknowledgedHighRisk = false } = {}) {
+function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, remarkOverrides = {}, acknowledgedHighRisk = false } = {}) {
   const currentRaw = fillAllApprovedAmounts({ apply: false });
   if (currentRaw.blocked) {
     appendClaimActivity('apply-blocked', { blockReason: currentRaw.blockReason });
@@ -797,7 +813,8 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
   const result = fillAllApprovedAmounts({
     apply: true,
     selectedRowKeys: new Set(selectedKeys),
-    approvedOverrides
+    approvedOverrides,
+    remarkOverrides
   });
   if (result.blocked) {
     appendClaimActivity('apply-blocked', { blockReason: result.blockReason });

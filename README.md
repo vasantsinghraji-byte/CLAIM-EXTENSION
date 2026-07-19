@@ -286,6 +286,23 @@ The toolbar icon shows a per-tab badge with the number of open audit findings
 on the current process sheet. It is cleared when the tab begins a new navigation,
 so page transitions cannot leave a stale count visible.
 
+### Custom findings and portal remarks
+
+Open **Rules & Stats** and use **Custom findings** to create profile-local
+unbundling or upcoding-review rules without editing the generated
+`audit-rules.js`. Custom rules require a unique ID, an exact code or validated
+name pattern, a plain-language reason, and an optional reference. They always
+start and remain review-only; adding a rule can never silently enable an
+automatic deduction.
+
+The same page provides decision-specific remark templates for approved,
+deducted, rejected, and held rows. Approved Amount controls remain numeric-only;
+templates are written only to portal Remarks. A blank deducted or hold template
+keeps the specialized built-in wording. Configuration is stored in
+`chrome.storage.local`, applies to open RGHS tabs, and can be exported/imported
+as schema-versioned JSON without claim or patient data. Built-in generated rules
+remain immutable and the editor can reset all custom configuration safely.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the required workflow: GitHub Flow

@@ -83,6 +83,7 @@
     const proposals = group?.proposals || [];
     if (mode === 'hold') return { selectedKeys: [], approvedOverrides: {}, acknowledgementRequired: false };
     const approvedOverrides = {};
+    const remarkDispositions = {};
     let selected = proposals;
     if (mode === 'recommended') {
       selected = proposals.filter(proposal => proposal.recommendedApproved !== null && proposal.recommendedApproved !== undefined);
@@ -136,9 +137,15 @@
     } else {
       return { selectedKeys: [], approvedOverrides: {}, acknowledgementRequired: false };
     }
+    for (const proposal of selected) {
+      const approved = Number(approvedOverrides[proposal.key]) || 0;
+      const claim = Number(proposal.claimAmount) || 0;
+      remarkDispositions[proposal.key] = approved < claim ? 'deducted' : 'approved';
+    }
     return {
       selectedKeys: selected.map(proposal => proposal.key),
       approvedOverrides,
+      remarkDispositions,
       acknowledgementRequired: mode === 'approve-all'
     };
   }

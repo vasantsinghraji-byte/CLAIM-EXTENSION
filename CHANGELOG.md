@@ -119,3 +119,7 @@
 ## 1.4.20 - 2026-07-19
 
 - Complete profile-local override isolation by deleting the legacy Chrome sync key only after its one-time local migration succeeds.
+
+## 1.5.0 - 2026-07-19
+
+- Added a validated profile-local Rule Editor for custom unbundling and upcoding findings, decision-specific portal remark templates, safe JSON import/export, and grouped-decision remark application.

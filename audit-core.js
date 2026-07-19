@@ -182,7 +182,9 @@
           exceptionHit: hasExceptionKeyword(anchor.line, rule) ||
             componentHits.some(hit => hasExceptionKeyword(hit.line, rule) || datesConflict(anchor.line, hit.line)),
           remarkReason: rule.remarkReason,
-          reference: rule.reference
+          reference: rule.reference,
+          remarkTemplates: rule.remarkTemplates,
+          globalRemarkTemplates: rules.remarkTemplates
         });
         continue;
       }
@@ -215,7 +217,9 @@
           // legitimate separate service - downgrade to a review flag.
           exceptionHit: hasExceptionKeyword(hit.line, rule) || datesConflict(anchor.line, hit.line),
           remarkReason: rule.remarkReason,
-          reference: rule.reference
+          reference: rule.reference,
+          remarkTemplates: rule.remarkTemplates,
+          globalRemarkTemplates: rules.remarkTemplates
         });
       }
     }
@@ -408,7 +412,8 @@
     for (const rule of rules.reviewTriggers || []) {
       const entity = compileEntity(rule.entity);
       for (const line of prepared) {
-        if (!matchEntity(line, entity)) continue;
+        const match = matchEntity(line, entity);
+        if (!match) continue;
         findings.push({
           type: 'UPCODING_REVIEW',
           ruleId: rule.ruleId,
@@ -417,8 +422,11 @@
           action: 'review-only',
           autoDeductEligible: false,
           rows: [line.index],
+          mainEntity: { label: rule.label, code: match.code },
           remarkReason: `${rule.label} - ${rule.reason}`,
-          reference: rule.reference
+          reference: rule.reference,
+          remarkTemplates: rule.remarkTemplates,
+          globalRemarkTemplates: rules.remarkTemplates
         });
       }
     }
@@ -464,6 +472,32 @@
   }
 
   function formatRemark(finding, disposition, rowIndex = null) {
+    const templateKey = disposition === 'deduct' ? 'deducted'
+      : disposition === 'approved' ? 'approved'
+        : disposition === 'rejected' ? 'rejected' : 'hold';
+    const localHasTemplate = Object.prototype.hasOwnProperty.call(finding.remarkTemplates || {}, templateKey);
+    const globalHasTemplate = Object.prototype.hasOwnProperty.call(finding.globalRemarkTemplates || {}, templateKey);
+    const template = localHasTemplate ? finding.remarkTemplates[templateKey]
+      : globalHasTemplate ? finding.globalRemarkTemplates[templateKey] : null;
+    if (template !== null && template !== '') {
+      const component = finding.componentRow || finding.components?.[0] || null;
+      const values = {
+        rule_id: finding.ruleId,
+        main_code: finding.bundleRow?.code || finding.mainEntity?.code || '',
+        main_package: finding.bundleRow?.label || finding.mainEntity?.label || '',
+        component_code: component?.code || finding.code || '',
+        component: component?.label || '',
+        claimed_amount: component?.claimAmount ?? '',
+        approved_amount: disposition === 'deduct' ? '0' : '',
+        deduction: finding.fixedDeduction?.amount ?? component?.claimAmount ?? '',
+        reference: finding.reference || '',
+        reason: finding.remarkReason || ''
+      };
+      return String(template).replace(/\{([^{}]+)\}/g, (match, key) =>
+        Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match)
+        .replace(/\s+/g, ' ').trim();
+    }
+    if (templateKey === 'approved') return '';
     if (disposition === 'deduct') {
       if (finding.type === 'UNBUNDLING_FIXED') {
         const components = finding.components.map(c => describeCode(c.label, c.code)).join(', ');

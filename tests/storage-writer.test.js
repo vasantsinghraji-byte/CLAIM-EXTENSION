@@ -95,3 +95,11 @@ test('legacy synced overrides migrate once to profile-local storage', async () =
   assert.equal(await migrateRuleOverridesToLocal(local, sync), false);
   assert.deepEqual(local.data.ruleOverrides, { 'CA-01': { autoDeductEligible: true } });
 });
+
+test('custom rule configuration is serialized through the service worker', async () => {
+  const storage = delayedStorage();
+  const writer = createSerializedStorageWriter(storage);
+  const config = { schemaVersion: 1, rules: [{ ruleId: 'CUSTOM-001' }], remarkTemplates: {} };
+  assert.equal(await writer.setCustomRuleConfig(config), 1);
+  assert.deepEqual(storage.data.customRuleConfig, config);
+});

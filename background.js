@@ -128,6 +128,12 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         await storageSet(storage, { ruleOverrides: {} });
         return 0;
       });
+    },
+    setCustomRuleConfig(config) {
+      return enqueue('customRuleConfig', async () => {
+        await storageSet(storage, { customRuleConfig: config });
+        return Array.isArray(config?.rules) ? config.rules.length : 0;
+      });
     }
   };
 }
@@ -153,6 +159,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       mutation = overrideMigration.then(() => storageWriter.resetRuleOverrides());
     } else if (request?.action === 'ensureRuleOverridesMigration') {
       mutation = overrideMigration.then(() => 0);
+    } else if (request?.action === 'setCustomRuleConfig') {
+      mutation = storageWriter.setCustomRuleConfig(request.config);
     }
     if (!mutation) return undefined;
     mutation.then(count => sendResponse({ success: true, count }))
