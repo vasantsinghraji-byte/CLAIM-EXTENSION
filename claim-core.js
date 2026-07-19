@@ -50,7 +50,7 @@
 
     const medicine = isMedicineRow(particularText);
     const approved = isEmptyApprovedValue(approvedValue)
-      ? String(medicine ? calculateMedicineApprovedAmount(claimAmount) : claimValue).trim()
+      ? String(medicine ? calculateMedicineApprovedAmount(claimAmount) : claimAmount)
       : null;
     const remarks = medicine && !String(remarksValue ?? '').toUpperCase().includes('12%')
       ? DEDUCTION_REMARK
@@ -87,7 +87,7 @@
     let timer = null;
     let pendingNodes = [];
     return function schedule(nodes) {
-      pendingNodes.push(...nodes);
+      for (const node of nodes) pendingNodes.push(node);
       if (timer !== null) timers.clearTimeout(timer);
       timer = timers.setTimeout(() => {
         timer = null;

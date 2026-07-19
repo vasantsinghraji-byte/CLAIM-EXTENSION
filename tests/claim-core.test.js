@@ -24,9 +24,13 @@ test('RGHS process sheets require exactly one fully mapped claim table', () => {
   assert.equal(validatePortalLayoutDescriptor({ pathname: '/other', tables: [] }).ok, true);
 });
 
-test('normal row copies the original valid claim representation', () => {
+test('normal row writes a normalized portal-safe amount', () => {
   assert.deepEqual(planRowUpdate({ claimValue: '1,250.50', approvedValue: '', particularText: 'Investigation', remarksValue: '' }),
-    { approvedValue: '1,250.50', remarksValue: null, reason: 'standard' });
+    { approvedValue: '1250.5', remarksValue: null, reason: 'standard' });
+  assert.deepEqual(planRowUpdate({ claimValue: '1,23,450.00', approvedValue: '0', particularText: 'Procedure', remarksValue: '' }),
+    { approvedValue: '123450', remarksValue: null, reason: 'standard' });
+  assert.deepEqual(planRowUpdate({ claimValue: '12,345.67', approvedValue: '', particularText: 'Investigation', remarksValue: '' }),
+    { approvedValue: '12345.67', remarksValue: null, reason: 'standard' });
 });
 
 test('medicine row deducts 12 percent and rounds to nearest whole rupee', () => {
@@ -66,6 +70,20 @@ test('dynamic row processing is debounced without dropping earlier row batches',
   assert.equal(callbacks.size, 1);
   [...callbacks.values()][0]();
   assert.deepEqual(processed, [['old-row', 'new-row']]);
+});
+
+test('debounced processing accepts bulk mutation batches without spread-argument overflow', () => {
+  let callback;
+  const timers = {
+    setTimeout(next) { callback = next; return 1; },
+    clearTimeout() {}
+  };
+  let processedCount = 0;
+  const schedule = createDebouncedProcessor(nodes => { processedCount = nodes.length; }, 300, timers);
+  const bulkNodes = Array.from({ length: 200000 }, (_, index) => ({ index }));
+  assert.doesNotThrow(() => schedule(bulkNodes));
+  callback();
+  assert.equal(processedCount, bulkNodes.length);
 });
 
 test('live RGHS hidden cells are mapped from the approved-input anchor', () => {

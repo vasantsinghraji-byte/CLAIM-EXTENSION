@@ -26,6 +26,26 @@ const files = [
   'icons/icon128.png',
   'icons/claim-spark.png'
 ];
+const developmentOrigins = new Set(['http://localhost/*', 'http://127.0.0.1/*']);
+
+function createProductionManifest(sourceManifest) {
+  const manifest = JSON.parse(JSON.stringify(sourceManifest));
+  for (const script of manifest.content_scripts || []) {
+    script.matches = (script.matches || []).filter(origin => !developmentOrigins.has(origin));
+  }
+  for (const resource of manifest.web_accessible_resources || []) {
+    resource.matches = (resource.matches || []).filter(origin => !developmentOrigins.has(origin));
+  }
+  assertProductionManifest(manifest);
+  return manifest;
+}
+
+function assertProductionManifest(manifest) {
+  const serialized = JSON.stringify(manifest);
+  for (const origin of developmentOrigins) {
+    if (serialized.includes(origin)) throw new Error(`Development origin leaked into production manifest: ${origin}`);
+  }
+}
 
 function crc32(buffer) {
   let crc = 0xffffffff;
@@ -82,23 +102,43 @@ function createStoredZip(entries) {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-for (const relativePath of files) {
-  if (!fs.existsSync(path.join(rootDir, relativePath))) {
-    throw new Error(`Required extension file is missing: ${relativePath}`);
-  }
+function createBuildEntries() {
+  return [...files].sort().map(relativePath => {
+    const source = path.join(rootDir, relativePath);
+    const data = relativePath === 'manifest.json'
+      ? Buffer.from(`${JSON.stringify(createProductionManifest(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`)
+      : fs.readFileSync(source);
+    return { name: relativePath, data };
+  });
 }
 
-fs.rmSync(distDir, { recursive: true, force: true });
-fs.mkdirSync(distDir, { recursive: true });
+function main() {
+  for (const relativePath of files) {
+    if (!fs.existsSync(path.join(rootDir, relativePath))) {
+      throw new Error(`Required extension file is missing: ${relativePath}`);
+    }
+  }
 
-const entries = files.sort().map(relativePath => {
-  const source = path.join(rootDir, relativePath);
-  const destination = path.join(distDir, relativePath);
-  fs.mkdirSync(path.dirname(destination), { recursive: true });
-  fs.copyFileSync(source, destination);
-  return { name: relativePath, data: fs.readFileSync(source) };
-});
+  fs.rmSync(distDir, { recursive: true, force: true });
+  fs.mkdirSync(distDir, { recursive: true });
 
-fs.writeFileSync(zipPath, createStoredZip(entries));
-console.log(`Built ${entries.length} files in ${distDir}`);
-console.log(`Created reproducible package ${zipPath}`);
+  const entries = createBuildEntries();
+  for (const entry of entries) {
+    const destination = path.join(distDir, entry.name);
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, entry.data);
+  }
+
+  const zip = createStoredZip(entries);
+  fs.writeFileSync(zipPath, zip);
+  assertProductionManifest(JSON.parse(fs.readFileSync(path.join(distDir, 'manifest.json'), 'utf8')));
+  for (const origin of developmentOrigins) {
+    if (zip.includes(Buffer.from(origin))) throw new Error(`Development origin leaked into production ZIP: ${origin}`);
+  }
+  console.log(`Built ${entries.length} files in ${distDir}`);
+  console.log(`Created reproducible package ${zipPath}`);
+}
+
+if (require.main === module) main();
+
+module.exports = { createProductionManifest, createBuildEntries, createStoredZip };

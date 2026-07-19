@@ -13,6 +13,7 @@
     /\b\d{3,4}-[A-Z]{2}\d{2,5}[A-Z]{0,3}\b/g,
     /\bIMPCRD\d{3}\b/g
   ];
+  const compiledEntityCache = new WeakMap();
 
   function normalizeText(value) {
     return String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -50,11 +51,17 @@
   }
 
   function compileEntity(entity) {
-    return {
+    const cached = compiledEntityCache.get(entity);
+    if (cached) return cached;
+    const codes = entity.codes || [];
+    const patterns = entity.patterns || [];
+    const compiled = {
       label: entity.label || '',
-      codes: new Set((entity.codes || []).map(code => String(code).toUpperCase())),
-      regexes: (entity.patterns || []).map(pattern => new RegExp(pattern, 'i'))
+      codes: new Set(codes.map(code => String(code).toUpperCase())),
+      regexes: patterns.map(pattern => new RegExp(pattern, 'i'))
     };
+    compiledEntityCache.set(entity, compiled);
+    return compiled;
   }
 
   function collectKnownBareCodes(rules) {
