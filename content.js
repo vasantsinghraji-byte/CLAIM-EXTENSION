@@ -291,7 +291,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     let remarksIdx = -1;
 
     // Find header row
-    for (let row of allRows) {
+    for (const row of allRows) {
       const cells = row.querySelectorAll('th, td');
       for (let i = 0; i < cells.length; i++) {
         const text = cells[i].textContent.toLowerCase().trim();
@@ -348,7 +348,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     let foundHeader = false;
     let dataRowNum = 0;
 
-    for (let row of allRows) {
+    for (const row of allRows) {
       if (!foundHeader) {
         if (row === headerRow) foundHeader = true;
         continue;
@@ -606,7 +606,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (!parent) return;
 
         const siblings = parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea');
-        for (let sib of siblings) {
+        for (const sib of siblings) {
           if (sib === input) continue;
           const sName = (sib.name || '').toLowerCase();
           const sId = (sib.id || '').toLowerCase();
@@ -791,7 +791,7 @@ let cachedTid;
 function findTid() {
   if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
-  const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9\/-]{3,19})/i);
+  const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i);
   cachedTid = match ? match[1] : '';
   return cachedTid;
 }

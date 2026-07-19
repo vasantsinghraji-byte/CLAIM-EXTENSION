@@ -11,7 +11,7 @@ const root = path.join(__dirname, '..');
 function nextVersion(version, releaseType) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version));
   if (!match) throw new Error(`Invalid semantic version: ${version}`);
-  let [, major, minor, patch] = match.map(Number);
+  const [, major, minor, patch] = match.map(Number);
   if (releaseType === 'major') return `${major + 1}.0.0`;
   if (releaseType === 'minor') return `${major}.${minor + 1}.0`;
   if (releaseType === 'patch') return `${major}.${minor}.${patch + 1}`;

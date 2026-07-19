@@ -1,0 +1,12 @@
+# <type>(<scope>): <subject>  (72 chars max on this line)
+#
+# Types: feat fix refactor chore docs test build ci perf style revert
+# Scopes (suggested): audit, rules, autofill, popup, options, widget,
+#                     review, build, release, docs
+#
+# Body (optional): what and WHY, wrapped at 72 chars. The diff shows how.
+#
+# Examples:
+#   feat(audit): downgrade duplicates when laterality wording present
+#   fix(autofill): anchor hidden-cell offsets to approved input
+#   chore(build): add options page to the packaged file list

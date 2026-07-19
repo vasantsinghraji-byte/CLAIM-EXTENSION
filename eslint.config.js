@@ -1,0 +1,73 @@
+'use strict';
+
+const js = require('@eslint/js');
+
+const browserGlobals = {
+  chrome: 'readonly',
+  window: 'readonly',
+  document: 'readonly',
+  location: 'readonly',
+  console: 'readonly',
+  setTimeout: 'readonly',
+  clearTimeout: 'readonly',
+  setInterval: 'readonly',
+  clearInterval: 'readonly',
+  URL: 'readonly',
+  Blob: 'readonly',
+  Event: 'readonly',
+  CustomEvent: 'readonly',
+  MutationObserver: 'readonly',
+  Node: 'readonly',
+  HTMLInputElement: 'readonly',
+  HTMLTextAreaElement: 'readonly',
+  sessionStorage: 'readonly',
+  navigator: 'readonly',
+  crypto: 'readonly'
+};
+
+const nodeGlobals = {
+  require: 'readonly',
+  module: 'writable',
+  process: 'readonly',
+  console: 'readonly',
+  Buffer: 'readonly',
+  __dirname: 'readonly',
+  setTimeout: 'readonly',
+  clearTimeout: 'readonly',
+  URL: 'readonly',
+  fetch: 'readonly',
+  crypto: 'readonly'
+};
+
+module.exports = [
+  {
+    // Generated data and build output are not linted.
+    ignores: ['audit-rules.js', 'dist/**', 'node_modules/**']
+  },
+  js.configs.recommended,
+  {
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs'
+    },
+    rules: {
+      // Correctness only - no style bikeshedding; hooks/CI keep this fast.
+      'no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+      'no-var': 'error',
+      'prefer-const': 'error',
+      eqeqeq: ['error', 'smart']
+    }
+  },
+  {
+    files: [
+      'content.js', 'popup.js', 'options.js', 'background.js',
+      'floating-widget.js', 'claim-core.js', 'audit-core.js', 'review-core.js',
+      'scripts/live-browser-smoke.js'
+    ],
+    languageOptions: { globals: browserGlobals }
+  },
+  {
+    files: ['build.js', 'scripts/release.js', 'tests/**/*.js', 'eslint.config.js'],
+    languageOptions: { globals: nodeGlobals }
+  }
+];

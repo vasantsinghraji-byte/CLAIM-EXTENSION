@@ -56,7 +56,7 @@ toggle.addEventListener('change', async () => {
     chrome.tabs.sendMessage(tab.id, {
       action: 'toggleAutoFill',
       enabled: enabled
-    }, (response) => {
+    }, () => {
       if (chrome.runtime.lastError) {
         showStatus('Please refresh the page for changes to take effect', 'warning');
         return;

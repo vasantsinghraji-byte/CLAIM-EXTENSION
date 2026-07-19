@@ -273,6 +273,11 @@ on the current process sheet.
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the required workflow: GitHub Flow
+branching (`feat/*`, `fix/*`, `chore/*`, `hotfix/*` — never commit to `main`),
+Conventional Commits enforced by git hooks, pre-commit test/lint gates, PR
+review with the claims-safety checklist, and CI that must be green to merge.
+
 Contributions are welcome! Feel free to:
 - Report bugs
 - Suggest new features
