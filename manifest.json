@@ -1,12 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Claim Amount Auto-Fill",
-  "version": "1.0.0",
-  "description": "Automatically fills approved amounts with claim amounts to save time",
+  "version": "1.4.1",
+  "description": "Fills approved amounts from claim amounts and audits bundled RGHS packages for unbundling and duplicate billing",
   "permissions": [
     "activeTab",
     "storage"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -17,9 +24,32 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "https://rghs.rajasthan.gov.in/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "audit-rules.js",
+        "audit-core.js",
+        "claim-core.js",
+        "review-core.js",
+        "content.js",
+        "floating-widget.js"
+      ],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/claim-spark.png"
+      ],
+      "matches": [
+        "https://rghs.rajasthan.gov.in/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
     }
   ],
   "icons": {

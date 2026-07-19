@@ -176,6 +176,153 @@
         </tr>
     </table>
 
+    <h2>Test Case 4: Unbundling &mdash; CBC package + components (Rule BI-01)</h2>
+    <p>Expect the ESR and peripheral smear rows to be flagged (amber/orange) with an [RGHS-AUDIT] remark; in deduct mode with BI-01 allowlisted, their approved amounts become 0.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Particular</th>
+                <th>Package Code/Package Name</th>
+                <th>Rate</th>
+                <th>Unit/Hour/Days</th>
+                <th>Claim Amount(Rs.)</th>
+                <th>Approved Amount(Rs.)</th>
+                <th>Deductions</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Investigation</td>
+                <td>1394 (Complete Haemogram/CBC)</td>
+                <td>350</td>
+                <td>1</td>
+                <td><input type="text" value="350"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Investigation</td>
+                <td>1392 (Erythrocyte Sedimentation Rate (ESR))</td>
+                <td>80</td>
+                <td>1</td>
+                <td><input type="text" value="80"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Investigation</td>
+                <td>Peripheral Smear Examination</td>
+                <td>120</td>
+                <td>1</td>
+                <td><input type="text" value="120"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Test Case 5: PTCA package + separately booked CAG (Rule CA-01, fixed Rs.6000)</h2>
+    <p>Expect the PTCA row flagged; in deduct mode with CA-01 allowlisted, PTCA approved becomes 34000 (claim 40000 minus 6000 per package master).</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Particular</th>
+                <th>Package Code/Package Name</th>
+                <th>Rate</th>
+                <th>Unit/Hour/Days</th>
+                <th>Claim Amount(Rs.)</th>
+                <th>Approved Amount(Rs.)</th>
+                <th>Deductions</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Procedure</td>
+                <td>2831-MC011A (PTCA, inclusive of diagnostic angiogram)</td>
+                <td>40000</td>
+                <td>1</td>
+                <td><input type="text" value="40000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Procedure</td>
+                <td>601 (Coronary angiography)</td>
+                <td>6000</td>
+                <td>1</td>
+                <td><input type="text" value="6000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Test Case 6: Review-only findings (duplicate MM diagnosis + adjunct cluster)</h2>
+    <p>Expect all four rows flagged for review (amber) with [RGHS-AUDIT] REVIEW REQUIRED remarks; approved amounts stay untouched even in deduct mode.</p>
+    <table>
+        <thead>
+            <tr>
+                <th>Particular</th>
+                <th>Package Code/Package Name</th>
+                <th>Rate</th>
+                <th>Unit/Hour/Days</th>
+                <th>Claim Amount(Rs.)</th>
+                <th>Approved Amount(Rs.)</th>
+                <th>Deductions</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Medical Management</td>
+                <td>CM-0004 (Systemic Thrombolysis for MI - Cardiology)</td>
+                <td>20000</td>
+                <td>1</td>
+                <td><input type="text" value="20000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Medical Management</td>
+                <td>CM-0044 (Systemic Thrombolysis for MI - General Medicine)</td>
+                <td>18000</td>
+                <td>1</td>
+                <td><input type="text" value="18000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Procedure</td>
+                <td>584 (Intravascular ultrasound (IVUS))</td>
+                <td>25000</td>
+                <td>1</td>
+                <td><input type="text" value="25000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+            <tr>
+                <td>Procedure</td>
+                <td>585 (Fractional flow reserve (FFR))</td>
+                <td>15000</td>
+                <td>1</td>
+                <td><input type="text" value="15000"></td>
+                <td><input type="text" value="0"></td>
+                <td>0</td>
+                <td><input type="text" value=""></td>
+            </tr>
+        </tbody>
+    </table>
+
     <div id="result" style="margin-top: 20px;"></div>
 
     <script>

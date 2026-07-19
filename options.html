@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RGHS Audit Rules &amp; Statistics</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>RGHS Audit Rules &amp; Statistics</h1>
+      <p id="rulesMeta" class="meta"></p>
+      <p class="hint">
+        A rule may be promoted to auto-deduct only after its flags show a clean record:
+        review the Confirmed / Dismissed counts gathered from the on-page &#10003;/&#10007; feedback
+        buttons before switching a toggle on. Toggles apply immediately to every open
+        RGHS tab (mode must be "Flag + auto-deduct" in the popup for deductions to run).
+        Review-only rules cannot be promoted by design.
+      </p>
+    </header>
+
+    <div class="toolbar">
+      <span id="statusMessage" class="status"></span>
+      <button id="resetOverridesBtn" type="button">Reset all overrides</button>
+    </div>
+
+    <table id="rulesTable">
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th>Bundle / check</th>
+          <th>Category</th>
+          <th>Risk</th>
+          <th>Class</th>
+          <th>Flagged</th>
+          <th>Deducted</th>
+          <th>Confirmed</th>
+          <th>Dismissed</th>
+          <th>FP&nbsp;rate</th>
+          <th>Auto-deduct</th>
+        </tr>
+      </thead>
+      <tbody id="rulesBody"></tbody>
+    </table>
+
+    <p class="footnote" id="otherFamilies"></p>
+  </div>
+
+  <script src="audit-rules.js"></script>
+  <script src="audit-core.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

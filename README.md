@@ -5,9 +5,14 @@ A Chrome extension that automatically fills approved amount fields with correspo
 ## Features
 
 - **Automatic Detection**: Intelligently identifies claim amount and approved amount field pairs
-- **Auto-Fill**: Automatically fills empty approved amounts with claim amounts
-- **Manual Control**: Toggle auto-fill on/off and trigger manual fills
-- **Real-time Updates**: Works with dynamically loaded content
+- **Manual Commit**: Opening a process sheet never changes approved amounts; Preview and Apply are always explicit actions
+- **Manual Control**: Enable claim tools, preview changes, apply them, or undo the latest fill
+- **Floating Claim Spark**: Drag the process-sheet mascot anywhere in the viewport; it remembers its position and follows the Auto-fill toggle
+- **Fresh DOM Review**: Every Preview reads the current process sheet, including dynamically loaded rows
+- **Selective Review**: Choose individual rows; high-risk findings start unselected and require acknowledgement
+- **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
+- **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
+- **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
 - **Smart Matching**: Uses multiple strategies to find field pairs:
   - Name/ID attribute matching
   - Table structure analysis
@@ -42,7 +47,7 @@ Once published, you'll be able to install directly from the Chrome Web Store.
 
 5. **Load the Extension**
    - Click "Load unpacked" button
-   - Navigate to and select the `claim-autofill-extension` folder
+   - Run `npm run build`, then select the generated `dist` folder
    - Click "Select Folder"
 
 6. **Verify Installation**
@@ -56,14 +61,15 @@ Once published, you'll be able to install directly from the Chrome Web Store.
 1. **Navigate to Your Claim Form**
    - Open any webpage with claim and approved amount fields
 
-2. **Automatic Filling**
-   - By default, the extension automatically fills empty approved amounts
-   - Works on page load and when new fields appear
+2. **Safe Manual Filling**
+   - Opening or updating a process sheet never modifies approved amounts
+   - Use Preview, review the proposed counts, and explicitly Apply
 
 3. **Manual Control**
    - Click the extension icon in your toolbar
-   - Use the toggle to enable/disable auto-fill
-   - Click "Fill Now" to manually trigger filling
+   - Use the toggle to enable/disable the claim tools and floating widget
+   - Click "Preview Fill", review the counts, then apply the changes
+   - Use "Undo Last Fill" to restore the latest changed fields while the page remains open
 
 ### How It Works
 
@@ -109,14 +115,14 @@ The extension recognizes fields with these naming patterns:
 
 2. **Check Extension Status**
    - Click the extension icon
-   - Verify that "Auto-fill enabled" toggle is ON
+   - Verify that the "Claim tools enabled" toggle is ON
 
 3. **Verify Field Names**
    - The extension works best with standard naming conventions
    - Fields should contain keywords like "claim", "approved", "sanctioned"
 
 4. **Manual Fill**
-   - Try clicking "Fill Now" button to manually trigger filling
+   - Try previewing and applying a manual fill from the extension popup
    - Check the status message for results
 
 5. **Console Logs**
@@ -153,11 +159,16 @@ if (claimValue) {  // Remove the check for empty approved field
 }
 ```
 
+## Calculation Rule
+
+Medicine rows matching the configured RGHS descriptions receive a 12% deduction. The extension calculates 88% of the parsed claim and rounds to the nearest whole rupee using `Math.round`, because approved amounts are entered as whole rupees. Malformed, negative, empty, and zero claims are ignored.
+
 ## Privacy & Security
 
 - **No Data Collection**: This extension does not collect, store, or transmit any data
 - **Local Processing**: All operations happen locally in your browser
 - **No External Servers**: No communication with external servers
+- **Restricted Access**: The content script runs only on the official `rghs.rajasthan.gov.in` portal and localhost development pages
 - **Open Source**: Code is fully visible and auditable
 
 ## Browser Compatibility
@@ -172,8 +183,9 @@ if (claimValue) {  // Remove the check for empty approved field
 ### File Structure
 ```
 claim-autofill-extension/
-├── manifest.json       # Extension configuration
-├── content.js         # Main logic for auto-filling
+├── claim-core.js      # Tested calculation and decision rules
+├── manifest.json      # Extension configuration
+├── content.js         # Browser DOM integration
 ├── popup.html         # Extension popup interface
 ├── popup.js          # Popup functionality
 ├── popup.css         # Popup styling
@@ -181,13 +193,83 @@ claim-autofill-extension/
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-└── README.md         # This file
+├── tests/             # Node.js regression tests
+├── dist/              # Generated unpacked extension
+└── README.md          # This file
 ```
 
 ### Technologies Used
 - Manifest V3 (latest Chrome extension format)
 - Vanilla JavaScript (no external dependencies)
 - Chrome Extension APIs (storage, messaging, tabs)
+
+### Build and Test
+
+```bash
+npm test
+npm run check
+npm run build
+```
+
+The build copies an explicit production allowlist to `dist/` and creates `claim-autofill-extension.zip`. File ordering and ZIP timestamps are fixed, so identical sources produce an identical package.
+
+### Claim Spark review workflow
+
+1. Preview the current process sheet; this is read-only.
+2. Click **Apply Safe Rows Now** to fill ordinary eligible rows immediately; audit findings remain untouched.
+3. Related audit findings appear as one decision card. Use Jump to inspect each portal row.
+4. Choose **Apply package deduction**, **Approve main only**, **Approve both/all**, or **Hold**. The card calculates each resulting approved amount.
+5. Recommended actions do not require acknowledgement. An acknowledgement is required only for exceptional overrides such as approving every flagged line.
+6. Confirm the selected totals reconcile, then Apply Selected. If the sheet changed after Preview, Apply is blocked.
+7. Use Undo in the same page session or the two-step saved-snapshot recovery after a refresh.
+
+The widget title shows the active manifest version. When claim tools are disabled, an obvious `Claim Extension OFF` badge remains near the portal header while the mascot stays hidden.
+
+### Live browser smoke test
+
+On a process sheet with eligible empty rows, open DevTools, select the Claim Auto-Fill content-script execution context, paste `scripts/live-browser-smoke.js`, and run:
+
+```js
+await runClaimExtensionLiveSmoke()
+```
+
+The smoke test previews, applies only non-high-risk proposals, immediately undoes the fill, and compares every approved/remark control with its original value. It never clicks Submit and throws a blocking error if exact restoration fails.
+
+### Safety and release controls
+
+- Real RGHS process sheets must match the supported header and input mapping before Preview or Apply is allowed.
+- Audit rules carry `schemaVersion`, `version`, and `effectiveDate`; invalid or duplicate rule definitions block claim processing.
+- Fixed unbundling findings reserve both the main package and every separately billed component from ordinary autofill; only the configured target can receive a deduction after explicit high-risk review.
+- `tools/matrix-coverage.json` maps every one of the 47 workbook Risk Matrix rows to executable rules. The build fails if a workbook row, title, or rule mapping drifts.
+- Documentation-dependent upcoding risks (fracture extent, radical hysterectomy, fusion/fixation, burns severity, radiotherapy fractions, multi-trauma extent, cataract/SFIOL technique, and pacemaker/CRT configuration) create review-only proposals even when no second billed component is present.
+- After extension-applied changes, Submit is intercepted until the reviewer acknowledges a final totals summary. The extension never clicks or submits the portal form.
+- The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
+- Use `npm run release -- patch`, `minor`, or `major` to align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256.
+
+### Shadow-mode promotion workflow (flag-only to auto-deduct)
+
+Every deduct-eligible rule ships **flag-only**. Promotion to auto-deduct is a
+data-driven decision backed by auditor feedback:
+
+1. Work claims normally in flag mode. Each flagged row shows ✓ / ✗ buttons:
+   **✓ confirms** the finding was correct; **✗ dismisses** it as a false
+   positive (this also clears the highlight and the rule's remark segment).
+   Verdicts are stored locally per rule in `chrome.storage.local`.
+2. Open **Rules & Stats** from the popup (or the extension's Options page). It
+   lists every bundle rule with its flagged/deducted counts, confirmed/dismissed
+   feedback, and the resulting false-positive rate.
+3. When a rule shows a clean record (FP rate green, meaningful sample size),
+   switch its **Auto-deduct** toggle on. The override is stored in
+   `chrome.storage.sync` and applied over the generated rules at runtime — no
+   rebuild needed. **Reset all overrides** returns to the generated defaults.
+4. Deductions additionally require the popup mode "Flag + auto-deduct",
+   code-confirmed matches, an empty approved field, and the per-sheet safety cap.
+5. For permanent promotion (survives rule regeneration and applies to other
+   machines), also flip `autoDeductEligible` in `tools/rule-curation.json` and
+   run `python tools/generate-audit-rules.py`.
+
+The toolbar icon shows a per-tab badge with the number of open audit findings
+on the current process sheet.
 
 ## Contributing
 

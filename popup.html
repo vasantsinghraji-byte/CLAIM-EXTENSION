@@ -10,18 +10,27 @@
   <div class="container">
     <div class="header">
       <h1>Claim Auto-Fill</h1>
-      <p class="subtitle">Automatically fill approved amounts</p>
+      <p class="subtitle">Review before applying approved amounts</p>
     </div>
 
     <div class="content">
       <div class="toggle-section">
-        <label class="toggle-label">
-          <span>Auto-fill enabled</span>
+        <label class="toggle-label" for="autoFillToggle">
+          <span>Claim tools enabled</span>
           <div class="toggle-switch">
-            <input type="checkbox" id="autoFillToggle" checked>
+            <input type="checkbox" id="autoFillToggle" name="autoFillToggle" checked>
             <span class="slider"></span>
           </div>
         </label>
+      </div>
+
+      <div class="audit-section">
+        <label class="audit-label" for="auditMode">Unbundling audit</label>
+        <select id="auditMode" name="auditMode">
+          <option value="off">Off</option>
+          <option value="flag" selected>Flag only (remarks, no deductions)</option>
+          <option value="deduct">Flag + auto-deduct allowlisted rules</option>
+        </select>
       </div>
 
       <div class="button-section">
@@ -29,8 +38,17 @@
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M13.5 3.5L6 11L2.5 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          Fill Now
+          Preview Fill
         </button>
+        <button id="undoBtn" class="btn btn-secondary" disabled>Undo Last Fill</button>
+        <div class="btn-row">
+          <button id="exportLogBtn" class="btn btn-secondary btn-small">Export Audit Log (CSV)</button>
+          <button id="exportActivityBtn" class="btn btn-secondary btn-small">Export Activity (JSON)</button>
+          <button id="clearLogBtn" class="btn btn-secondary btn-small">Clear Log</button>
+        </div>
+        <div class="btn-row">
+          <button id="rulesStatsBtn" class="btn btn-secondary btn-small">Rules &amp; Stats (promotion)</button>
+        </div>
       </div>
 
       <div id="statusMessage" class="status-message"></div>
@@ -40,17 +58,20 @@
         <ul>
           <li>Extension automatically detects claim and approved amount fields</li>
           <li>Fills empty approved amounts with corresponding claim amounts</li>
-          <li>Works on page load and when new fields appear</li>
-          <li>Click "Fill Now" to manually trigger auto-fill</li>
+          <li>Audit checks bundled packages billed together with their components</li>
+          <li>Flagged rows get an [RGHS-AUDIT] remark and colour highlight</li>
+          <li>Audit flags are screening aids, not automatic rejections &mdash; verify documentation</li>
+          <li>Preview changes before applying; undo while the page remains open</li>
         </ul>
       </div>
     </div>
 
     <div class="footer">
-      <p>Version 1.0.0</p>
+      <p id="versionLabel">Version</p>
     </div>
   </div>
 
+  <script src="audit-core.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
