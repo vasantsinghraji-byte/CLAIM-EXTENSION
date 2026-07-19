@@ -1,115 +1,49 @@
 # Development Guide
 
-## Project Structure
+## Source layout
 
-```
-claim-autofill-extension/
-├── dist/                      # Build output (load this in Chrome)
-├── src/                       # Source code
-│   ├── assets/               # Static assets
-│   │   └── icons/           # Extension icons (16x16, 48x48, 128x128)
-│   ├── content/             # Content scripts (injected into web pages)
-│   │   └── autofill.js     # Main autofill logic
-│   ├── popup/              # Browser action popup
-│   │   ├── popup.html
-│   │   ├── popup.css
-│   │   └── popup.js
-│   ├── utils/              # Shared utility functions (future use)
-│   └── manifest.json       # Extension configuration
-├── build.js                # Build script
-├── package.json            # Project metadata
-└── test-page.html         # Test page for development
-```
+Editable extension files live at the repository root. Generated files live in `dist/` and `claim-autofill-extension.zip`; do not edit generated copies.
 
-## Development Workflow
+- `claim-core.js`: pure calculation, matching, row-planning, and debounce helpers
+- `review-core.js`: deterministic preview fingerprints, reconciliation, expiry, and high-risk Apply gates
+- `content.js`: RGHS DOM integration, dynamic-row observation, and undo state
+- `popup.html`, `popup.css`, `popup.js`: preview/apply/undo interface
+- `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from RGHS styles
 
-### 1. Make changes in the `src/` directory
+Claim Spark is limited to `/RGHS/processSheetSearch/` routes. It starts hidden until the synced Auto-fill setting is read, then follows enabled-state events from the content script.
 
-All source files are in the `src/` folder:
-- Edit `src/content/autofill.js` for autofill logic
-- Edit `src/popup/` files for popup UI
-- Edit `src/manifest.json` for extension configuration
+Production process-sheet routes fail closed when the expected claim table headers or stable approved controls cannot be mapped. Audit rule data is schema-validated before claim processing. Submission acknowledgement only arms the next user-initiated portal Submit; extension code never submits the form.
+Its drag position is clamped to the viewport and stored in `chrome.storage.local` as `claimSparkPosition`. The action panel flips below or right when the mascot is near an edge.
 
-### 2. Build the extension
+## Manual-commit safety contract
 
-```bash
-npm run build
-```
+Page load, route updates, DOM mutations, and enabling the extension must never call `fillAllApprovedAmounts()`. Only the explicit `preview` action may calculate proposed changes, and only the explicit `fillNow` / Claim Spark Apply action may write them. Every manual preview scans the current DOM, so dynamically loaded rows remain supported without automatic mutation.
 
-This copies all files from `src/` to `dist/`.
+Preview tokens are deterministic fingerprints of row keys, current/proposed values, remarks, risks, and reasons. Apply recomputes the preview against the live DOM and blocks stale, expired, empty, unbalanced, or unacknowledged high-risk selections. Recovery snapshots contain only control IDs, before/after values, TID/URL context, timestamp, and extension version; they expire after 24 hours and are capped at 20 entries.
 
-### 3. Load the extension in Chrome
+`tests/fixtures/rghs-process-sheet.html` mirrors the live RGHS hidden-leading/trailing-cell structure. Its integration test covers mapping, normal and medicine proposals, selective reconciliation, Apply validation, and stale-preview detection without requiring a network session.
+- `manifest.json`: permissions and official RGHS origin scope
+- `tests/`: dependency-free Node.js regression tests
+- `test-page.html`: manual browser fixture
 
-1. Open `chrome://extensions/`
-2. Enable "Developer mode" (top right)
-3. Click "Load unpacked"
-4. Select the `dist/` folder
+## Workflow
 
-### 4. Test your changes
+1. Edit the root source files.
+2. Run `npm run check`.
+3. Run `npm run build`.
+4. Load or reload `dist/` at `chrome://extensions/`.
+5. Refresh the RGHS claim page or local `test-page.html` fixture.
 
-- After making changes, run `npm run build` again
-- Click the reload button on the extension in `chrome://extensions/`
-- Refresh the test page or target website
+The build fails when a required production file is missing. It produces a deterministic `claim-autofill-extension.zip` without another dependency.
 
-### 5. Watch mode (optional)
+## Tests
 
-For automatic rebuilding on file changes:
+`npm test` covers normal claims, medicine deduction and whole-rupee rounding, existing approvals, existing remarks, malformed amounts, Indian currency formatting, and debounced dynamic-row processing.
 
-```bash
-# First install dependencies
-npm install
+The RGHS process sheet has hidden leading and trailing data cells that do not align one-for-one with its visible headers. Row mapping therefore anchors to `name="packageFinalAmounts"` / `id="packageFinalAmount_*"` and `id="packageremarks_*"`, with generic header mapping retained for other supported tables.
 
-# Then run watch mode
-npm run watch
-```
+For a release, also verify in a clean RGHS session that controlled inputs accept the `input` and `change` events, preview counts match visible fields, undo restores them, and dynamically inserted rows are filled once.
 
-This will automatically rebuild whenever you save changes to files in `src/`.
+## Security scope
 
-## Testing
-
-### Test Page
-
-Open `test-page.html` in your browser to test the extension with sample data.
-
-### Real Website
-
-Test on the Rajasthan Government Health website or any page with:
-- Tables containing "Claim Amount" and "Approved Amount" columns
-- Input fields for claim and approved amounts
-
-### Debug Logging
-
-Open the browser console (F12) to see detailed debug messages:
-- Table detection
-- Column identification
-- Row processing
-- Input field matching
-
-## Building for Distribution
-
-When ready to distribute:
-
-1. Run `npm run build`
-2. The `dist/` folder contains the complete extension
-3. Zip the `dist/` folder for upload to Chrome Web Store
-
-## File Descriptions
-
-### src/content/autofill.js
-- Main content script injected into web pages
-- Detects claim/approved field pairs
-- Automatically fills approved amounts with claim amounts
-- Three detection strategies:
-  1. Table column headers
-  2. Name/ID attributes
-  3. Inline table structure
-
-### src/popup/
-- Popup UI shown when clicking the extension icon
-- Toggle auto-fill on/off
-- Manual "Fill Now" button
-- Status messages
-
-### build.js
-- Simple Node.js script that copies `src/` to `dist/`
-- No bundling or transpilation needed for this extension
+The extension runs on `https://rghs.rajasthan.gov.in/*`. Local development is limited to `http://localhost/*` and `http://127.0.0.1/*`; serve `test-page.html` from either host. `all_frames` is intentionally omitted because the repository contains no evidence that the claim form is inside a cross-frame document. Add it only after verifying that requirement on the live portal.

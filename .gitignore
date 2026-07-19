@@ -22,3 +22,6 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.bak
+
+# Build artifact (reproducible via npm run build)
+claim-autofill-extension.zip

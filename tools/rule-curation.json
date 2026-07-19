@@ -1,0 +1,529 @@
+{
+  "comment": "Hand-curated rule overlay for the RGHS Healthcare Coding Risk Audit Matrix. This file, not the raw xlsx parse, is the source of truth for codes, name patterns and action classes. Regenerate audit-rules.js with tools/generate-audit-rules.py after editing. Flip autoDeductEligible to true per rule ONLY after shadow-mode validation shows a clean false-positive record.",
+  "bundles": [
+    {
+      "ruleId": "BI-01", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "CBC / Complete Haemogram package", "codes": ["1394"], "patterns": ["complete h(a?)emogram", "\\bcbc\\b", "complete blood count"] },
+      "components": [
+        { "label": "ESR", "codes": ["1392"], "patterns": ["\\besr\\b", "erythrocyte sedimentation"] },
+        { "label": "Peripheral smear", "codes": [], "patterns": ["peripheral (blood )?smear", "peripheral blood film", "\\bpbf\\b"] },
+        { "label": "Haemoglobin", "codes": [], "patterns": ["^(?!.*\\b(?:glycosylated|glycated)\\s+h(a?)emoglobin\\b).*\\bh(a?)emoglobin\\b"] },
+        { "label": "TLC/DLC", "codes": [], "patterns": ["\\btlc\\b", "\\bdlc\\b", "total leucocyte", "differential leucocyte"] },
+        { "label": "Platelet count", "codes": [], "patterns": ["platelet count"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second"],
+      "remarkReason": "Component expressly included in composite CBC package",
+      "reference": "Risk Matrix: Complete haemogram / CBC package (1394 vs 1392)"
+    },
+    {
+      "ruleId": "BI-02", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Kidney Function Test (KFT)", "codes": ["1512"], "patterns": ["kidney function test", "\\bkft\\b", "renal function test", "\\brft\\b"] },
+      "components": [
+        { "label": "Blood urea nitrogen", "codes": ["1446"], "patterns": ["blood urea", "urea nitrogen", "\\bbun\\b"] },
+        { "label": "Serum creatinine", "codes": ["1447"], "patterns": ["creatinine"] },
+        { "label": "Serum sodium", "codes": ["1481"], "patterns": ["serum sodium", "\\bsodium\\b"] },
+        { "label": "Serum potassium", "codes": ["1482"], "patterns": ["potassium"] },
+        { "label": "Chloride", "codes": ["1531"], "patterns": ["chloride"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second"],
+      "remarkReason": "Component included in composite KFT panel",
+      "reference": "Risk Matrix: KFT (1512 vs 1446/1447/1481/1482/1531)"
+    },
+    {
+      "ruleId": "BI-03", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Liver Function Test (LFT)", "codes": ["1513"], "patterns": ["liver function test", "\\blft\\b"] },
+      "components": [
+        { "label": "Serum bilirubin", "codes": ["1456"], "patterns": ["bilirubin"] },
+        { "label": "SGPT/ALT", "codes": ["1475"], "patterns": ["\\bsgpt\\b", "alanine aminotransferase", "\\balt\\b"] },
+        { "label": "SGOT/AST", "codes": ["1476"], "patterns": ["\\bsgot\\b", "aspartate aminotransferase", "\\bast\\b"] },
+        { "label": "Alkaline phosphatase", "codes": ["1494"], "patterns": ["alkaline phosphatase", "\\balp\\b"] },
+        { "label": "Albumin", "codes": ["1461"], "patterns": ["\\balbumin\\b"] },
+        { "label": "Total protein / A:G ratio", "codes": ["1469"], "patterns": ["total protein", "alb/glo", "a:g ratio"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second"],
+      "remarkReason": "Component included in composite LFT panel",
+      "reference": "Risk Matrix: LFT (1513 vs 1456/1475/1476/1494/1461/1469)"
+    },
+    {
+      "ruleId": "BI-04", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Lipid profile", "codes": ["1514"], "patterns": ["lipid profile"] },
+      "components": [
+        { "label": "Serum cholesterol", "codes": ["1463"], "patterns": ["cholesterol"] },
+        { "label": "LDL", "codes": ["1526"], "patterns": ["\\bldl\\b", "low density lipoprotein"] },
+        { "label": "Triglycerides", "codes": ["1487"], "patterns": ["triglyceride"] },
+        { "label": "HDL", "codes": [], "patterns": ["\\bhdl\\b", "high density lipoprotein"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second"],
+      "remarkReason": "Component included in composite lipid profile",
+      "reference": "Risk Matrix: Lipid profile (1514 vs 1463/1526/1487)"
+    },
+    {
+      "ruleId": "BI-05", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Thyroid profile (T3, T4, TSH)", "codes": ["1559"], "patterns": ["t3,? ?t4,? ?tsh", "thyroid profile", "thyroid function test"] },
+      "components": [
+        { "label": "T3", "codes": ["1560"], "patterns": ["triiodothyronine", "\\bt3\\b"] },
+        { "label": "T4", "codes": ["1561"], "patterns": ["tetraiodothyronine", "\\bthyroxine\\b", "\\bt4\\b"] },
+        { "label": "TSH", "codes": ["1562"], "patterns": ["thyroid stimulating hormone", "\\btsh\\b"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second"],
+      "remarkReason": "Total-hormone component included in T3-T4-TSH profile",
+      "reference": "Risk Matrix: Thyroid profile (1559 vs 1560/1561/1562)"
+    },
+    {
+      "ruleId": "BI-05R", "category": "Bundled investigations", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Thyroid profile (T3, T4, TSH)", "codes": ["1559"], "patterns": ["t3,? ?t4,? ?tsh", "thyroid profile"] },
+      "components": [
+        { "label": "Free T3", "codes": ["1821"], "patterns": ["free triiodothyronine", "\\bft3\\b"] },
+        { "label": "Free T4", "codes": ["1822"], "patterns": ["free thyroxine", "\\bft4\\b"] }
+      ],
+      "exceptionKeywords": [],
+      "remarkReason": "Routine free-hormone add-on with thyroid profile - verify specific clinical indication",
+      "reference": "Risk Matrix: Thyroid profile (FT3 1821 / FT4 1822 add-ons)"
+    },
+    {
+      "ruleId": "BI-06", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Bleeding disorder / coagulation panel", "codes": ["1409", "1733"], "patterns": ["bleeding disorder panel", "coagulation profile"] },
+      "components": [
+        { "label": "Prothrombin time", "codes": ["1492"], "patterns": ["prothrombin time"] },
+        { "label": "APTT", "codes": ["1406"], "patterns": ["\\baptt\\b", "partial thromboplastin"] },
+        { "label": "Fibrinogen", "codes": ["1530"], "patterns": ["fibrinogen"] },
+        { "label": "Thrombin time", "codes": [], "patterns": ["thrombin time"] },
+        { "label": "D-dimer/FDP", "codes": [], "patterns": ["d-?dimer", "fibrinogen degradation", "\\bfdp\\b"] }
+      ],
+      "exceptionKeywords": ["repeat", "2nd", "second", "post"],
+      "remarkReason": "Component included in coagulation/bleeding panel",
+      "reference": "Risk Matrix: Bleeding disorder panel (1409/1733 vs 1492/1406/1530)"
+    },
+    {
+      "ruleId": "BI-07", "category": "Bundled investigations", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "ABG with electrolytes", "codes": ["1507"], "patterns": ["blood gas", "\\babg\\b"] },
+      "components": [
+        { "label": "Serum sodium", "codes": ["1481"], "patterns": ["serum sodium"] },
+        { "label": "Serum potassium", "codes": ["1482"], "patterns": ["potassium"] },
+        { "label": "Chloride", "codes": ["1531"], "patterns": ["chloride"] }
+      ],
+      "exceptionKeywords": ["separate sample", "central lab"],
+      "remarkReason": "Electrolytes may already be reported by the ABG analyzer - compare timestamps and samples",
+      "reference": "Risk Matrix: ABG with electrolytes (1507 vs 1481/1482/1531)"
+    },
+    {
+      "ruleId": "BI-08", "category": "Bundled investigations", "risk": "Medium", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Urine routine examination", "codes": ["1383"], "patterns": ["urine routine"] },
+      "components": [
+        { "label": "Urine sugar", "codes": [], "patterns": ["urine sugar"] },
+        { "label": "Urine protein", "codes": [], "patterns": ["urine protein"] },
+        { "label": "Urine microscopy", "codes": [], "patterns": ["urine microscopy"] }
+      ],
+      "exceptionKeywords": ["culture", "cytology", "repeat"],
+      "remarkReason": "Component included in urine routine package",
+      "reference": "Risk Matrix: Urine routine (1383)"
+    },
+    {
+      "ruleId": "BI-09", "category": "Bundled investigations", "risk": "Medium", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Extended lipid profile", "codes": ["1520"], "patterns": ["extended lipid profile"] },
+      "components": [
+        { "label": "Basic lipid profile", "codes": ["1514"], "patterns": ["lipid profile"] },
+        { "label": "Serum cholesterol", "codes": ["1463"], "patterns": ["cholesterol"] },
+        { "label": "LDL", "codes": ["1526"], "patterns": ["\\bldl\\b"] },
+        { "label": "Triglycerides", "codes": ["1487"], "patterns": ["triglyceride"] },
+        { "label": "Apo A1", "codes": [], "patterns": ["apo ?a1"] },
+        { "label": "Apo B", "codes": [], "patterns": ["apo ?b\\b"] },
+        { "label": "Lp(a)", "codes": [], "patterns": ["lp ?\\(a\\)", "lipoprotein ?\\(a\\)"] }
+      ],
+      "exceptionKeywords": ["repeat"],
+      "remarkReason": "Basic profile / advanced marker fully overlaps the extended lipid profile",
+      "reference": "Risk Matrix: Extended lipid profile (1520 vs 1514 and markers)"
+    },
+    {
+      "ruleId": "BI-10", "category": "Bundled investigations", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Thalassemia transfusion/day-care package", "codes": ["1834-MG0121A", "1834-MG0121D"], "patterns": ["thalassemia", "packed cell blood transfusion"] },
+      "components": [
+        { "label": "CBC", "codes": ["1394"], "patterns": ["\\bcbc\\b", "complete h(a?)emogram"] },
+        { "label": "LFT", "codes": ["1513"], "patterns": ["\\blft\\b", "liver function test"] },
+        { "label": "KFT", "codes": ["1512"], "patterns": ["\\bkft\\b", "kidney function test"] },
+        { "label": "Serum ferritin", "codes": [], "patterns": ["ferritin"] },
+        { "label": "Iron chelation medicine", "codes": [], "patterns": ["deferasirox", "deferiprone", "iron chelation"] }
+      ],
+      "exceptionKeywords": ["3 month", "three month"],
+      "remarkReason": "Package text includes routine CBC/LFT/KFT/ferritin and chelation medicine - verify against inclusion schedule",
+      "reference": "Risk Matrix: Thalassemia package (1834-MG0121A/D)"
+    },
+    {
+      "ruleId": "CA-01", "category": "Cardiology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "PTCA package (inclusive of diagnostic angiogram)", "codes": ["2831-MC011A", "544", "545"], "patterns": ["\\bptca\\b", "coronary angioplasty"] },
+      "components": [
+        { "label": "Coronary angiography", "codes": ["601"], "patterns": ["coronary angiograph"] }
+      ],
+      "fixedDeduction": { "amount": 6000, "appliesTo": "bundle" },
+      "exceptionKeywords": ["staged", "different date", "second sitting"],
+      "remarkReason": "PTCA package is inclusive of diagnostic angiogram; Rs.6000 deducted from PTCA when CAG booked separately per package master",
+      "reference": "Risk Matrix: PTCA 2831-MC011A (6000 deducted from 40000 if CAG booked separately)"
+    },
+    {
+      "ruleId": "CA-02", "category": "Cardiology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "CABG package (including intra-operative IABP)", "codes": ["2832-SV004A", "530"], "patterns": ["\\bcabg\\b", "coronary artery bypass"] },
+      "components": [
+        { "label": "IABP", "codes": ["572"], "patterns": ["intra.?aortic balloon", "\\biabp\\b"] }
+      ],
+      "exceptionKeywords": ["pre-op", "pre op", "preoperative", "post-op", "post op", "postoperative", "prolonged"],
+      "remarkReason": "Intra-operative IABP expressly included in CABG package",
+      "reference": "Risk Matrix: CABG 2832-SV004A / 530 vs IABP 572"
+    },
+    {
+      "ruleId": "CA-04", "category": "Cardiology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "EPS with radiofrequency ablation", "codes": ["2831-MC012B"], "patterns": ["radio ?frequency ablation"] },
+      "components": [
+        { "label": "Electrophysiological study", "codes": ["2831-MC012A"], "patterns": ["electrophysiolog", "\\beps\\b"] }
+      ],
+      "exceptionKeywords": ["different date", "staged"],
+      "remarkReason": "Diagnostic EPS duplicated alongside combined EPS+RFA package",
+      "reference": "Risk Matrix: EPS 2831-MC012A vs EPS+RFA 2831-MC012B"
+    },
+    {
+      "ruleId": "GI-01", "category": "Gastroenterology / General Surgery", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "ERCP + stenting/stone removal package", "codes": ["1858-SG103A"], "patterns": ["ercp.*(stent|stone)"] },
+      "components": [
+        { "label": "Stand-alone ERCP", "codes": ["1858-SG0109A", "1624"], "patterns": ["\\bercp\\b"] },
+        { "label": "Endoscopic sphincterotomy", "codes": ["1305"], "patterns": ["sphincterotomy"] },
+        { "label": "CBD stone extraction", "codes": ["1306"], "patterns": ["cbd stone"] },
+        { "label": "Biliary stenting", "codes": ["1308"], "patterns": ["biliary stent"] }
+      ],
+      "exceptionKeywords": ["different date", "repeat"],
+      "remarkReason": "Combined ERCP package expressly includes stenting/stone removal steps",
+      "reference": "Risk Matrix: ERCP 1858-SG103A vs 1858-SG0109A/1624/1305/1306/1308"
+    },
+    {
+      "ruleId": "GI-02", "category": "Gastroenterology / General Surgery", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Cholecystectomy with CBD exploration", "codes": ["1835-SG039B", "1835-SG039D", "442"], "patterns": ["cholecystectomy.*(cbd|bile duct)", "exploration of cbd"] },
+      "components": [
+        { "label": "CBD repair", "codes": ["443"], "patterns": ["repair of common bile duct"] },
+        { "label": "CBD stone extraction", "codes": ["1306"], "patterns": ["cbd stone"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "CBD work already represented in the with-exploration cholecystectomy package",
+      "reference": "Risk Matrix: Cholecystectomy 1835-SG039B/D vs 443/1306"
+    },
+    {
+      "ruleId": "GI-03", "category": "Gastroenterology", "risk": "Medium", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Combined upper + lower GI endoscopy", "codes": ["1281"], "patterns": ["upper gi endoscopy.*lower", "upper.*\\+.*lower gi"] },
+      "components": [
+        { "label": "Upper GI / diagnostic endoscopy", "codes": ["1282"], "patterns": ["upper gi endoscopy", "diagnostic endoscopy", "gastroscopy"] },
+        { "label": "Colonoscopy/ileoscopy", "codes": ["1931"], "patterns": ["colonoscopy", "ileoscopy"] }
+      ],
+      "exceptionKeywords": ["different date", "repeat"],
+      "remarkReason": "Component endoscopy duplicated alongside combined upper+lower package",
+      "reference": "Risk Matrix: 1281 vs 1282/1931"
+    },
+    {
+      "ruleId": "GI-04", "category": "Gastroenterology", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Therapeutic endoscopy (polypectomy / hot biopsy)", "codes": ["654", "1301"], "patterns": ["polypectomy", "hot biopsy"] },
+      "components": [
+        { "label": "Diagnostic scope/biopsy", "codes": ["1282", "1931", "1283", "407"], "patterns": ["diagnostic endoscopy", "colonoscopy", "endoscopic biopsy", "duodenal biopsy"] }
+      ],
+      "exceptionKeywords": ["distinct lesion", "different site"],
+      "remarkReason": "Diagnostic and therapeutic endoscopy components may overlap - verify rate-card and distinct lesions",
+      "reference": "Risk Matrix: 654/1301 vs 407/1283/1931"
+    },
+    {
+      "ruleId": "GI-05", "category": "Gastroenterology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Lower GI bleed package (inclusive of sigmoidoscopy/colonoscopy)", "codes": ["1858-SG100A"], "patterns": ["lower gi bleed"] },
+      "components": [
+        { "label": "Sigmoidoscopy/colonoscopy", "codes": ["1931"], "patterns": ["colonoscopy", "sigmoidoscopy", "ileoscopy"] }
+      ],
+      "exceptionKeywords": ["different date", "repeat"],
+      "remarkReason": "Package name states scope is inclusive - separately billed scope is a direct duplicate",
+      "reference": "Risk Matrix: 1858-SG100A"
+    },
+    {
+      "ruleId": "GI-06", "category": "Gastroenterology / Interventional Radiology", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Palliative radiological/endoscopic intervention package", "codes": ["1849-PM032A", "1836-PM032A"], "patterns": ["palliative radiological"] },
+      "components": [
+        { "label": "ERCP", "codes": ["1624"], "patterns": ["\\bercp\\b"] },
+        { "label": "PTBD", "codes": [], "patterns": ["\\bptbd\\b"] },
+        { "label": "PCN", "codes": [], "patterns": ["\\bpcn\\b", "percutaneous nephrostomy"] },
+        { "label": "DJ stenting", "codes": ["2846-SU033A"], "patterns": ["dj stent"] },
+        { "label": "Pericardiostomy", "codes": [], "patterns": ["pericardiostomy"] }
+      ],
+      "exceptionKeywords": ["different date", "different site"],
+      "remarkReason": "Listed component intervention may already form the palliative package claim - identify which intervention the package covers",
+      "reference": "Risk Matrix: 1849-PM032A / 1836-PM032A"
+    },
+    {
+      "ruleId": "UR-01", "category": "Urology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Cystolithotripsy / urethral stone package (including cystoscopy)", "codes": ["1846-SU041A", "1846-SU041B"], "patterns": ["cystolithotripsy", "urethral stone"] },
+      "components": [
+        { "label": "Cystoscopy", "codes": [], "patterns": ["cystoscopy"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Package expressly includes cystoscopy",
+      "reference": "Risk Matrix: 1846-SU041A/B"
+    },
+    {
+      "ruleId": "UR-02", "category": "Urology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "DJ stenting stand-alone package", "codes": ["2846-SU033A"], "patterns": ["dj stent"] },
+      "components": [
+        { "label": "Cystoscopy", "codes": [], "patterns": ["cystoscopy"] },
+        { "label": "Ureteric catheterization", "codes": [], "patterns": ["ureteric catheteri[sz]ation"] },
+        { "label": "Retrograde pyelogram", "codes": [], "patterns": ["retrograde pyelogram", "\\brgp\\b"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Cystoscopy, ureteric catheterization and RGP expressly included in DJ stenting package",
+      "reference": "Risk Matrix: 2846-SU033A"
+    },
+    {
+      "ruleId": "UR-03", "category": "Urology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Ureteroscopy + stone removal with lithotripsy", "codes": ["1846-SU014A", "1846-SU014B"], "patterns": ["ureteroscopy.*stone", "\\bursl\\b"] },
+      "components": [
+        { "label": "Holmium YAG lithotripsy", "codes": ["901"], "patterns": ["holmium", "yag.*lithotripsy"] },
+        { "label": "Cystoscopy", "codes": [], "patterns": ["cystoscopy"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Lithotripsy/scope steps represented in the combined URSL package",
+      "reference": "Risk Matrix: 1846-SU014A/B vs 901"
+    },
+    {
+      "ruleId": "UR-05", "category": "Urology", "risk": "Medium", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Post-TURBT check cystoscopy with cold-cup biopsy", "codes": ["1846-SU057A"], "patterns": ["post turbt", "check cystoscopy"] },
+      "components": [
+        { "label": "Bladder biopsy", "codes": ["747"], "patterns": ["biopsy of bladder", "bladder biopsy"] },
+        { "label": "Cystoscopy with cold-cup biopsy", "codes": ["893"], "patterns": ["cold.?cup"] },
+        { "label": "Cystoscopy", "codes": [], "patterns": ["cystoscopy"] }
+      ],
+      "exceptionKeywords": ["repeat turbt"],
+      "remarkReason": "Check package already includes cystoscopy and cold-cup biopsy",
+      "reference": "Risk Matrix: 1846-SU057A vs 747/893"
+    },
+    {
+      "ruleId": "UR-06", "category": "Urology", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "PCNL / RIRS stone surgery", "codes": ["2846-SU007A", "903"], "patterns": ["\\bpcnl\\b", "percutaneous nephrolith", "\\brirs\\b", "flexible ureteroscopy"] },
+      "components": [
+        { "label": "Nephrostomy/access", "codes": [], "patterns": ["nephrostomy"] },
+        { "label": "DJ stenting", "codes": ["2846-SU033A"], "patterns": ["dj stent"] },
+        { "label": "Lithotripsy", "codes": ["901"], "patterns": ["lithotripsy"] },
+        { "label": "Cystoscopy", "codes": [], "patterns": ["cystoscopy"] }
+      ],
+      "exceptionKeywords": ["different date", "second tract"],
+      "remarkReason": "Same-session access/scope/stent steps may be fragmented from the stone-surgery package - map to operative timeline",
+      "reference": "Risk Matrix: PCNL/RIRS row"
+    },
+    {
+      "ruleId": "OB-01", "category": "Obstetrics & Gynaecology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Abdominal hysterectomy + salpingo-oophorectomy package", "codes": ["1838-SO010B", "640"], "patterns": ["hysterectomy.*salping"] },
+      "components": [
+        { "label": "Salpingo-oophorectomy", "codes": ["1838-SC030B", "620"], "patterns": ["salping?o.?oophorectomy", "oophorectomy"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Adnexal procedure already represented in the combined hysterectomy variant",
+      "reference": "Risk Matrix: 1838-SO010B vs 1838-SC030B/620"
+    },
+    {
+      "ruleId": "OB-02", "category": "Obstetrics & Gynaecology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Vaginal hysterectomy with pelvic-floor repairs", "codes": ["1838-SO010D", "642"], "patterns": ["vaginal hysterectomy"] },
+      "components": [
+        { "label": "Colpoperineorrhaphy / repair", "codes": [], "patterns": ["colpoperineorrhaphy", "anterior.*posterior repair", "pelvic floor repair"] }
+      ],
+      "exceptionKeywords": ["additional", "distinct"],
+      "remarkReason": "Included prolapse repairs unbundled from vaginal hysterectomy package",
+      "reference": "Risk Matrix: 1838-SO010D / 642"
+    },
+    {
+      "ruleId": "OB-03", "category": "Obstetrics & Gynaecology / Oncology", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Radical hysterectomy package", "codes": ["2838-SC032A", "2838-SC032B", "2838-SC032F", "2838-SC032G", "2838-SO0789RJ"], "patterns": ["radical hysterectomy"] },
+      "components": [
+        { "label": "BPLND / lymphadenectomy", "codes": [], "patterns": ["\\bbplnd\\b", "pelvic lymph", "lymphadenectomy"] },
+        { "label": "Bilateral salpingo-oophorectomy", "codes": ["620"], "patterns": ["salping?o.?oophorectomy"] },
+        { "label": "Omentectomy", "codes": [], "patterns": ["omentectomy"] },
+        { "label": "Peritonectomy", "codes": [], "patterns": ["peritonectomy"] }
+      ],
+      "exceptionKeywords": [],
+      "remarkReason": "Package name bundles oncologic components - match claimed variant to documented organs/nodes",
+      "reference": "Risk Matrix: Radical hysterectomy variants"
+    },
+    {
+      "ruleId": "OB-05", "category": "Obstetrics & Gynaecology", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Diagnostic hystero-laparoscopy / hysteroscopy with biopsy", "codes": ["1838-SO066A", "1838-SO016A"], "patterns": ["hystero.?\\s?-?\\s?laparoscopy", "diagnostic hysteroscopy"] },
+      "components": [
+        { "label": "Hysteroscopy", "codes": ["703"], "patterns": ["hysteroscopy"] },
+        { "label": "Diagnostic laparoscopy", "codes": ["658"], "patterns": ["laparoscopy.*diagnostic", "chromopertubation"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Diagnostic components stacked despite combined package option",
+      "reference": "Risk Matrix: 1838-SO066A/SO016A vs 703/658"
+    },
+    {
+      "ruleId": "EN-01", "category": "ENT", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Adenotonsillectomy package", "codes": ["1833-SL016B"], "patterns": ["adenotonsillectomy"] },
+      "components": [
+        { "label": "Adenoidectomy", "codes": ["1833-SL015A"], "patterns": ["adenoidectomy"] },
+        { "label": "Tonsillectomy", "codes": [], "patterns": ["tonsillectomy"] }
+      ],
+      "exceptionKeywords": [],
+      "remarkReason": "Component procedure included in combined adenotonsillectomy",
+      "reference": "Risk Matrix: 1833-SL016B vs 1833-SL015A"
+    },
+    {
+      "ruleId": "OP-01", "category": "Ophthalmology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "SFIOL package (inclusive of vitrectomy)", "codes": ["2839-SE023A"], "patterns": ["sfiol"] },
+      "components": [
+        { "label": "Vitrectomy", "codes": [], "patterns": ["vitrectomy"] }
+      ],
+      "exceptionKeywords": ["different date", "other eye"],
+      "remarkReason": "SFIOL package expressly includes vitrectomy",
+      "reference": "Risk Matrix: 2839-SE023A"
+    },
+    {
+      "ruleId": "OP-02", "category": "Ophthalmology", "risk": "Medium", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Cataract surgery with IOL", "codes": ["155", "154", "159", "2839-SE020A"], "patterns": ["cataract", "phaco ?emulsification"] },
+      "components": [
+        { "label": "Separate IOL / lens line", "codes": [], "patterns": ["\\biol\\b", "intraocular lens"] }
+      ],
+      "exceptionKeywords": ["cionni", "tension ring"],
+      "remarkReason": "IOL-related service may duplicate the with-IOL cataract package - check device policy",
+      "reference": "Risk Matrix: Cataract 155/154/2839-SE020A"
+    },
+    {
+      "ruleId": "BU-01", "category": "Burns", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Burns management package", "codes": ["2847-BM004C", "2847-BM004D", "2847-BM005A", "2847-BM005B"], "patterns": ["\\bburns?\\b"] },
+      "components": [
+        { "label": "Debridement", "codes": [], "patterns": ["debridement"] },
+        { "label": "Skin grafting", "codes": [], "patterns": ["skin graft"] },
+        { "label": "Flap cover", "codes": [], "patterns": ["flap cover", "flap surgery"] },
+        { "label": "Fasciotomy", "codes": [], "patterns": ["fasciotomy"] },
+        { "label": "Dressings", "codes": [], "patterns": ["dressing"] }
+      ],
+      "exceptionKeywords": ["staged", "different date"],
+      "remarkReason": "Burns package text includes surgical and follow-up components - allow staged surgery only with separate dates and necessity",
+      "reference": "Risk Matrix: Burns packages 2847-BM004C/D, BM005A/B"
+    },
+    {
+      "ruleId": "RO-01", "category": "Radiation Oncology", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
+      "bundle": { "label": "Radiotherapy fraction package (inclusive of simulation & planning)", "codes": ["1844-MR001A", "2844-MR005A", "2844-MR014B"], "patterns": ["external beam radiotherapy", "linear accelerator", "brachytherapy"] },
+      "components": [
+        { "label": "Simulation", "codes": [], "patterns": ["simulation"] },
+        { "label": "Planning", "codes": [], "patterns": ["planning"] },
+        { "label": "OT charges (brachytherapy)", "codes": [], "patterns": ["ot charge"] }
+      ],
+      "exceptionKeywords": ["re-?plan", "replan"],
+      "remarkReason": "Simulation/planning costs expressly included in the radiotherapy package",
+      "reference": "Risk Matrix: 1844-MR001A / 2844-MR005A / 2844-MR014B"
+    },
+    {
+      "ruleId": "NS-01", "category": "Neurosurgery / Orthopaedics", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Laminectomy with fusion and fixation", "codes": ["2837-SN034B", "2840-SN034B"], "patterns": ["laminectomy.*\\bwith\\b.*fusion"] },
+      "components": [
+        { "label": "Laminectomy (without fusion)", "codes": ["1837-SN034A"], "patterns": ["laminectomy"] },
+        { "label": "Spinal fusion", "codes": [], "patterns": ["fusion"] },
+        { "label": "Fixation/instrumentation", "codes": [], "patterns": ["pedicle screw", "fixation"] }
+      ],
+      "exceptionKeywords": [],
+      "remarkReason": "Combined laminectomy+fusion package may be fragmented; implants assessed separately per package wording",
+      "reference": "Risk Matrix: 2837-SN034B / 1837-SN034A"
+    },
+    {
+      "ruleId": "TR-01", "category": "Trauma / Multi-specialty", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Combined multi-trauma package", "codes": ["2835-ST003A", "2835-ST003C", "2835-ST004A", "2835-ST005A"], "patterns": ["craniotomy.*fracture", "chest injury.*fracture", "visceral injury.*fracture"] },
+      "components": [
+        { "label": "Craniotomy / haematoma evacuation", "codes": [], "patterns": ["craniotomy", "evacuation of h(a?)ematoma"] },
+        { "label": "Long-bone fixation", "codes": ["2840-SB010A"], "patterns": ["\\borif\\b", "fixation.*long bone", "nailing", "plating"] }
+      ],
+      "exceptionKeywords": ["different date"],
+      "remarkReason": "Dedicated combined trauma package may duplicate separate specialty procedures",
+      "reference": "Risk Matrix: 2835-ST003A/C, ST004A, ST005A"
+    },
+    {
+      "ruleId": "OR-02", "category": "Orthopaedics / Plastic Surgery", "risk": "High", "action": "review-only", "autoDeductEligible": false,
+      "bundle": { "label": "Internal fixation with flap cover (compound fracture)", "codes": ["2835-ST007A"], "patterns": ["internal fixation.*flap"] },
+      "components": [
+        { "label": "Internal fixation", "codes": [], "patterns": ["internal fixation", "\\borif\\b"] },
+        { "label": "Flap cover", "codes": [], "patterns": ["\\bflap\\b"] },
+        { "label": "Debridement", "codes": [], "patterns": ["debridement"] }
+      ],
+      "exceptionKeywords": ["separate session", "different date"],
+      "remarkReason": "Combined trauma package can be unbundled into fixation, flap and wound-care lines",
+      "reference": "Risk Matrix: 2835-ST007A"
+    }
+  ],
+  "mutuallyExclusive": [
+    { "ruleId": "ME-01", "label": "PTCA with VCD vs without VCD", "risk": "High", "groups": [ { "codes": ["544"], "patterns": ["ptca with vcd"] }, { "codes": ["545"], "patterns": ["ptca without vcd"] } ], "reference": "Risk Matrix: 544/545" },
+    { "ruleId": "ME-02", "label": "Peripheral angioplasty with VCD vs without VCD", "risk": "Medium", "groups": [ { "codes": ["581"], "patterns": ["peripheral angioplasty with vcd"] }, { "codes": ["582"], "patterns": ["peripheral angioplasty without vcd"] } ], "reference": "Risk Matrix: 581/582" },
+    { "ruleId": "ME-03", "label": "Cholecystectomy without vs with CBD exploration", "risk": "High", "groups": [ { "codes": ["1835-SG039A", "1835-SG039C"], "patterns": [] }, { "codes": ["1835-SG039B", "1835-SG039D"], "patterns": [] } ], "reference": "Risk Matrix: 1835-SG039A-D" },
+    { "ruleId": "ME-04", "label": "Laminectomy without vs with fusion", "risk": "High", "groups": [ { "codes": ["1837-SN034A"], "patterns": [] }, { "codes": ["2837-SN034B", "2840-SN034B"], "patterns": [] } ], "reference": "Risk Matrix: laminectomy variants" },
+    { "ruleId": "ME-05", "label": "Hernia repair technique variants (same site)", "risk": "Medium", "groups": [ { "codes": ["504"], "patterns": [] }, { "codes": ["427"], "patterns": [] }, { "codes": ["428"], "patterns": [] } ], "reference": "Risk Matrix: hernia packages 504/427/428" },
+    { "ruleId": "ME-06", "label": "EPS alone vs EPS with RFA", "risk": "High", "groups": [ { "codes": ["2831-MC012A"], "patterns": [] }, { "codes": ["2831-MC012B"], "patterns": [] } ], "reference": "Risk Matrix: 2831-MC012A/B" },
+    { "ruleId": "ME-07", "label": "TURP monopolar vs bipolar", "risk": "Medium", "groups": [ { "codes": ["2846-SU080A"], "patterns": [] }, { "codes": ["2846-SU080B"], "patterns": [] } ], "reference": "Risk Matrix: TURP variants" },
+    { "ruleId": "ME-08", "label": "Cataract technique variants (same eye)", "risk": "Medium", "groups": [ { "codes": ["155"], "patterns": [] }, { "codes": ["154"], "patterns": [] }, { "codes": ["2839-SE020A"], "patterns": [] } ], "reference": "Risk Matrix: cataract packages" },
+    { "ruleId": "ME-09", "label": "Hysterectomy variants", "risk": "High", "groups": [ { "codes": ["1838-SO010A"], "patterns": [] }, { "codes": ["1838-SO010B"], "patterns": [] }, { "codes": ["1838-SO010D"], "patterns": [] } ], "reference": "Risk Matrix: 1838-SO010A/B/D" }
+  ],
+  "addOnDependencies": [
+    { "ruleId": "AD-01", "label": "FFR add-on requires CAG/PTCA base", "risk": "Medium",
+      "addOn": { "codes": ["2831-MC030ARJ", "585", "1795"], "patterns": ["fractional flow reserve", "\\bffr\\b"] },
+      "requiresBase": { "codes": ["601", "544", "545", "2831-MC011A"], "patterns": ["coronary angiograph", "\\bptca\\b"] },
+      "reference": "Risk Matrix: FFR add-on 2831-MC030ARJ" },
+    { "ruleId": "AD-02", "label": "IVUS add-on requires CAG/PTCA base", "risk": "Medium",
+      "addOn": { "codes": ["584", "1831-IN082ARJ"], "patterns": ["intravascular ultrasound", "\\bivus\\b"] },
+      "requiresBase": { "codes": ["601", "544", "545", "2831-MC011A"], "patterns": ["coronary angiograph", "\\bptca\\b"] },
+      "reference": "Risk Matrix: IVUS 584 / 1831-IN082ARJ" },
+    { "ruleId": "AD-03", "label": "Intracoronary OCT requires CAG/PTCA base", "risk": "Medium",
+      "addOn": { "codes": ["1794"], "patterns": ["intracoronary oct", "optical coherence"] },
+      "requiresBase": { "codes": ["601", "544", "545", "2831-MC011A"], "patterns": ["coronary angiograph", "\\bptca\\b"] },
+      "reference": "Risk Matrix: OCT 1794" },
+    { "ruleId": "AD-04", "label": "Temporary pacemaker add-on requires qualifying base procedure", "risk": "Medium",
+      "addOn": { "codes": ["1831-MC014A"], "patterns": ["temporary pacemaker"] },
+      "requiresBase": { "codes": ["560", "561", "562", "2831-MC015A", "2831-MC016A", "530", "2832-SV004A", "601", "544", "545", "2831-MC011A"], "patterns": ["pacemaker implantation", "\\bcabg\\b", "\\bptca\\b", "coronary angiograph"] },
+      "reference": "Risk Matrix: 1831-MC014A add-on" },
+    { "ruleId": "AD-05", "label": "CRT physiological pacemaker add-on requires CRT/DDD base", "risk": "Medium",
+      "addOn": { "codes": ["2831-MC025CRJ"], "patterns": ["crt with physiological pacemaker"] },
+      "requiresBase": { "codes": ["562", "2831-MC016A", "561"], "patterns": ["biventricular", "dd?d pacemaker", "dual chamber"] },
+      "reference": "Risk Matrix: 2831-MC025CRJ add-on" }
+  ],
+  "combinedAvailable": [
+    { "ruleId": "CB-01", "label": "CABG + valve billed separately (combined package exists)", "risk": "High",
+      "components": [ { "codes": ["530", "2832-SV004A"], "patterns": ["\\bcabg\\b", "coronary artery bypass"] }, { "codes": ["2832-SV005A", "2832-SV006A", "2832-SV007A"], "patterns": ["valve replacement", "valve procedure", "valve repair"] } ],
+      "combined": { "codes": ["531"], "patterns": ["cabg.*valve"] },
+      "reference": "Risk Matrix: 531 CABG+Valve" },
+    { "ruleId": "CB-02", "label": "TURP + cystolithotripsy billed separately (combined code 866 exists)", "risk": "High",
+      "components": [ { "codes": ["2846-SU080A", "2846-SU080B", "865"], "patterns": ["\\bturp\\b"] }, { "codes": ["1846-SU041A"], "patterns": ["cystolithotripsy"] } ],
+      "combined": { "codes": ["866"], "patterns": ["turp.*cystolithotripsy"] },
+      "reference": "Risk Matrix: 866" },
+    { "ruleId": "CB-03", "label": "Caesarean + hysterectomy billed separately (caesarean-hysterectomy package exists)", "risk": "High",
+      "components": [ { "codes": ["1838-SO057A"], "patterns": ["c(a?)esarean"] }, { "codes": ["640", "1838-SO010A"], "patterns": ["hysterectomy"] } ],
+      "combined": { "codes": ["1838-SO011A"], "patterns": ["c(a?)esarean hysterectomy"] },
+      "reference": "Risk Matrix: 1838-SO011A" },
+    { "ruleId": "CB-04", "label": "Upper + lower GI endoscopy billed separately (combined code 1281 exists)", "risk": "Medium",
+      "components": [ { "codes": ["1282"], "patterns": ["upper gi endoscopy", "gastroscopy"] }, { "codes": ["1931"], "patterns": ["colonoscopy", "ileoscopy"] } ],
+      "combined": { "codes": ["1281"], "patterns": ["upper gi endoscopy.*lower"] },
+      "reference": "Risk Matrix: 1281" },
+    { "ruleId": "CB-05", "label": "Hysterectomy + salpingo-oophorectomy billed separately (combined variant exists)", "risk": "High",
+      "components": [ { "codes": ["1838-SO010A"], "patterns": ["abdominal hysterectomy"] }, { "codes": ["620", "1838-SC030B"], "patterns": ["salping?o.?oophorectomy"] } ],
+      "combined": { "codes": ["1838-SO010B", "640"], "patterns": ["hysterectomy.*salping"] },
+      "reference": "Risk Matrix: 1838-SO010B" },
+    { "ruleId": "CB-06", "label": "Craniotomy + long-bone fixation billed separately (combined trauma package exists)", "risk": "High",
+      "components": [ { "codes": [], "patterns": ["craniotomy", "evacuation of h(a?)ematoma"] }, { "codes": ["2840-SB010A"], "patterns": ["\\borif\\b", "fixation of diaphyseal"] } ],
+      "combined": { "codes": ["2835-ST003A", "2835-ST003C"], "patterns": ["craniotomy.*fracture"] },
+      "reference": "Risk Matrix: 2835-ST003A/C" }
+  ],
+  "adjunctClusters": [
+    { "ruleId": "AJ-01", "label": "Multiple intracoronary adjuncts in one session (IVUS/FFR/OCT)", "risk": "Medium", "minDistinct": 2,
+      "members": [
+        { "label": "IVUS", "codes": ["584", "1831-IN082ARJ"], "patterns": ["intravascular ultrasound", "\\bivus\\b"] },
+        { "label": "FFR", "codes": ["585", "1795", "2831-MC030ARJ"], "patterns": ["fractional flow reserve", "\\bffr\\b"] },
+        { "label": "OCT", "codes": ["1794"], "patterns": ["intracoronary oct", "optical coherence"] }
+      ],
+      "reference": "Risk Matrix: IVUS/FFR/OCT adjuncts" }
+  ],
+  "reviewTriggers": [
+    { "ruleId": "UP-01", "label": "Fracture fixation extent / ORIF complexity", "risk": "High", "category": "Orthopaedics", "entity": { "codes": ["2840-SB010A", "2840-SB014A", "2840-SB016A", "2840-SB020A"], "patterns": ["\\borif\\b", "fracture.*fixation", "bimalleolar", "trimalleolar"] }, "reason": "Verify documented anatomy, laterality, fracture count and fixation complexity before approving the selected package", "reference": "Risk Matrix row 41: ORIF / fracture fixation packages" },
+    { "ruleId": "UP-02", "label": "Radical hysterectomy documented extent", "risk": "High", "category": "Obstetrics & Gynaecology / Oncology", "entity": { "codes": ["2838-SC032A", "2838-SC032B", "2838-SC032F", "2838-SC032G", "2838-SO0789RJ"], "patterns": ["radical hysterectomy"] }, "reason": "Verify class, nodes, organs and documented surgical extent; downcode unsupported higher-value variants", "reference": "Risk Matrix row 38: Radical hysterectomy packages" },
+    { "ruleId": "UP-03", "label": "Laminectomy with fusion/fixation documentation", "risk": "High", "category": "Neurosurgery / Orthopaedics", "entity": { "codes": ["2837-SN034B", "2840-SN034B"], "patterns": ["laminectomy.*fusion", "laminectomy.*fixation"] }, "reason": "Verify decompression, fusion levels and instrumentation; implant eligibility is separate from procedural upcoding", "reference": "Risk Matrix row 43: Laminectomy with fusion and fixation" },
+    { "ruleId": "UP-04", "label": "Burns severity and included-procedure extent", "risk": "High", "category": "Burns", "entity": { "codes": ["2847-BM004C", "2847-BM004D", "2847-BM005A", "2847-BM005B"], "patterns": ["electrical contact burns", "chemical burns"] }, "reason": "Verify TBSA, limb loss, graft/flap extent and staged dates against the claimed severity package", "reference": "Risk Matrix row 47: Burns management packages" },
+    { "ruleId": "UP-05", "label": "Radiotherapy fraction and inclusion validation", "risk": "High", "category": "Radiation Oncology", "entity": { "codes": ["1844-MR001A", "2844-MR005A", "2844-MR014B"], "patterns": ["radiotherapy.*fractions", "brachytherapy.*doses"] }, "reason": "Reconcile fractions/doses to machine logs and verify simulation, planning and OT inclusions", "reference": "Risk Matrix row 48: Radiotherapy fraction packages" },
+    { "ruleId": "UP-06", "label": "Combined multi-trauma documented extent", "risk": "High", "category": "Trauma / Multi-specialty", "entity": { "codes": ["2835-ST003A", "2835-ST003C", "2835-ST004A", "2835-ST005A"], "patterns": ["craniotomy.*fracture", "chest injury.*fracture", "visceral injury.*fracture"] }, "reason": "Verify the number of long bones and each included major procedure against operative records", "reference": "Risk Matrix row 44: Combined multi-trauma packages" },
+    { "ruleId": "UP-07", "label": "Cataract/SFIOL technique and device validation", "risk": "High", "category": "Ophthalmology", "entity": { "codes": ["154", "155", "159", "2839-SE020A", "2839-SE023A"], "patterns": ["cataract.*iol", "sfiol"] }, "reason": "Verify technique, eye/laterality, IOL documentation and included vitrectomy before approval", "reference": "Risk Matrix row 46: Cataract surgery with IOL / SFIOL" },
+    { "ruleId": "UP-08", "label": "Pacemaker/CRT/AICD device configuration", "risk": "Medium", "category": "Cardiology", "entity": { "codes": ["560", "561", "562", "2831-MC015A", "2831-MC016A", "2831-MC025CRJ"], "patterns": ["pacemaker implantation", "\\bcrt\\b", "\\baicd\\b"] }, "reason": "Verify chamber/device configuration, generator/leads, implant invoice and base-package dependency", "reference": "Risk Matrix row 20: Permanent pacemaker / CRT / AICD implantation" }
+  ],
+  "settings": {
+    "duplicateAutoDeductEligible": false,
+    "maxAutoDeductionTotal": 10000,
+    "maxAutoDeductionLines": 5
+  }
+}

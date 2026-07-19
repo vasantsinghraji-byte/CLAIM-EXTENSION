@@ -1,13 +1,54 @@
 // Content script for auto-filling approved amounts with claim amounts
 
+const AUDIT_MODES = ['off', 'flag', 'deduct'];
+
 let isAutoFillEnabled = true;
-let observer = null;
+let auditMode = 'flag';
+let ruleOverrides = {};
+let undoBatch = [];
+let lastPreview = null;
+let previewRowElements = new Map();
+let lastAppliedSummary = null;
+let submitArmedUntil = 0;
+const Core = globalThis.ClaimAutoFillCore;
+const Audit = globalThis.RGHSAuditCore;
+const AuditRules = globalThis.RGHSAuditRules;
+const Review = globalThis.ClaimReviewCore;
+const ruleSetValidation = Audit && AuditRules && Audit.validateRuleSet
+  ? Audit.validateRuleSet(AuditRules)
+  : { ok: false, errors: ['Audit rule engine is unavailable'] };
+const APPLIED_SESSION_KEY = 'claimExtensionAppliedSummary';
 
 // Load settings from storage
-chrome.storage.sync.get(['autoFillEnabled'], (result) => {
-  isAutoFillEnabled = result.autoFillEnabled !== false; // Default to true
-  if (isAutoFillEnabled) {
-    startObserving();
+chrome.storage.sync.get(['autoFillEnabled', 'auditMode', 'ruleOverrides'], (result) => {
+  isAutoFillEnabled = result.autoFillEnabled !== false;
+  auditMode = AUDIT_MODES.includes(result.auditMode) ? result.auditMode : 'flag';
+  ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' ? result.ruleOverrides : {};
+  window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
+    detail: { enabled: isAutoFillEnabled }
+  }));
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'sync') return;
+
+  if (changes.auditMode) {
+    auditMode = AUDIT_MODES.includes(changes.auditMode.newValue) ? changes.auditMode.newValue : 'flag';
+  }
+
+  if (changes.ruleOverrides) {
+    ruleOverrides = changes.ruleOverrides.newValue && typeof changes.ruleOverrides.newValue === 'object'
+      ? changes.ruleOverrides.newValue
+      : {};
+  }
+
+  if (changes.autoFillEnabled) {
+    const enabled = changes.autoFillEnabled.newValue !== false;
+    if (enabled === isAutoFillEnabled) return;
+    isAutoFillEnabled = enabled;
+    window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
+      detail: { enabled: isAutoFillEnabled }
+    }));
   }
 });
 
@@ -15,289 +56,1022 @@ chrome.storage.sync.get(['autoFillEnabled'], (result) => {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'toggleAutoFill') {
     isAutoFillEnabled = request.enabled;
-    if (isAutoFillEnabled) {
-      startObserving();
-      fillAllApprovedAmounts();
-    } else {
-      stopObserving();
-    }
+    window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
+      detail: { enabled: isAutoFillEnabled }
+    }));
     sendResponse({ success: true });
   } else if (request.action === 'fillNow') {
-    const count = fillAllApprovedAmounts();
-    sendResponse({ success: true, count: count });
+    const result = applyReviewedPreview(request);
+    sendResponse({ success: true, ...result });
+  } else if (request.action === 'preview') {
+    const result = createReviewedPreview();
+    sendResponse({ success: true, ...result, hasUndo: undoBatch.length > 0 });
+  } else if (request.action === 'undo') {
+    const count = undoLastFill();
+    if (count > 0) {
+      sendResponse({ success: true, count });
+    } else {
+      restorePersistentSnapshot().then(result => sendResponse({ success: true, ...result }));
+    }
   } else if (request.action === 'getStatus') {
-    sendResponse({ enabled: isAutoFillEnabled });
+    hasPersistentRecovery(hasRecovery => {
+      sendResponse({ enabled: isAutoFillEnabled, auditMode, hasUndo: undoBatch.length > 0, hasRecovery });
+    });
   }
   return true;
 });
 
-// Function to find claim and approved amount field pairs
-function findAmountPairs() {
-  const pairs = [];
+// Helper to find any editable element inside a cell
+function findEditableElement(cell) {
+  if (!cell) return null;
 
-  // Strategy 1: Find by column headers (most reliable for tabular data)
-  const tables = document.querySelectorAll('table');
-  console.log(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
+  const input = cell.querySelector('input[type="text"], input[type="number"], input:not([type])');
+  if (input) return input;
 
-  tables.forEach((table, tableIndex) => {
-    // Find header row and identify column indices
-    const headerRows = table.querySelectorAll('thead tr, tr');
-    let claimColumnIndex = -1;
-    let approvedColumnIndex = -1;
+  const textarea = cell.querySelector('textarea');
+  if (textarea) return textarea;
 
-    console.log(`[Claim Auto-Fill] Table ${tableIndex + 1}: Found ${headerRows.length} potential header rows`);
+  const select = cell.querySelector('select');
+  if (select) return select;
 
-    // Search for header row with "Claim Amount" and "Approved Amount"
-    for (let headerRow of headerRows) {
-      const headers = headerRow.querySelectorAll('th, td');
-      console.log(`[Claim Auto-Fill] Table ${tableIndex + 1}: Checking row with ${headers.length} headers`);
+  const editable = cell.querySelector('[contenteditable="true"], [contenteditable=""]');
+  if (editable) return editable;
 
-      headers.forEach((header, index) => {
-        const text = header.textContent.toLowerCase().trim();
-        // Remove parentheses and their content for easier matching
-        const cleanText = text.replace(/\([^)]*\)/g, '').trim();
+  const anyInput = cell.querySelector('input');
+  if (anyInput) return anyInput;
 
-        console.log(`[Claim Auto-Fill] Header ${index}: "${text}" (clean: "${cleanText}")`);
+  const ngModel = cell.querySelector('[ng-model], [ng-bind], [formcontrolname], [data-bind]');
+  if (ngModel) return ngModel;
 
-        // Match "Claim Amount" or similar (with or without Rs., parentheses, etc.)
-        if ((text.includes('claim') && text.includes('amount')) ||
-            (cleanText.includes('claim') && cleanText.includes('amount')) ||
-            text.match(/claim.*amount/i)) {
-          claimColumnIndex = index;
-          console.log(`[Claim Auto-Fill] ✓ Found Claim column at index ${index}`);
-        }
+  return null;
+}
 
-        // Match "Approved Amount" or similar (with or without Rs., parentheses, etc.)
-        if ((text.includes('approved') && text.includes('amount')) ||
-            (cleanText.includes('approved') && cleanText.includes('amount')) ||
-            text.match(/approved.*amount/i) ||
-            text.match(/sanctioned.*amount/i)) {
-          approvedColumnIndex = index;
-          console.log(`[Claim Auto-Fill] ✓ Found Approved column at index ${index}`);
-        }
-      });
+// Helper to get value from any element (input or plain cell)
+function getElementValue(el) {
+  if (!el) return '';
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+    return el.value || '';
+  }
+  if (el.hasAttribute && el.hasAttribute('contenteditable')) {
+    return el.textContent.trim();
+  }
+  return el.value || el.textContent.trim();
+}
 
-      // If we found both columns, stop searching
-      if (claimColumnIndex !== -1 && approvedColumnIndex !== -1) {
-        console.log(`[Claim Auto-Fill] ✓ Found both columns - Claim: ${claimColumnIndex}, Approved: ${approvedColumnIndex}`);
+// Helper to set value on any element
+function setElementValue(el, value) {
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (nativeSetter && nativeSetter.set) {
+      nativeSetter.set.call(el, value);
+    } else {
+      el.value = value;
+    }
+  } else if (el.tagName === 'SELECT') {
+    el.value = value;
+  } else {
+    el.textContent = value;
+  }
+
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+// Set value on a cell or its editable child
+function setCellValue(cell, value, batch) {
+  const editableEl = findEditableElement(cell);
+  if (editableEl) {
+    batch.push({ element: editableEl, value: getElementValue(editableEl) });
+    setElementValue(editableEl, value);
+  } else {
+    batch.push({ element: cell, value: cell.textContent });
+    cell.textContent = value;
+    cell.dispatchEvent(new Event('input', { bubbles: true }));
+    cell.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+}
+
+// Get value from a cell or its editable child
+function getCellValue(cell) {
+  const editableEl = findEditableElement(cell);
+  return editableEl ? getElementValue(editableEl).trim() : cell.textContent.trim();
+}
+
+// Check if a particular text matches medicine categories
+function collectTables(roots) {
+  const tables = new Set();
+  for (const root of roots) {
+    if (!root || root.nodeType !== Node.ELEMENT_NODE && root !== document) continue;
+    if (root.matches && root.matches('table')) tables.add(root);
+    const parentTable = root.closest && root.closest('table');
+    if (parentTable) tables.add(parentTable);
+    if (root.querySelectorAll) root.querySelectorAll('table').forEach(table => tables.add(table));
+  }
+  return [...tables];
+}
+
+function collectInputs(roots) {
+  const selector = 'input[type="text"], input[type="number"], input:not([type]), textarea';
+  const inputs = new Set();
+  for (const root of roots) {
+    if (!root || root.nodeType !== Node.ELEMENT_NODE && root !== document) continue;
+    const scope = root === document ? document : root.closest('tr, div, form, fieldset') || root;
+    if (scope.matches && scope.matches(selector)) inputs.add(scope);
+    if (scope.querySelectorAll) scope.querySelectorAll(selector).forEach(input => inputs.add(input));
+  }
+  return [...inputs];
+}
+
+function inspectPortalLayout() {
+  const tables = [...document.querySelectorAll('table')].map(table => {
+    const rows = [...table.querySelectorAll('tr')];
+    let header = null;
+    let indices = null;
+    for (const row of rows) {
+      const labels = [...row.querySelectorAll('th, td')].map(cell => cell.textContent.toLowerCase().trim());
+      const candidate = {
+        particular: labels.findIndex(text => text === 'particular' || text === 'particulars'),
+        claim: labels.findIndex(text => text.includes('claim') && (text.includes('amount') || text.includes('amt'))),
+        approved: labels.findIndex(text => (text.includes('approved') || text.includes('sanctioned')) && (text.includes('amount') || text.includes('amt'))),
+        remarks: labels.findIndex(text => text === 'remarks' || text === 'remark')
+      };
+      if (candidate.claim >= 0 && candidate.approved >= 0) {
+        header = row;
+        indices = candidate;
         break;
       }
     }
 
-    // If we found column headers, process data rows
-    if (claimColumnIndex !== -1 && approvedColumnIndex !== -1) {
-      console.log(`[Claim Auto-Fill] Found columns - Claim: ${claimColumnIndex}, Approved: ${approvedColumnIndex}`);
-      const dataRows = table.querySelectorAll('tbody tr, tr');
-      console.log(`[Claim Auto-Fill] Found ${dataRows.length} data rows to process`);
+    const controls = [...table.querySelectorAll('[name="packageFinalAmounts"], [id^="packageFinalAmount_"]')];
+    let mappedApprovedControls = 0;
+    let invalidMappings = 0;
+    if (header && indices) {
+      const headerCellCount = header.querySelectorAll('th, td').length;
+      for (const control of controls) {
+        const row = control.closest('tr');
+        const cells = row ? [...row.querySelectorAll('td, th')] : [];
+        const approvedControlIdx = cells.findIndex(cell => cell.contains(control));
+        const resolved = Core.resolveRowColumnIndices({
+          cellCount: cells.length,
+          headerCellCount,
+          particularIdx: indices.particular,
+          claimIdx: indices.claim,
+          approvedIdx: indices.approved,
+          remarksIdx: indices.remarks,
+          approvedControlIdx
+        });
+        if (row && approvedControlIdx >= 0 && resolved.claimIdx >= 0 && resolved.claimIdx < cells.length) mappedApprovedControls++;
+        else invalidMappings++;
+      }
+    }
 
-      dataRows.forEach((row, rowIndex) => {
-        const cells = row.querySelectorAll('td, th');
-        console.log(`[Claim Auto-Fill] Row ${rowIndex + 1}: Has ${cells.length} cells`);
+    return {
+      hasRequiredHeaders: Boolean(header && indices && indices.particular >= 0 && indices.claim >= 0 && indices.approved >= 0 && indices.remarks >= 0),
+      dataRows: controls.length,
+      approvedControls: controls.length,
+      mappedApprovedControls,
+      invalidMappings
+    };
+  });
+  return Core.validatePortalLayoutDescriptor({ pathname: location.pathname, tables });
+}
 
-        // Make sure this row has enough cells
-        if (cells.length > Math.max(claimColumnIndex, approvedColumnIndex)) {
-          const claimCell = cells[claimColumnIndex];
-          const approvedCell = cells[approvedColumnIndex];
+function blockedFillResult(reason, details = []) {
+  return {
+    blocked: true,
+    blockReason: reason,
+    blockDetails: details,
+    count: 0,
+    approvedCount: 0,
+    remarksCount: 0,
+    auditFlagged: 0,
+    auditDeducted: 0,
+    proposals: [],
+    rowElements: new Map()
+  };
+}
 
-          // Find inputs in these cells
-          const claimInput = claimCell ? claimCell.querySelector('input[type="text"], input[type="number"], input:not([type])') : null;
-          const approvedInput = approvedCell ? approvedCell.querySelector('input[type="text"], input[type="number"], input:not([type])') : null;
+// Fill all approved amounts on the page
+function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowKeys = null, approvedOverrides = {} } = {}) {
+  if (!isAutoFillEnabled && apply) {
+    return { count: 0, approvedCount: 0, remarksCount: 0, auditFlagged: 0, auditDeducted: 0 };
+  }
 
-          console.log(`[Claim Auto-Fill] Row ${rowIndex + 1}: Claim input=${!!claimInput}, Approved input=${!!approvedInput}`);
+  if (location.pathname.startsWith('/RGHS/processSheetSearch/')) {
+    const layout = inspectPortalLayout();
+    if (!layout.ok) return blockedFillResult('unsupported-layout', [layout.reason]);
+    if (!ruleSetValidation.ok) return blockedFillResult('invalid-rule-set', ruleSetValidation.errors);
+  }
 
-          if (claimInput && approvedInput && claimInput !== approvedInput) {
-            pairs.push({ claim: claimInput, approved: approvedInput });
-            console.log(`[Claim Auto-Fill] ✓ Added pair from row ${rowIndex + 1}`);
-          }
-        } else {
-          console.log(`[Claim Auto-Fill] Row ${rowIndex + 1}: Not enough cells (need > ${Math.max(claimColumnIndex, approvedColumnIndex)})`);
+  console.log('[Claim Auto-Fill] Starting auto-fill process...');
+
+  let approvedCount = 0;
+  let remarksCount = 0;
+  let auditFlagged = 0;
+  let auditDeducted = 0;
+  const auditLogEntries = [];
+  const batch = [];
+  const proposals = [];
+  const rowElements = new Map();
+  const tables = collectTables(roots);
+  console.log(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
+
+  tables.forEach((table, tableIndex) => {
+    const allRows = table.querySelectorAll('tr');
+    let headerRow = null;
+    let headerCellCount = 0;
+    let particularIdx = -1;
+    let packageIdx = -1;
+    let rateIdx = -1;
+    let unitIdx = -1;
+    let dateIdx = -1;
+    let claimIdx = -1;
+    let approvedIdx = -1;
+    let remarksIdx = -1;
+
+    // Find header row
+    for (let row of allRows) {
+      const cells = row.querySelectorAll('th, td');
+      for (let i = 0; i < cells.length; i++) {
+        const text = cells[i].textContent.toLowerCase().trim();
+
+        if (text === 'particular' || text === 'particulars') {
+          particularIdx = i;
         }
+        if (text.includes('package') && (text.includes('code') || text.includes('name'))) {
+          packageIdx = i;
+        }
+        if (text === 'rate' || text.startsWith('rate ')) {
+          rateIdx = i;
+        }
+        if (text.includes('unit') || text.includes('hours') || text.includes('days')) {
+          unitIdx = i;
+        }
+        if (text.includes('date') && !text.includes('update')) {
+          dateIdx = i;
+        }
+        if ((text.includes('claim') && text.includes('amount')) || text.match(/claim.*amt/i)) {
+          claimIdx = i;
+        }
+        if ((text.includes('approved') && text.includes('amount')) ||
+            text.match(/approved.*amt/i) ||
+            (text.includes('sanctioned') && text.includes('amount'))) {
+          approvedIdx = i;
+        }
+        if (text === 'remarks' || text === 'remark') {
+          remarksIdx = i;
+        }
+      }
+
+      if (claimIdx !== -1 && approvedIdx !== -1) {
+        headerRow = row;
+        headerCellCount = cells.length;
+        console.log(`[Claim Auto-Fill] Header found: Particular@${particularIdx}, Package@${packageIdx}, Claim@${claimIdx}, Approved@${approvedIdx}, Remarks@${remarksIdx} (${headerCellCount} cells)`);
+        break;
+      } else {
+        particularIdx = -1;
+        packageIdx = -1;
+        rateIdx = -1;
+        unitIdx = -1;
+        dateIdx = -1;
+        claimIdx = -1;
+        approvedIdx = -1;
+        remarksIdx = -1;
+      }
+    }
+
+    if (!headerRow) return;
+
+    // First pass: collect data rows after the header into records
+    const records = [];
+    let foundHeader = false;
+    let dataRowNum = 0;
+
+    for (let row of allRows) {
+      if (!foundHeader) {
+        if (row === headerRow) foundHeader = true;
+        continue;
+      }
+
+      const cells = row.querySelectorAll('td, th');
+      dataRowNum++;
+
+      const approvedControl = row.querySelector('[name="packageFinalAmounts"], [id^="packageFinalAmount_"]');
+      const remarksControl = row.querySelector('[id^="packageremarks_"]');
+      const approvedControlIdx = approvedControl ? [...cells].findIndex(cell => cell.contains(approvedControl)) : -1;
+      const remarksControlIdx = remarksControl ? [...cells].findIndex(cell => cell.contains(remarksControl)) : -1;
+      const resolved = Core.resolveRowColumnIndices({
+        cellCount: cells.length,
+        headerCellCount,
+        particularIdx,
+        claimIdx,
+        approvedIdx,
+        remarksIdx,
+        approvedControlIdx,
+        remarksControlIdx
+      });
+      const adjClaimIdx = resolved.claimIdx;
+      const adjApprovedIdx = resolved.approvedIdx;
+      const adjParticularIdx = resolved.particularIdx;
+      const adjRemarksIdx = resolved.remarksIdx;
+      const offset = adjClaimIdx - claimIdx;
+      const adjPackageIdx = packageIdx !== -1 ? packageIdx + offset : -1;
+      const adjRateIdx = rateIdx !== -1 ? rateIdx + offset : -1;
+      const adjUnitIdx = unitIdx !== -1 ? unitIdx + offset : -1;
+      const adjDateIdx = dateIdx !== -1 ? dateIdx + offset : -1;
+
+      if (cells.length <= Math.max(adjClaimIdx, adjApprovedIdx)) continue;
+
+      const claimCell = cells[adjClaimIdx];
+      const approvedCell = cells[adjApprovedIdx];
+      if (!claimCell || !approvedCell) continue;
+
+      const particularText = adjParticularIdx !== -1 && adjParticularIdx < cells.length
+        ? cells[adjParticularIdx].textContent
+        : '';
+      const packageText = adjPackageIdx !== -1 && adjPackageIdx < cells.length
+        ? cells[adjPackageIdx].textContent
+        : '';
+      const rateValue = adjRateIdx !== -1 && adjRateIdx < cells.length ? getCellValue(cells[adjRateIdx]) : '';
+      const unitValue = adjUnitIdx !== -1 && adjUnitIdx < cells.length ? getCellValue(cells[adjUnitIdx]) : '';
+      const dateValue = adjDateIdx !== -1 && adjDateIdx < cells.length ? getCellValue(cells[adjDateIdx]) : '';
+      const remarksCell = adjRemarksIdx !== -1 && adjRemarksIdx < cells.length ? cells[adjRemarksIdx] : null;
+
+      records.push({
+        rowEl: row,
+        index: dataRowNum,
+        claimCell,
+        approvedCell,
+        remarksCell,
+        claimValue: getCellValue(claimCell),
+        approvedValue: getCellValue(approvedCell),
+        particularText,
+        packageText,
+        rateValue,
+        unitValue,
+        dateValue,
+        remarksValue: remarksCell ? getCellValue(remarksCell) : ''
       });
     }
+
+    // Second pass: audit for unbundling/duplicates before any auto-fill
+    const auditedRows = new Set();
+    if (Audit && AuditRules && auditMode !== 'off' && records.length > 0) {
+      const lines = records.map(record => ({
+        index: record.index,
+        particularText: record.particularText,
+        packageText: record.packageText,
+        claimValue: record.claimValue,
+        approvedValue: record.approvedValue,
+        remarksValue: record.remarksValue,
+        rateValue: record.rateValue,
+        unitValue: record.unitValue,
+        dateValue: record.dateValue
+      }));
+      const effectiveRules = Audit.applyRuleOverrides(AuditRules, ruleOverrides);
+      const findings = Audit.analyzeClaim(lines, effectiveRules);
+      const { rowActions } = Audit.planAuditActions(findings, lines, {
+        mode: auditMode,
+        settings: effectiveRules.settings
+      });
+
+      const actionsByRow = new Map();
+      for (const action of rowActions) {
+        if (!actionsByRow.has(action.rowIndex)) actionsByRow.set(action.rowIndex, []);
+        actionsByRow.get(action.rowIndex).push(action);
+      }
+
+      const context = { url: location.href, tid: findTid(), mode: auditMode };
+      for (const [rowIndex, actions] of actionsByRow) {
+        const record = records.find(r => r.index === rowIndex);
+        if (!record) continue;
+        auditedRows.add(rowIndex);
+
+        const deductAction = actions.find(action => action.setApproved !== null);
+        const reviewedApproval = deductAction ? null : Core.planRowUpdate({
+          claimValue: record.claimValue,
+          approvedValue: record.approvedValue,
+          particularText: record.particularText,
+          remarksValue: record.remarksValue
+        }).approvedValue;
+        const key = `table-${tableIndex}-row-${record.index}`;
+        const primaryFinding = actions[0]?.finding;
+        const isMain = actions.some(action => action.finding?.bundleRow?.index === record.index);
+        const isPrimary = actions.some(action => action.finding?.firstRow?.index === record.index);
+        const isComponent = actions.some(action =>
+          action.finding?.componentRow?.index === record.index ||
+          action.finding?.components?.some(component => component.index === record.index) ||
+          action.finding?.duplicateRows?.some(row => row.index === record.index));
+        let recommendedApproved = null;
+        if (primaryFinding?.type === 'UNBUNDLING_FIXED') {
+          recommendedApproved = isMain
+            ? Math.max(0, (Core.parseAmount(record.claimValue) || 0) - primaryFinding.fixedDeduction.amount)
+            : 0;
+        } else if (primaryFinding?.type === 'UNBUNDLING') {
+          recommendedApproved = isMain ? Core.parseAmount(record.claimValue) || 0 : 0;
+        } else if (primaryFinding?.type === 'DUPLICATE') {
+          recommendedApproved = isPrimary ? Core.parseAmount(record.claimValue) || 0 : 0;
+        }
+        const decisionRole = isMain ? 'main' : isPrimary ? 'primary' : isComponent ? 'component' : 'member';
+        const displayRemarkTexts = [...new Set(actions.map(action => action.remark))];
+        const remarkTexts = [...new Set(actions
+          .filter(action => action.appendRemark !== false)
+          .map(action => action.remark))];
+        const existing = record.remarksValue ? `${record.remarksValue}; ` : '';
+        proposals.push({
+          key,
+          tableIndex,
+          rowIndex: record.index,
+          label: record.particularText.trim() || record.packageText.trim() || `Row ${record.index}`,
+          packageText: record.packageText.trim(),
+          claimAmount: Core.parseAmount(record.claimValue) || 0,
+          beforeApproved: Core.parseAmount(record.approvedValue) || 0,
+          proposedApproved: deductAction
+            ? Number(deductAction.setApproved)
+            : reviewedApproval === null ? null : Core.parseAmount(reviewedApproval),
+          beforeRemarks: record.remarksValue,
+          proposedRemarks: remarkTexts.length ? existing + remarkTexts.join('; ') : null,
+          risk: 'high',
+          reason: actions.map(action => `${action.ruleId}: ${action.remark}`).join(' | '),
+          ruleIds: [...new Set(actions.map(action => action.ruleId))],
+          groupId: actions[0]?.ruleId || key,
+          decisionRole,
+          recommendedApproved
+        });
+        rowElements.set(key, record.rowEl);
+        if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
+
+        const hasApprovedOverride = Object.prototype.hasOwnProperty.call(approvedOverrides, key);
+        if (deductAction && !hasApprovedOverride) {
+          if (apply) setCellValue(record.approvedCell, deductAction.setApproved, batch);
+          auditDeducted++;
+        } else {
+          const approvedOverride = hasApprovedOverride
+            ? String(approvedOverrides[key])
+            : reviewedApproval;
+          if (approvedOverride !== null && apply) {
+            setCellValue(record.approvedCell, approvedOverride, batch);
+            approvedCount++;
+          }
+          auditFlagged++;
+        }
+
+        if (record.remarksCell && remarkTexts.length > 0 && apply) {
+          setCellValue(record.remarksCell, existing + remarkTexts.join('; '), batch);
+        }
+
+        if (apply) {
+          highlightRow(record.rowEl, deductAction && !hasApprovedOverride
+            ? 'deduct'
+            : actions.some(action => action.highlight === 'candidate') ? 'candidate' : 'review');
+          record.rowEl.title = displayRemarkTexts.join('\n');
+          attachFeedbackControls(record, [...new Set(actions.map(action => action.ruleId))], context);
+          for (const action of actions) {
+            auditLogEntries.push(Audit.buildAuditEntry(action, { ...context, amountBefore: record.approvedValue }));
+          }
+        }
+        console.log(`[RGHS-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
+      }
+    }
+
+    // Third pass: normal auto-fill, never touching audited rows
+    for (const record of records) {
+      if (auditedRows.has(record.index)) continue;
+
+      const plan = Core.planRowUpdate({
+        claimValue: record.claimValue,
+        approvedValue: record.approvedValue,
+        particularText: record.particularText,
+        remarksValue: record.remarksValue
+      });
+
+      if (plan.reason === 'invalid-or-zero-claim') continue;
+
+      if (plan.approvedValue !== null || plan.remarksValue !== null) {
+        const key = `table-${tableIndex}-row-${record.index}`;
+        const claimAmount = Core.parseAmount(record.claimValue) || 0;
+        const proposedApproved = plan.approvedValue === null ? null : Core.parseAmount(plan.approvedValue);
+        proposals.push({
+          key,
+          tableIndex,
+          rowIndex: record.index,
+          label: record.particularText.trim() || record.packageText.trim() || `Row ${record.index}`,
+          packageText: record.packageText.trim(),
+          claimAmount,
+          beforeApproved: Core.parseAmount(record.approvedValue) || 0,
+          proposedApproved,
+          beforeRemarks: record.remarksValue,
+          proposedRemarks: plan.remarksValue,
+          risk: plan.reason === 'medicine' ? 'medium' : 'low',
+          reason: plan.reason === 'medicine'
+            ? `${Core.DEDUCTION_PERCENT}% RGHS medicine deduction; rounded to nearest whole rupee`
+            : 'Copy eligible claim amount into the empty approved amount',
+          ruleIds: plan.reason === 'medicine' ? ['RGHS-MEDICINE-12'] : []
+        });
+        rowElements.set(key, record.rowEl);
+        if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
+      }
+
+      // Only fill if approved is empty or "0"
+      if (plan.approvedValue !== null) {
+        if (apply) setCellValue(record.approvedCell, plan.approvedValue, batch);
+        approvedCount++;
+        console.log(`[Claim Auto-Fill] Row ${record.index}: Planned approved amount "${plan.approvedValue}"`);
+      }
+
+      // Fill remarks for medicine rows
+      if (record.remarksCell && plan.remarksValue !== null) {
+        if (apply) setCellValue(record.remarksCell, plan.remarksValue, batch);
+        remarksCount++;
+        console.log(`[Claim Auto-Fill] Row ${record.index}: Planned deduction remark`);
+      }
+    }
+
+    console.log(`[Claim Auto-Fill] Processed ${dataRowNum} data rows from table ${tableIndex + 1}`);
   });
 
-  // Strategy 2: Find by common patterns in name/id attributes (fallback)
-  if (pairs.length === 0) {
-    const inputs = document.querySelectorAll('input[type="text"], input[type="number"], input:not([type])');
+  // Fallback: Find by input name/id attributes
+  if (approvedCount === 0 && remarksCount === 0 && auditFlagged === 0 && auditDeducted === 0) {
+    console.log('[Claim Auto-Fill] Table strategy found nothing, trying input name/id matching...');
+    const inputs = collectInputs(roots);
 
     inputs.forEach(input => {
       const name = (input.name || '').toLowerCase();
       const id = (input.id || '').toLowerCase();
       const placeholder = (input.placeholder || '').toLowerCase();
 
-      // Check if this is a claim amount field
       if (name.includes('claim') || id.includes('claim') || placeholder.includes('claim')) {
-        // Try to find corresponding approved amount field
-        const approvedField = findCorrespondingApprovedField(input);
-        if (approvedField) {
-          pairs.push({ claim: input, approved: approvedField });
-        }
-      }
-    });
-  }
+        const parent = input.closest('tr, div, form, fieldset');
+        if (!parent) return;
 
-  // Strategy 3: Find by inline table structure (same row)
-  if (pairs.length === 0) {
-    const tables = document.querySelectorAll('table');
-    tables.forEach(table => {
-      const rows = table.querySelectorAll('tr');
-      rows.forEach(row => {
-        const cells = row.querySelectorAll('td, th');
-        let claimInput = null;
-        let approvedInput = null;
-
-        cells.forEach(cell => {
-          const text = cell.textContent.toLowerCase();
-          const input = cell.querySelector('input[type="text"], input[type="number"], input:not([type])');
-
-          if (input) {
-            if (text.includes('claim') && !text.includes('approved')) {
-              claimInput = input;
-            } else if (text.includes('approved') || text.includes('sanctioned')) {
-              approvedInput = input;
+        const siblings = parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea');
+        for (let sib of siblings) {
+          if (sib === input) continue;
+          const sName = (sib.name || '').toLowerCase();
+          const sId = (sib.id || '').toLowerCase();
+          if (sName.includes('approved') || sName.includes('sanctioned') ||
+              sId.includes('approved') || sId.includes('sanctioned')) {
+            const claimVal = input.value.trim();
+            const appVal = sib.value.trim();
+            const amount = Core.parseAmount(claimVal);
+            if (amount !== null && amount > 0 && Core.isEmptyApprovedValue(appVal)) {
+              if (apply) {
+                batch.push({ element: sib, value: getElementValue(sib) });
+                setElementValue(sib, claimVal);
+              }
+              approvedCount++;
             }
           }
-        });
-
-        if (claimInput && approvedInput) {
-          pairs.push({ claim: claimInput, approved: approvedInput });
         }
-      });
+      }
     });
   }
 
-  return pairs;
+  if (apply && batch.length > 0) undoBatch = batch;
+  if (apply && batch.length > 0) persistRecoverySnapshot(batch);
+  if (apply && auditLogEntries.length > 0) appendAuditLog(auditLogEntries);
+  const count = approvedCount + remarksCount + auditFlagged + auditDeducted;
+  console.log(`[Claim Auto-Fill] Done. ${apply ? 'Filled' : 'Previewed'} ${approvedCount} approved amount(s), ${remarksCount} remark(s); audit: ${auditDeducted} deducted, ${auditFlagged} flagged`);
+  updateAuditBadge(auditFlagged + auditDeducted);
+  return { count, changedFieldCount: batch.length, approvedCount, remarksCount, auditFlagged, auditDeducted, proposals, rowElements };
 }
 
-// Find corresponding approved amount field for a claim field
-function findCorrespondingApprovedField(claimInput) {
-  const parent = claimInput.closest('tr, div, form, fieldset');
-  if (!parent) return null;
+// Best-effort tab badge showing how many audit findings are open on this page.
+function updateAuditBadge(count) {
+  try {
+    chrome.runtime.sendMessage({ action: 'setAuditBadge', count }, () => void chrome.runtime.lastError);
+  } catch (error) {
+    // Extension context may be gone (page outliving a reload); badge is optional.
+  }
+}
 
-  const inputs = parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type])');
+function formatPreview(raw, createdAt = Date.now()) {
+  const token = Review.fingerprint(raw.proposals);
+  return {
+    count: raw.count,
+    rowCount: raw.proposals.length,
+    approvedCount: raw.approvedCount,
+    remarksCount: raw.remarksCount,
+    auditFlagged: raw.auditFlagged,
+    auditDeducted: raw.auditDeducted,
+    proposals: raw.proposals,
+    token,
+    createdAt,
+    reconciliation: Review.reconcile(raw.proposals),
+    blocked: raw.blocked === true,
+    blockReason: raw.blockReason || null,
+    blockDetails: raw.blockDetails || []
+  };
+}
 
-  for (let input of inputs) {
-    if (input === claimInput) continue;
+function createReviewedPreview() {
+  const raw = fillAllApprovedAmounts({ apply: false });
+  const preview = formatPreview(raw);
+  lastPreview = preview;
+  previewRowElements = raw.rowElements;
+  appendClaimActivity('preview', {
+    blocked: preview.blocked,
+    blockReason: preview.blockReason,
+    rowCount: preview.rowCount,
+    totals: preview.reconciliation,
+    ruleIds: preview.proposals.flatMap(proposal => proposal.ruleIds || [])
+  });
+  return preview;
+}
 
-    const name = (input.name || '').toLowerCase();
-    const id = (input.id || '').toLowerCase();
-    const placeholder = (input.placeholder || '').toLowerCase();
+function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, acknowledgedHighRisk = false } = {}) {
+  const currentRaw = fillAllApprovedAmounts({ apply: false });
+  if (currentRaw.blocked) {
+    appendClaimActivity('apply-blocked', { blockReason: currentRaw.blockReason });
+    return { ...blockedFillResult(currentRaw.blockReason, currentRaw.blockDetails), rowElements: undefined, proposals: undefined };
+  }
+  const current = formatPreview(currentRaw, lastPreview?.createdAt);
+  const selectedKeys = Array.isArray(selectedRowKeys) ? [...new Set(selectedRowKeys)] : [];
+  const invalidOverride = Object.entries(approvedOverrides).some(([key, value]) => {
+    const proposal = current.proposals.find(item => item.key === key);
+    if (!proposal || !selectedKeys.includes(key)) return true;
+    const allowed = [0, proposal.claimAmount, proposal.beforeApproved, proposal.proposedApproved, proposal.recommendedApproved]
+      .filter(item => item !== null && item !== undefined)
+      .map(Number);
+    return !allowed.some(item => Math.abs(item - Number(value)) < 0.005);
+  });
+  if (invalidOverride) return { blocked: true, blockReason: 'invalid-decision', count: 0 };
+  const selected = current.proposals
+    .filter(proposal => selectedKeys.includes(proposal.key))
+    .map(proposal => Object.prototype.hasOwnProperty.call(approvedOverrides, proposal.key)
+      ? { ...proposal, proposedApproved: Number(approvedOverrides[proposal.key]) }
+      : proposal);
+  const validation = Review.validateApply({
+    previewToken: token,
+    currentToken: current.token,
+    createdAt: lastPreview?.token === token ? lastPreview.createdAt : 0,
+    selectedProposals: selected,
+    acknowledgedHighRisk
+  });
 
-    if (name.includes('approved') || name.includes('sanctioned') ||
-        id.includes('approved') || id.includes('sanctioned') ||
-        placeholder.includes('approved') || placeholder.includes('sanctioned')) {
-      return input;
+  if (!validation.ok) {
+    return {
+      blocked: true,
+      blockReason: validation.reason,
+      currentToken: current.token,
+      reconciliation: validation.totals || Review.reconcile(selected),
+      count: 0
+    };
+  }
+
+  const result = fillAllApprovedAmounts({
+    apply: true,
+    selectedRowKeys: new Set(selectedKeys),
+    approvedOverrides
+  });
+  const ruleIds = [...new Set(selected.flatMap(proposal => proposal.ruleIds || []))];
+  lastAppliedSummary = {
+    createdAt: Date.now(),
+    path: location.pathname,
+    tid: findTid(),
+    selectedRows: selected.length,
+    changedFields: result.changedFieldCount,
+    highRiskCount: validation.totals.highRiskCount,
+    proposedApprovedTotal: validation.totals.proposedApprovedTotal,
+    deductionTotal: validation.totals.deductionTotal,
+    ruleIds
+  };
+  sessionStorage.setItem(APPLIED_SESSION_KEY, JSON.stringify(lastAppliedSummary));
+  appendClaimActivity('apply', { rowCount: selected.length, fieldCount: result.changedFieldCount, totals: validation.totals, ruleIds });
+  lastPreview = null;
+  previewRowElements = new Map();
+  return {
+    ...result,
+    proposals: undefined,
+    rowElements: undefined,
+    blocked: false,
+    reconciliation: validation.totals
+  };
+}
+
+// --- RGHS audit helpers ---
+
+function ensureAuditStyles() {
+  if (document.getElementById('rghs-audit-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'rghs-audit-styles';
+  style.textContent = [
+    'tr.rghs-audit-review td { background-color: #fff3cd !important; }',
+    'tr.rghs-audit-candidate td { background-color: #ffe0b2 !important; }',
+    'tr.rghs-audit-deduct td { background-color: #f8d7da !important; }',
+    'tr.rghs-decision-approve td { background-color: #dcfce7 !important; box-shadow: inset 0 2px #16a34a, inset 0 -2px #16a34a; }',
+    'tr.rghs-decision-deduct td { background-color: #fee2e2 !important; box-shadow: inset 0 2px #dc2626, inset 0 -2px #dc2626; }',
+    '.rghs-audit-feedback { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }',
+    '.rghs-audit-feedback button { border: 1px solid #999; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 6px; }',
+    '.rghs-audit-feedback button:hover { background: #eee; }'
+  ].join('\n');
+  (document.head || document.documentElement).appendChild(style);
+}
+
+function highlightRow(rowEl, kind) {
+  ensureAuditStyles();
+  rowEl.classList.remove('rghs-audit-review', 'rghs-audit-candidate', 'rghs-audit-deduct');
+  rowEl.classList.add(`rghs-audit-${kind}`);
+}
+
+function highlightDecisionRows(approvedByKey = {}) {
+  ensureAuditStyles();
+  for (const row of previewRowElements.values()) {
+    row.classList.remove('rghs-decision-approve', 'rghs-decision-deduct');
+  }
+  for (const [key, approvedAmount] of Object.entries(approvedByKey)) {
+    const row = previewRowElements.get(key);
+    if (!row) continue;
+    row.classList.add(Number(approvedAmount) === 0 ? 'rghs-decision-deduct' : 'rghs-decision-approve');
+  }
+}
+
+let cachedTid;
+function findTid() {
+  if (cachedTid !== undefined) return cachedTid;
+  const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
+  const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9\/-]{3,19})/i);
+  cachedTid = match ? match[1] : '';
+  return cachedTid;
+}
+
+function appendClaimActivity(event, details = {}) {
+  const totals = details.totals || {};
+  const entry = {
+    timestamp: new Date().toISOString(),
+    event,
+    tid: findTid(),
+    path: location.pathname,
+    extensionVersion: chrome.runtime.getManifest().version,
+    ruleSetVersion: AuditRules?.version || '',
+    blocked: details.blocked === true,
+    blockReason: String(details.blockReason || ''),
+    rowCount: Number(details.rowCount) || 0,
+    fieldCount: Number(details.fieldCount) || 0,
+    proposedApprovedTotal: Number(totals.proposedApprovedTotal) || 0,
+    deductionTotal: Number(totals.deductionTotal) || 0,
+    highRiskCount: Number(totals.highRiskCount) || 0,
+    ruleIds: [...new Set((details.ruleIds || []).map(String))]
+  };
+  chrome.storage.local.get(['claimActivityLog'], result => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const log = (Array.isArray(result.claimActivityLog) ? result.claimActivityLog : [])
+      .filter(item => Date.parse(item.timestamp) >= cutoff);
+    log.push(entry);
+    chrome.storage.local.set({ claimActivityLog: log.slice(-500) });
+  });
+}
+
+function clearAppliedSummary() {
+  lastAppliedSummary = null;
+  sessionStorage.removeItem(APPLIED_SESSION_KEY);
+}
+
+function restoreAppliedSummary() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null');
+    if (saved && saved.path === location.pathname && Date.now() - saved.createdAt < 24 * 60 * 60 * 1000) {
+      lastAppliedSummary = saved;
+    } else {
+      sessionStorage.removeItem(APPLIED_SESSION_KEY);
     }
+  } catch (_) {
+    sessionStorage.removeItem(APPLIED_SESSION_KEY);
   }
-
-  return null;
 }
 
-// Fill approved amount with claim amount
-function fillApprovedAmount(claimInput, approvedInput) {
-  const claimValue = claimInput.value.trim();
-  const approvedValue = approvedInput.value.trim();
-
-  // Only fill if claim has a value and approved is empty or "0"
-  // Treat "0" as empty since it's often a placeholder
-  if (claimValue && (!approvedValue || approvedValue === '0')) {
-    approvedInput.value = claimValue;
-
-    // Focus the input first to ensure proper event handling
-    approvedInput.focus();
-
-    // Trigger events to ensure the page recognizes the change
-    approvedInput.dispatchEvent(new Event('input', { bubbles: true }));
-    approvedInput.dispatchEvent(new Event('change', { bubbles: true }));
-    approvedInput.dispatchEvent(new Event('keyup', { bubbles: true }));
-    approvedInput.dispatchEvent(new Event('blur', { bubbles: true }));
-
-    // Blur to move focus away
-    approvedInput.blur();
-
-    return true;
-  }
-
-  return false;
+function isPortalSubmitControl(target) {
+  const control = target?.closest?.('button, input[type="submit"], input[type="button"]');
+  if (!control) return false;
+  const label = String(control.textContent || control.value || '').replace(/\s+/g, ' ').trim();
+  return control.type === 'submit' || /^submit$/i.test(label);
 }
 
-// Fill all approved amounts on the page
-function fillAllApprovedAmounts() {
-  if (!isAutoFillEnabled) return 0;
-
-  console.log('[Claim Auto-Fill] Starting auto-fill process...');
-
-  const pairs = findAmountPairs();
-  console.log(`[Claim Auto-Fill] Found ${pairs.length} claim/approved field pairs`);
-
-  let count = 0;
-
-  pairs.forEach((pair, index) => {
-    const claimValue = pair.claim.value;
-    const approvedValue = pair.approved.value;
-    console.log(`[Claim Auto-Fill] Pair ${index + 1}: Claim="${claimValue}", Approved="${approvedValue}"`);
-
-    if (fillApprovedAmount(pair.claim, pair.approved)) {
-      count++;
-      console.log(`[Claim Auto-Fill] ✓ Filled pair ${index + 1} with value: ${claimValue}`);
-    }
+function showSubmissionInterlock() {
+  let host = document.getElementById('claim-extension-submit-guard');
+  if (host) return;
+  const summary = lastAppliedSummary;
+  host = document.createElement('div');
+  host.id = 'claim-extension-submit-guard';
+  host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:rgba(15,23,42,.55);';
+  const shadow = host.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = `
+    <style>
+      *{box-sizing:border-box}.card{width:min(480px,calc(100vw - 32px));padding:20px;border-radius:16px;background:#fff;color:#172554;box-shadow:0 20px 60px rgba(0,0,0,.35);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.title{font-size:18px;font-weight:800;color:#991b1b}.summary{margin:12px 0;padding:12px;border-radius:10px;background:#fff7ed}.ack{display:flex;gap:9px;align-items:flex-start;margin:14px 0;font-weight:650}.actions{display:flex;gap:9px;justify-content:flex-end}button{border:0;border-radius:9px;padding:10px 13px;cursor:pointer;font-weight:750}.cancel{background:#e2e8f0;color:#334155}.continue{background:#b91c1c;color:#fff}.continue:disabled{opacity:.45;cursor:not-allowed}
+    </style>
+    <section class="card" role="alertdialog" aria-modal="true" aria-labelledby="guard-title">
+      <div class="title" id="guard-title">Final claim review required</div>
+      <p>Claim Extension changed fields on this process sheet. Submission remains blocked until you acknowledge the final review.</p>
+      <div class="summary">Selected rows: <strong>${summary.selectedRows}</strong><br>Changed fields: <strong>${summary.changedFields}</strong><br>Proposed approved total: <strong>Rs. ${summary.proposedApprovedTotal}</strong><br>Claim-proposed difference: <strong>Rs. ${summary.deductionTotal}</strong><br>High-risk rows: <strong>${summary.highRiskCount}</strong></div>
+      <label class="ack"><input type="checkbox">I reviewed the approved amounts, deductions, remarks, and high-risk findings.</label>
+      <div class="actions"><button class="cancel" type="button">Return to claim</button><button class="continue" type="button" disabled>Allow next Submit click</button></div>
+    </section>`;
+  const checkbox = shadow.querySelector('input');
+  const continueButton = shadow.querySelector('.continue');
+  checkbox.addEventListener('change', () => { continueButton.disabled = !checkbox.checked; });
+  shadow.querySelector('.cancel').addEventListener('click', () => host.remove());
+  continueButton.addEventListener('click', () => {
+    submitArmedUntil = Date.now() + 2 * 60 * 1000;
+    appendClaimActivity('submit-acknowledged', { rowCount: summary.selectedRows, fieldCount: summary.changedFields, ruleIds: summary.ruleIds });
+    host.remove();
   });
-
-  if (count > 0) {
-    console.log(`[Claim Auto-Fill] ✓ Successfully auto-filled ${count} approved amount(s)`);
-  } else if (pairs.length > 0) {
-    console.log('[Claim Auto-Fill] No fields were filled (all already have values)');
-  } else {
-    console.log('[Claim Auto-Fill] No claim/approved field pairs found on this page');
-  }
-
-  return count;
+  document.documentElement.appendChild(host);
+  checkbox.focus();
 }
 
-// Start observing DOM changes
-function startObserving() {
-  if (observer) return;
-
-  observer = new MutationObserver((mutations) => {
-    // Debounce the filling to avoid excessive operations
-    clearTimeout(window.autoFillTimeout);
-    window.autoFillTimeout = setTimeout(() => {
-      fillAllApprovedAmounts();
-    }, 500);
-  });
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-
-  // Initial fill
-  fillAllApprovedAmounts();
+function installSubmissionInterlock() {
+  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  restoreAppliedSummary();
+  document.addEventListener('click', event => {
+    if (!lastAppliedSummary || !isPortalSubmitControl(event.target) || Date.now() < submitArmedUntil) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    appendClaimActivity('submit-blocked', { rowCount: lastAppliedSummary.selectedRows, fieldCount: lastAppliedSummary.changedFields, ruleIds: lastAppliedSummary.ruleIds });
+    showSubmissionInterlock();
+  }, true);
+  document.addEventListener('submit', event => {
+    if (!lastAppliedSummary || Date.now() < submitArmedUntil) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    appendClaimActivity('submit-blocked', { rowCount: lastAppliedSummary.selectedRows, fieldCount: lastAppliedSummary.changedFields, ruleIds: lastAppliedSummary.ruleIds });
+    showSubmissionInterlock();
+  }, true);
 }
 
-// Stop observing DOM changes
-function stopObserving() {
-  if (observer) {
-    observer.disconnect();
-    observer = null;
-  }
-}
+// Auditor feedback buttons: confirm keeps the flag, dismiss records a false
+// positive, clears the highlight and strips this rule's remark segment.
+function attachFeedbackControls(record, ruleIds, context) {
+  const host = record.remarksCell || record.approvedCell;
+  if (!host || host.querySelector('.rghs-audit-feedback')) return;
 
-// Start when page loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    // Wait a bit for dynamic content to load
-    setTimeout(() => {
-      if (isAutoFillEnabled) {
-        fillAllApprovedAmounts();
+  const wrap = document.createElement('span');
+  wrap.className = 'rghs-audit-feedback';
+
+  const makeButton = (label, title, verdict) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.title = title;
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      recordAuditFeedback(record, ruleIds, verdict, context);
+      if (verdict === 'dismissed') {
+        record.rowEl.classList.remove('rghs-audit-review', 'rghs-audit-candidate', 'rghs-audit-deduct');
+        record.rowEl.removeAttribute('title');
+        if (record.remarksCell) {
+          let cleaned = getCellValue(record.remarksCell);
+          for (const ruleId of ruleIds) cleaned = Audit.stripAuditRemark(cleaned, ruleId);
+          setCellValue(record.remarksCell, cleaned, []);
+        }
       }
-    }, 1000);
-  });
-} else {
-  // Page already loaded, wait a bit then fill
-  setTimeout(() => {
-    if (isAutoFillEnabled) {
-      fillAllApprovedAmounts();
-    }
-  }, 1000);
+      wrap.remove();
+    });
+    return button;
+  };
+
+  wrap.append(
+    makeButton('✓', 'Confirm finding (flag is correct)', 'confirmed'),
+    makeButton('✗', 'Dismiss finding (false positive)', 'dismissed')
+  );
+  host.appendChild(wrap);
 }
+
+function recordAuditFeedback(record, ruleIds, verdict, context) {
+  const entries = ruleIds.map(ruleId => ({
+    ts: new Date().toISOString(),
+    tid: context.tid,
+    url: context.url,
+    ruleId,
+    rowNumber: record.index,
+    verdict
+  }));
+  chrome.storage.local.get(['rghsAuditFeedback'], result => {
+    const feedback = Array.isArray(result.rghsAuditFeedback) ? result.rghsAuditFeedback : [];
+    feedback.push(...entries);
+    chrome.storage.local.set({ rghsAuditFeedback: feedback.slice(-2000) });
+  });
+}
+
+function appendAuditLog(entries) {
+  chrome.storage.local.get(['rghsAuditLog'], result => {
+    const log = Array.isArray(result.rghsAuditLog) ? result.rghsAuditLog : [];
+    // Re-running the fill on the same sheet must not inflate the log.
+    log.push(...Audit.dedupeLogEntries(log, entries));
+    // Keep the most recent 2000 entries.
+    chrome.storage.local.set({ rghsAuditLog: log.slice(-2000) });
+  });
+}
+
+function persistRecoverySnapshot(batch) {
+  const entries = batch
+    .filter(item => item.element?.id)
+    .map(item => ({ id: item.element.id, before: String(item.value ?? ''), after: getElementValue(item.element) }));
+  if (!entries.length) return;
+
+  const snapshot = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    createdAt: Date.now(),
+    tid: findTid(),
+    url: location.href,
+    version: chrome.runtime.getManifest().version,
+    entries
+  };
+  chrome.storage.local.get(['claimRecoverySnapshots'], result => {
+    const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
+    snapshots.push(snapshot);
+    chrome.storage.local.set({ claimRecoverySnapshots: snapshots.slice(-20) });
+  });
+}
+
+function getMatchingRecoverySnapshot(callback) {
+  chrome.storage.local.get(['claimRecoverySnapshots'], result => {
+    const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
+    const activeSnapshots = snapshots.filter(item => Date.now() - item.createdAt <= 24 * 60 * 60 * 1000);
+    if (activeSnapshots.length !== snapshots.length) {
+      chrome.storage.local.set({ claimRecoverySnapshots: activeSnapshots });
+    }
+    const tid = findTid();
+    const snapshot = [...activeSnapshots].reverse().find(item => item.url === location.href || (tid && item.tid === tid));
+    callback(snapshot || null, activeSnapshots);
+  });
+}
+
+function restorePersistentSnapshot() {
+  return new Promise(resolve => {
+    getMatchingRecoverySnapshot((snapshot, snapshots) => {
+      if (!snapshot) return resolve({ count: 0, hasRecovery: false });
+      let count = 0;
+      for (const entry of snapshot.entries) {
+        const element = document.getElementById(entry.id);
+        if (!element) continue;
+        setElementValue(element, entry.before);
+        count++;
+      }
+      const remaining = snapshots.filter(item => item.id !== snapshot.id);
+      chrome.storage.local.set({ claimRecoverySnapshots: remaining });
+      if (count > 0) {
+        clearAppliedSummary();
+        appendClaimActivity('restore', { fieldCount: count });
+      }
+      resolve({ count, hasRecovery: false });
+    });
+  });
+}
+
+function hasPersistentRecovery(callback) {
+  getMatchingRecoverySnapshot(snapshot => callback(Boolean(snapshot)));
+}
+
+function undoLastFill() {
+  const batch = undoBatch;
+  undoBatch = [];
+  for (let index = batch.length - 1; index >= 0; index--) {
+    setElementValue(batch[index].element, batch[index].value);
+  }
+  if (batch.length > 0) {
+    clearAppliedSummary();
+    appendClaimActivity('undo', { fieldCount: batch.length });
+    getMatchingRecoverySnapshot((snapshot, snapshots) => {
+      if (snapshot) chrome.storage.local.set({ claimRecoverySnapshots: snapshots.filter(item => item.id !== snapshot.id) });
+    });
+  }
+  return batch.length;
+}
+
+globalThis.ClaimAutoFillActions = {
+  preview() {
+    const result = createReviewedPreview();
+    return { ...result, hasUndo: undoBatch.length > 0 };
+  },
+  apply(options) {
+    const result = applyReviewedPreview(options);
+    return { ...result, hasUndo: undoBatch.length > 0 };
+  },
+  undo() {
+    const count = undoLastFill();
+    return { count, hasUndo: undoBatch.length > 0 };
+  },
+  status() {
+    return { enabled: isAutoFillEnabled, hasUndo: undoBatch.length > 0 };
+  },
+  jumpToRow(key) {
+    const row = previewRowElements.get(key);
+    if (!row) return false;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const previousOutline = row.style.outline;
+    row.style.outline = '3px solid #2563eb';
+    setTimeout(() => { row.style.outline = previousOutline; }, 1800);
+    return true;
+  },
+  highlightDecisionRows,
+  restoreRecovery() {
+    return restorePersistentSnapshot();
+  },
+  hasRecovery(callback) {
+    hasPersistentRecovery(callback);
+  }
+};
+
+installSubmissionInterlock();

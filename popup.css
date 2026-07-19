@@ -95,8 +95,44 @@ input:checked + .slider:before {
   transform: translateX(24px);
 }
 
+.audit-section {
+  margin-bottom: 20px;
+}
+
+.audit-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 6px;
+}
+
+.audit-section select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  color: #333;
+}
+
 .button-section {
   margin-bottom: 20px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row .btn {
+  margin-top: 8px;
+}
+
+.btn-small {
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .btn {
@@ -117,6 +153,12 @@ input:checked + .slider:before {
 .btn-primary {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+}
+
+.btn-secondary {
+  margin-top: 8px;
+  background: #e9ecef;
+  color: #333;
 }
 
 .btn-primary:hover {
