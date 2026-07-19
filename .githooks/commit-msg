@@ -1,0 +1,24 @@
+#!/bin/sh
+# Enforce Conventional Commits: type(scope)?: subject
+# Types: feat fix refactor chore docs test build ci perf style revert
+# Merge/revert/fixup commits pass through untouched.
+
+msg_file="$1"
+first_line=$(head -n 1 "$msg_file")
+
+case "$first_line" in
+  Merge\ *|Revert\ *|fixup!*|squash!*) exit 0 ;;
+esac
+
+if printf '%s' "$first_line" | grep -Eq '^(feat|fix|refactor|chore|docs|test|build|ci|perf|style|revert)(\([a-z0-9./-]+\))?!?: .{1,72}$'; then
+  exit 0
+fi
+
+echo "" >&2
+echo "Commit message rejected." >&2
+echo "  First line must be: <type>(<scope>)?: <subject (max 72 chars)>" >&2
+echo "  Types: feat fix refactor chore docs test build ci perf style revert" >&2
+echo "  Example: feat(audit): add laterality guard to duplicate check" >&2
+echo "  Your message: $first_line" >&2
+echo "" >&2
+exit 1

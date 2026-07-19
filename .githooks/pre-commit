@@ -1,0 +1,22 @@
+#!/bin/sh
+# Gate every commit on the project's fast validation suite:
+#   matrix coverage + syntax checks + unit tests, then ESLint.
+# Bypass in an emergency with: git commit --no-verify (CI still enforces).
+
+echo "pre-commit: npm run check"
+npm run check || {
+  echo "" >&2
+  echo "pre-commit: npm run check failed - commit aborted." >&2
+  exit 1
+}
+
+if [ -d node_modules/eslint ]; then
+  echo "pre-commit: eslint"
+  npx eslint . || {
+    echo "" >&2
+    echo "pre-commit: eslint failed - commit aborted." >&2
+    exit 1
+  }
+else
+  echo "pre-commit: eslint not installed (run npm install); skipping lint, CI will enforce it."
+fi
