@@ -508,25 +508,31 @@
     if (templateKey === 'approved') return '';
     if (disposition === 'deduct') {
       if (finding.type === 'UNBUNDLING_FIXED') {
-        const components = finding.components.map(c => describeCode(c.label, c.code)).join(', ');
-        return `${components} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)}. Rs.${finding.fixedDeduction.amount} deducted from the main package as per package terms.`;
+        const components = (finding.components || []).map(c => describeCode(c.label, c.code)).join(', ');
+        if (finding.bundleRow) {
+          return `${components} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)}. Rs.${finding.fixedDeduction.amount} deducted from the main package as per package terms.`;
+        }
       }
       if (finding.type === 'DUPLICATE') {
         return `The same package/procedure code appears more than once in this claim. Duplicate line kept at nil; verify the number of procedures/devices from the supporting documents.`;
       }
-      return `${describeCode(finding.componentRow.label, finding.componentRow.code)} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)} and has not been allowed separately.`;
+      if (finding.type === 'UNBUNDLING' && finding.componentRow && finding.bundleRow) {
+        return `${describeCode(finding.componentRow.label, finding.componentRow.code)} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)} and has not been allowed separately.`;
+      }
+      return `${finding.remarkReason || 'The selected item requires review'}. The affected amount has not been allowed after review.`;
     }
     if (finding.type === 'DUPLICATE') {
       return `The same package/procedure code appears more than once in this claim. Verify the number of procedures/devices and supporting invoices before approval.`;
     }
     if (finding.type === 'UNBUNDLING_FIXED') {
+      if (!finding.bundleRow) return `${finding.remarkReason || 'Possible package unbundling identified'}. Verify before approval.`;
       const isBundleRow = rowIndex === finding.bundleRow.index;
-      const components = finding.components.map(c => describeCode(c.label, c.code)).join(', ');
+      const components = (finding.components || []).map(c => describeCode(c.label, c.code)).join(', ');
       return isBundleRow
         ? `${components} is shown separately although it is included in this main package. Verify the admissible main-package amount before approval.`
         : `${components} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)} and should not ordinarily be allowed separately. Verify before approval.`;
     }
-    if (finding.type === 'UNBUNDLING') {
+    if (finding.type === 'UNBUNDLING' && finding.componentRow && finding.bundleRow) {
       return rowIndex === finding.bundleRow.index
         ? `${describeCode(finding.componentRow.label, finding.componentRow.code)} is shown separately although it is included in this main package. Verify the admissible main-package amount before approval.`
         : `${describeCode(finding.componentRow.label, finding.componentRow.code)} is included in ${describeCode(finding.bundleRow.label, finding.bundleRow.code)} and should not ordinarily be allowed separately. Verify before approval.`;

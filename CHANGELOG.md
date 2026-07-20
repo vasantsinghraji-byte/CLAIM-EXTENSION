@@ -124,3 +124,7 @@
 
 - Added a validated profile-local Rule Editor for custom unbundling and upcoding findings, decision-specific portal remark templates, safe JSON import/export, and grouped-decision remark application.
 - Added reversible per-built-in-rule remark overrides, including independent approved, deducted, rejected, and hold wording without changing other rules.
+
+## 1.5.1 - 2026-07-20
+
+- Prevented grouped-decision remark generation from crashing on upcoding and other non-unbundling findings by using type-safe fallback wording.
