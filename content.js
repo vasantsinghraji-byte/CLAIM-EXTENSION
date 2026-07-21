@@ -157,6 +157,13 @@ function setElementValue(el, value) {
 
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+  // Some portal totals only recompute on keyup/blur handlers rather than
+  // input/change (older AngularJS/jQuery binding patterns). blur does not
+  // natively bubble, so focusout (its bubbling equivalent) covers listeners
+  // attached higher up the DOM as well as directly on the field.
+  el.dispatchEvent(new Event('keyup', { bubbles: true }));
+  el.dispatchEvent(new Event('blur', { bubbles: true }));
+  el.dispatchEvent(new Event('focusout', { bubbles: true }));
 }
 
 // Set value on a cell or its editable child
@@ -344,7 +351,9 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (text.includes('date') && !text.includes('update')) {
           dateIdx = i;
         }
-        if ((text.includes('claim') && text.includes('amount')) || text.match(/claim.*amt/i)) {
+        if ((text.includes('claim') && text.includes('amount')) ||
+            text.match(/claim.*amt/i) ||
+            (text.includes('payable') && text.includes('amount'))) {
           claimIdx = i;
         }
         if ((text.includes('approved') && text.includes('amount')) ||
@@ -495,7 +504,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         const isComponent = actions.some(action =>
           action.finding?.componentRow?.index === record.index ||
           action.finding?.components?.some(component => component.index === record.index) ||
-          action.finding?.duplicateRows?.some(row => row.index === record.index));
+          action.finding?.duplicateRows?.some(row => row.index === record.index) ||
+          (action.finding?.type === 'COMBINED_AVAILABLE' && action.finding?.rows?.includes(record.index)));
         let recommendedApproved = null;
         if (primaryFinding?.type === 'UNBUNDLING_FIXED') {
           recommendedApproved = isMain
@@ -505,6 +515,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           recommendedApproved = isMain ? Core.parseAmount(record.claimValue) || 0 : 0;
         } else if (primaryFinding?.type === 'DUPLICATE') {
           recommendedApproved = isPrimary ? Core.parseAmount(record.claimValue) || 0 : 0;
+        } else if (primaryFinding?.type === 'COMBINED_AVAILABLE') {
+          // No single row anchors a combined-package finding - every matched
+          // component is an equal candidate for the reviewer to zero out or keep.
+          recommendedApproved = 0;
         }
         const decisionRole = isMain ? 'main' : isPrimary ? 'primary' : isComponent ? 'component' : 'member';
         const decisionMethod = primaryFinding?.type === 'UNBUNDLING_FIXED'
@@ -867,7 +881,7 @@ function highlightDecisionRows(approvedByKey = {}) {
 }
 
 function refreshPassiveAuditHighlights() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   for (const row of document.querySelectorAll('tr.rghs-audit-passive')) {
     row.classList.remove('rghs-audit-passive');
   }
@@ -887,7 +901,7 @@ const schedulePassiveAudit = Core.createDebouncedProcessor(
 );
 
 function installPassiveAuditObserver() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   const observer = new MutationObserver(mutations => {
     const addedNodes = mutations.flatMap(mutation => [...mutation.addedNodes]);
     if (addedNodes.length) schedulePassiveAudit(addedNodes);
@@ -1050,7 +1064,7 @@ function showSubmissionInterlock() {
 }
 
 function installSubmissionInterlock() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   restoreAppliedSummary();
   document.addEventListener('click', event => {
     if (!lastAppliedSummary || !isPortalSubmitControl(event.target) || Date.now() < submitArmedUntil) return;

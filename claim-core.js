@@ -14,6 +14,17 @@
   const DEDUCTION_REMARK = '12% DEDUCTED AS PER RGHS GUIDELINES';
   const DEDUCTION_PERCENT = 12;
 
+  // RGHS claim workflows this extension actively assists with. Passive
+  // features (floating widget, passive audit highlights, submit interlock)
+  // only arm on these pages; strict process-sheet layout validation stays
+  // scoped separately since it relies on that page's specific DOM quirks.
+  const SUPPORTED_CLAIM_PATH_PREFIXES = ['/RGHS/processSheetSearch/', '/RGHS/tpaOPD'];
+
+  function isSupportedClaimPage(pathname) {
+    const path = String(pathname || '');
+    return SUPPORTED_CLAIM_PATH_PREFIXES.some(prefix => path.startsWith(prefix));
+  }
+
   function parseAmount(value) {
     const normalized = String(value ?? '')
       .trim()
@@ -124,6 +135,7 @@
     planRowUpdate,
     resolveRowColumnIndices,
     createDebouncedProcessor,
-    validatePortalLayoutDescriptor
+    validatePortalLayoutDescriptor,
+    isSupportedClaimPage
   };
 });

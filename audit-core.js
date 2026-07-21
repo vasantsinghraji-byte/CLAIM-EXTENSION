@@ -338,8 +338,13 @@
         const entity = compileEntity(group);
         return prepared.filter(line => matchEntity(line, entity));
       });
-      if (groupHits.some(hits => hits.length === 0)) continue;
-      const rows = [...new Set(groupHits.flat().map(line => line.index))];
+      // Most combined-package rules require every listed component present.
+      // Lab panels set minComponents lower since one component (e.g. Albumin)
+      // is often folded into another test's report and never billed as its own line.
+      const matchedGroups = groupHits.filter(hits => hits.length > 0);
+      const required = rule.minComponents ?? groupHits.length;
+      if (matchedGroups.length < required) continue;
+      const rows = [...new Set(matchedGroups.flat().map(line => line.index))];
       if (rows.length < 2) continue; // one line matching every group is likely the combined itself
       findings.push({
         type: 'COMBINED_AVAILABLE',
