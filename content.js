@@ -914,7 +914,18 @@ let cachedTid;
 function findTid() {
   if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
-  const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i);
+  // Process sheets label the claim "TID: <code>"; tpaOPD labels it
+  // "transaction id [OPD] :-<code>" instead - both need to resolve to a
+  // per-claim identifier since only tpaOPD's URL stays fixed across claims.
+  const patterns = [
+    /\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i,
+    /transaction\s*id[^\d]{0,25}(\d{6,20})/i
+  ];
+  let match = null;
+  for (const pattern of patterns) {
+    match = text.match(pattern);
+    if (match) break;
+  }
   if (match) cachedTid = match[1];
   return match ? match[1] : '';
 }
@@ -992,7 +1003,13 @@ function restoreAppliedSummary() {
   try {
     const saved = normalizeAppliedSummary(JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null'));
     const age = saved ? Date.now() - saved.createdAt : -1;
-    if (saved && saved.path === location.pathname && age >= 0 && age < 24 * 60 * 60 * 1000) {
+    // Path alone identifies the claim on process sheets (one path per claim) but
+    // not on tpaOPD, where every claim shares the same path - the TID is the only
+    // thing that tells two different claims apart there, so require it to agree
+    // whenever both sides actually have one.
+    const currentTid = findTid();
+    const tidCompatible = saved && (!saved.tid || !currentTid || saved.tid === currentTid);
+    if (saved && saved.path === location.pathname && tidCompatible && age >= 0 && age < 24 * 60 * 60 * 1000) {
       lastAppliedSummary = saved;
     } else {
       sessionStorage.removeItem(APPLIED_SESSION_KEY);
@@ -1159,7 +1176,12 @@ function getMatchingRecoverySnapshot(callback) {
     const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
     const activeSnapshots = snapshots.filter(item => Date.now() - item.createdAt <= 24 * 60 * 60 * 1000);
     const tid = findTid();
-    const snapshot = [...activeSnapshots].reverse().find(item => item.url === location.href || (tid && item.tid === tid));
+    // location.href alone identifies the claim on process sheets, but on tpaOPD
+    // every claim shares the same URL - matching by URL there would restore a
+    // different claim's saved field values onto whatever claim is on screen now.
+    // Once a TID is known, it must agree; URL is only trusted when no TID exists.
+    const snapshot = [...activeSnapshots].reverse().find(item =>
+      tid ? item.tid === tid : item.url === location.href);
     callback(snapshot || null, activeSnapshots);
   });
 }
