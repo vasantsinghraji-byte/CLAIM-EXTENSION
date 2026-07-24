@@ -1,5 +1,7 @@
 {
-  "comment": "Hand-curated rule overlay for the RGHS Healthcare Coding Risk Audit Matrix. This file, not the raw xlsx parse, is the source of truth for codes, name patterns and action classes. Regenerate audit-rules.js with tools/generate-audit-rules.py after editing. Flip autoDeductEligible to true per rule ONLY after shadow-mode validation shows a clean false-positive record.",
+  "comment": "Hand-curated rule overlay for the RGHS Healthcare Coding Risk Audit Matrix. This file, not the raw xlsx parse, is the source of truth for codes, name patterns and action classes. Regenerate audit-rules.js with tools/generate-audit-rules.py after editing. Flip autoDeductEligible to true per rule ONLY after shadow-mode validation shows a clean false-positive record. Bump version/effectiveDate below whenever you edit this file - they are copied verbatim into audit-rules.js and must reflect when the rule data actually changed, not when the generator happened to run.",
+  "version": "2026-07-19",
+  "effectiveDate": "2026-07-19",
   "bundles": [
     {
       "ruleId": "BI-01", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
