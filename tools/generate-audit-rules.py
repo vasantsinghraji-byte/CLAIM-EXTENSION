@@ -13,7 +13,6 @@ rules, code lists, name patterns and action classes, because the workbook's
 Usage:  python tools/generate-audit-rules.py
 """
 
-import datetime
 import json
 import re
 import sys
@@ -88,6 +87,9 @@ def collect_curated_codes(curation):
 
 def main():
     curation = json.loads(CURATION.read_text(encoding="utf-8"))
+    for field in ("version", "effectiveDate"):
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(curation.get(field, ""))):
+            sys.exit(f"rule-curation.json is missing a valid top-level \"{field}\" (YYYY-MM-DD)")
     wb = openpyxl.load_workbook(WORKBOOK, data_only=True)
 
     workbook_text = load_workbook_text(wb).upper()
@@ -106,8 +108,8 @@ def main():
 
     rules = {
         "schemaVersion": 1,
-        "version": datetime.date.today().isoformat(),
-        "effectiveDate": datetime.date.today().isoformat(),
+        "version": curation["version"],
+        "effectiveDate": curation["effectiveDate"],
         "source": WORKBOOK.name,
         "generatedBy": "tools/generate-audit-rules.py",
         "bundles": curation["bundles"],
