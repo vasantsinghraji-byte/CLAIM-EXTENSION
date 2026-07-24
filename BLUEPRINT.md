@@ -1,8 +1,8 @@
 # Claim Amount Auto-Fill B2B Architecture Blueprint
 
-Status: Phase 0 complete for the processSheetSearch workflow; tpaOPD support
-merged and in scope, live-portal verification still outstanding (see
-`docs/PHASE_0_BASELINE.md`); Phase 1 awaiting project decisions
+Status: Phase 0 complete, including live-portal verification for both
+processSheetSearch and tpaOPD (see `docs/PHASE_0_BASELINE.md`); Phase 1
+awaiting project decisions (see section 25)
 
 Target users: Approximately 50 authorized RGHS claim processors
 

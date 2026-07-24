@@ -157,9 +157,19 @@ tpaOPD merge:
 
 This smoke covered `/RGHS/processSheetSearch/*` only. `/RGHS/tpaOPD*` has unit
 and regression coverage (TID-based session isolation, panel-unbundling
-detection) but has **not** had an authenticated live-portal smoke test since
-being added to scope - carried as an open item below rather than assumed
-passing.
+detection) but had **not** had an authenticated live-portal smoke test since
+being added to scope.
+
+Authenticated RGHS runtime verification for `/RGHS/tpaOPD*` completed
+2026-07-24:
+
+- Preview, Apply, and Undo confirmed working on a live tpaOPD claim.
+- Cross-claim isolation specifically checked: after Preview/Apply/Undo on one
+  tpaOPD claim, a second, different tpaOPD claim (same URL, different TID)
+  showed its own clean state with nothing carried over from the first -
+  confirming the TID-based session isolation from PR #2 holds on the live
+  portal, not just in the unit tests.
+- Reported by the processor as working correctly; no failures noted.
 
 ## 7. Phase 0 exit criteria
 
@@ -174,8 +184,8 @@ passing.
 - [x] Baseline source commit ID is recorded.
 - [x] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed
       for `/RGHS/processSheetSearch/*`.
-- [ ] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed
-      for `/RGHS/tpaOPD*`.
+- [x] Authenticated live RGHS Preview, Apply, Undo, and cross-claim isolation
+      smoke passed for `/RGHS/tpaOPD*`.
 
 ## 8. Phase 1 entry rule
 
