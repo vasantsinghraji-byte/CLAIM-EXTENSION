@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claim Amount Auto-Fill small promotional tile</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      width: 440px;
+      height: 280px;
+      margin: 0;
+      overflow: hidden;
+    }
+    body {
+      position: relative;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: white;
+      background:
+        radial-gradient(circle at 86% 14%, rgba(255,255,255,.22), transparent 24%),
+        linear-gradient(135deg, #4338ca 0%, #6d28d9 55%, #7c3aed 100%);
+    }
+    body::before,
+    body::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255,255,255,.08);
+    }
+    body::before { width: 180px; height: 180px; left: -80px; top: -90px; }
+    body::after { width: 150px; height: 150px; right: -60px; bottom: -90px; }
+    .copy {
+      position: absolute;
+      z-index: 2;
+      left: 30px;
+      top: 47px;
+      width: 245px;
+    }
+    h1 {
+      margin: 0 0 13px;
+      font-size: 34px;
+      line-height: 1.02;
+      letter-spacing: -1.1px;
+    }
+    p {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.35;
+      color: #ede9fe;
+    }
+    .steps {
+      display: flex;
+      gap: 7px;
+      margin-top: 19px;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .25px;
+    }
+    .steps span {
+      padding: 6px 8px;
+      border: 1px solid rgba(255,255,255,.35);
+      border-radius: 6px;
+      background: rgba(255,255,255,.12);
+    }
+    .steps b { color: #c4b5fd; }
+    .mascot {
+      position: absolute;
+      z-index: 1;
+      right: -15px;
+      bottom: -14px;
+      width: 205px;
+      height: 205px;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 18px rgba(30, 27, 75, .35));
+    }
+  </style>
+</head>
+<body>
+  <section class="copy">
+    <h1>Claim<br>Auto-Fill</h1>
+    <p>Safer RGHS amount review with every change under your control.</p>
+    <div class="steps">
+      <span>Preview</span><b>›</b><span>Review</span><b>›</b><span>Apply</span>
+    </div>
+  </section>
+  <img class="mascot" src="../icons/claim-spark.png" alt="">
+</body>
+</html>

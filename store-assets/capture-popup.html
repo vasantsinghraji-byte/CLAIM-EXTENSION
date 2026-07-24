@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claim Amount Auto-Fill - Preview and control</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 1280px;
+      height: 800px;
+      overflow: hidden;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #1f2937;
+      background: linear-gradient(135deg, #eef2ff, #f8fafc 50%, #ede9fe);
+    }
+    .frame { height: 100%; display: grid; grid-template-columns: 1fr 430px; align-items: center; gap: 70px; padding: 76px 92px; }
+    .copy h1 { margin: 0 0 22px; font-size: 56px; line-height: 1.05; letter-spacing: -2px; color: #312e81; }
+    .copy p { margin: 0 0 24px; max-width: 600px; font-size: 25px; line-height: 1.45; color: #475569; }
+    .point { display: flex; gap: 12px; align-items: center; margin: 16px 0; font-size: 21px; font-weight: 600; }
+    .tick { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 50%; background: #4f46e5; color: white; }
+    .popup {
+      width: 390px;
+      background: white;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 26px 70px rgba(49,46,129,.25);
+      border: 1px solid #ddd6fe;
+    }
+    .head { padding: 25px; text-align: center; color: white; background: linear-gradient(135deg,#667eea,#764ba2); }
+    .head h2 { margin: 0 0 6px; font-size: 25px; }
+    .head p { margin: 0; opacity: .9; }
+    .body { padding: 24px; }
+    .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-weight: 650; }
+    .toggle { width: 50px; height: 27px; border-radius: 20px; background: #667eea; padding: 3px; display:flex; justify-content:flex-end; }
+    .toggle span { width:21px; height:21px; border-radius:50%; background:white; }
+    label { display:block; font-weight:650; margin-bottom:7px; }
+    select { width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:7px; background:white; color:#334155; }
+    button { width:100%; margin-top:18px; padding:13px; border:0; border-radius:9px; background:linear-gradient(135deg,#667eea,#764ba2); color:white; font-size:16px; font-weight:700; }
+    .note { margin-top:16px; padding:13px; border-radius:9px; background:#f8fafc; color:#64748b; font-size:13px; line-height:1.45; }
+    .foot { padding:12px; text-align:center; color:#94a3b8; background:#f8fafc; border-top:1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <section class="copy">
+      <h1>Review before<br>you apply</h1>
+      <p>Prepare RGHS approved amounts without silent changes. The reviewer stays in control from preview through recovery.</p>
+      <div class="point"><span class="tick">✓</span> Preview is read-only</div>
+      <div class="point"><span class="tick">✓</span> Explicit Apply and Undo controls</div>
+      <div class="point"><span class="tick">✓</span> Local processing on the RGHS portal</div>
+    </section>
+    <section class="popup" aria-label="Extension popup demonstration">
+      <div class="head"><h2>Claim Auto-Fill</h2><p>Review before applying approved amounts</p></div>
+      <div class="body">
+        <div class="row"><span>Claim tools enabled</span><span class="toggle"><span></span></span></div>
+        <label for="mode">Unbundling audit</label>
+        <select id="mode"><option>Flag only (remarks, no deductions)</option></select>
+        <button type="button">✓ &nbsp; Preview Fill</button>
+        <div class="note"><strong>Safe workflow:</strong> Preview current portal rows, review proposed totals and findings, then explicitly apply selected changes.</div>
+      </div>
+      <div class="foot">Version 1.5.1</div>
+    </section>
+  </main>
+</body>
+</html>

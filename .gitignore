@@ -25,3 +25,6 @@ yarn-error.log*
 
 # Build artifact (reproducible via npm run build)
 claim-autofill-extension.zip
+
+# Separately versioned and deployed privacy/support website checkout
+/privacy-site/

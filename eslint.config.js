@@ -42,7 +42,7 @@ const nodeGlobals = {
 module.exports = [
   {
     // Generated data and build output are not linted.
-    ignores: ['audit-rules.js', 'dist/**', 'node_modules/**']
+    ignores: ['audit-rules.js', 'dist/**', 'node_modules/**', 'privacy-site/**']
   },
   js.configs.recommended,
   {

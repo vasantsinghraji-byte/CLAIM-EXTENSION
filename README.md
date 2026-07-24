@@ -165,10 +165,11 @@ Medicine rows matching the configured RGHS descriptions receive a 12% deduction.
 
 ## Privacy & Security
 
-- **No Data Collection**: This extension does not collect, store, or transmit any data
-- **Local Processing**: All operations happen locally in your browser
-- **No External Servers**: No communication with external servers
+- **Local Processing**: Claim and process-sheet data is handled locally in the user's browser
+- **Local Storage**: Settings, audit/activity records, reviewer feedback, and short-lived recovery snapshots are stored in the current Chrome profile as described in `PRIVACY_POLICY.md`
+- **No Developer Servers**: The extension does not send claim, patient, browsing, or usage data to the developer, analytics services, or advertising services
 - **Restricted Production Access**: The distributed extension runs only on the official `rghs.rajasthan.gov.in` portal; localhost access exists only in the source manifest for unpacked development
+- **Privacy Policy**: See `PRIVACY_POLICY.md` for handled data, purposes, retention, sharing, and user controls
 - **Open Source**: Code is fully visible and auditable
 
 ## Browser Compatibility
