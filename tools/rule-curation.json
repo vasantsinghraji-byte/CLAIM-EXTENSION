@@ -1,7 +1,7 @@
 {
   "comment": "Hand-curated rule overlay for the RGHS Healthcare Coding Risk Audit Matrix. This file, not the raw xlsx parse, is the source of truth for codes, name patterns and action classes. Regenerate audit-rules.js with tools/generate-audit-rules.py after editing. Flip autoDeductEligible to true per rule ONLY after shadow-mode validation shows a clean false-positive record. Bump version/effectiveDate below whenever you edit this file - they are copied verbatim into audit-rules.js and must reflect when the rule data actually changed, not when the generator happened to run.",
-  "version": "2026-07-19",
-  "effectiveDate": "2026-07-19",
+  "version": "2026-07-24",
+  "effectiveDate": "2026-07-24",
   "bundles": [
     {
       "ruleId": "BI-01", "category": "Bundled investigations", "risk": "High", "action": "deduct-eligible", "autoDeductEligible": false,
@@ -501,7 +501,28 @@
     { "ruleId": "CB-06", "label": "Craniotomy + long-bone fixation billed separately (combined trauma package exists)", "risk": "High",
       "components": [ { "codes": [], "patterns": ["craniotomy", "evacuation of h(a?)ematoma"] }, { "codes": ["2840-SB010A"], "patterns": ["\\borif\\b", "fixation of diaphyseal"] } ],
       "combined": { "codes": ["2835-ST003A", "2835-ST003C"], "patterns": ["craniotomy.*fracture"] },
-      "reference": "Risk Matrix: 2835-ST003A/C" }
+      "reference": "Risk Matrix: 2835-ST003A/C" },
+    { "ruleId": "CB-07", "label": "KFT components billed individually (kidney panel package exists)", "risk": "Medium", "minComponents": 3,
+      "components": [
+        { "label": "Blood urea nitrogen", "codes": ["1446"], "patterns": ["blood urea", "urea nitrogen", "\\bbun\\b"] },
+        { "label": "Serum creatinine", "codes": ["1447"], "patterns": ["creatinine"] },
+        { "label": "Serum sodium", "codes": ["1481"], "patterns": ["serum sodium", "\\bsodium\\b"] },
+        { "label": "Serum potassium", "codes": ["1482"], "patterns": ["potassium"] },
+        { "label": "Chloride", "codes": ["1531"], "patterns": ["chloride"] }
+      ],
+      "combined": { "codes": ["1512"], "patterns": ["kidney function test", "\\bkft\\b", "renal function test", "\\brft\\b"] },
+      "reference": "Risk Matrix: KFT (1512 vs 1446/1447/1481/1482/1531)" },
+    { "ruleId": "CB-08", "label": "LFT components billed individually (liver panel package exists)", "risk": "Medium", "minComponents": 4,
+      "components": [
+        { "label": "Serum bilirubin", "codes": ["1456"], "patterns": ["bilirubin"] },
+        { "label": "SGPT/ALT", "codes": ["1475"], "patterns": ["\\bsgpt\\b", "alanine aminotransferase", "\\balt\\b"] },
+        { "label": "SGOT/AST", "codes": ["1476"], "patterns": ["\\bsgot\\b", "aspartate aminotransferase", "\\bast\\b"] },
+        { "label": "Alkaline phosphatase", "codes": ["1494"], "patterns": ["alkaline phosphatase", "\\balp\\b"] },
+        { "label": "Albumin", "codes": ["1461"], "patterns": ["\\balbumin\\b"] },
+        { "label": "Total protein / A:G ratio", "codes": ["1469"], "patterns": ["total protein", "alb/glo", "a:g ratio"] }
+      ],
+      "combined": { "codes": ["1513"], "patterns": ["liver function test", "\\blft\\b"] },
+      "reference": "Risk Matrix: LFT (1513 vs 1456/1475/1476/1494/1461/1469)" }
   ],
   "adjunctClusters": [
     { "ruleId": "AJ-01", "label": "Multiple intracoronary adjuncts in one session (IVUS/FFR/OCT)", "risk": "Medium", "minDistinct": 2,

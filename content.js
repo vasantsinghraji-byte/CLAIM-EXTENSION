@@ -157,6 +157,13 @@ function setElementValue(el, value) {
 
   el.dispatchEvent(new Event('input', { bubbles: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
+  // Some portal totals only recompute on keyup/blur handlers rather than
+  // input/change (older AngularJS/jQuery binding patterns). blur does not
+  // natively bubble, so focusout (its bubbling equivalent) covers listeners
+  // attached higher up the DOM as well as directly on the field.
+  el.dispatchEvent(new Event('keyup', { bubbles: true }));
+  el.dispatchEvent(new Event('blur', { bubbles: true }));
+  el.dispatchEvent(new Event('focusout', { bubbles: true }));
 }
 
 // Set value on a cell or its editable child
@@ -344,7 +351,9 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (text.includes('date') && !text.includes('update')) {
           dateIdx = i;
         }
-        if ((text.includes('claim') && text.includes('amount')) || text.match(/claim.*amt/i)) {
+        if ((text.includes('claim') && text.includes('amount')) ||
+            text.match(/claim.*amt/i) ||
+            (text.includes('payable') && text.includes('amount'))) {
           claimIdx = i;
         }
         if ((text.includes('approved') && text.includes('amount')) ||
@@ -495,7 +504,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         const isComponent = actions.some(action =>
           action.finding?.componentRow?.index === record.index ||
           action.finding?.components?.some(component => component.index === record.index) ||
-          action.finding?.duplicateRows?.some(row => row.index === record.index));
+          action.finding?.duplicateRows?.some(row => row.index === record.index) ||
+          (action.finding?.type === 'COMBINED_AVAILABLE' && action.finding?.rows?.includes(record.index)));
         let recommendedApproved = null;
         if (primaryFinding?.type === 'UNBUNDLING_FIXED') {
           recommendedApproved = isMain
@@ -505,6 +515,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           recommendedApproved = isMain ? Core.parseAmount(record.claimValue) || 0 : 0;
         } else if (primaryFinding?.type === 'DUPLICATE') {
           recommendedApproved = isPrimary ? Core.parseAmount(record.claimValue) || 0 : 0;
+        } else if (primaryFinding?.type === 'COMBINED_AVAILABLE') {
+          // No single row anchors a combined-package finding - every matched
+          // component is an equal candidate for the reviewer to zero out or keep.
+          recommendedApproved = 0;
         }
         const decisionRole = isMain ? 'main' : isPrimary ? 'primary' : isComponent ? 'component' : 'member';
         const decisionMethod = primaryFinding?.type === 'UNBUNDLING_FIXED'
@@ -867,7 +881,7 @@ function highlightDecisionRows(approvedByKey = {}) {
 }
 
 function refreshPassiveAuditHighlights() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   for (const row of document.querySelectorAll('tr.rghs-audit-passive')) {
     row.classList.remove('rghs-audit-passive');
   }
@@ -887,7 +901,7 @@ const schedulePassiveAudit = Core.createDebouncedProcessor(
 );
 
 function installPassiveAuditObserver() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   const observer = new MutationObserver(mutations => {
     const addedNodes = mutations.flatMap(mutation => [...mutation.addedNodes]);
     if (addedNodes.length) schedulePassiveAudit(addedNodes);
@@ -900,7 +914,18 @@ let cachedTid;
 function findTid() {
   if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
-  const match = text.match(/\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i);
+  // Process sheets label the claim "TID: <code>"; tpaOPD labels it
+  // "transaction id [OPD] :-<code>" instead - both need to resolve to a
+  // per-claim identifier since only tpaOPD's URL stays fixed across claims.
+  const patterns = [
+    /\bTID[\s:.#-]*([A-Z0-9][A-Z0-9/-]{3,19})/i,
+    /transaction\s*id[^\d]{0,25}(\d{6,20})/i
+  ];
+  let match = null;
+  for (const pattern of patterns) {
+    match = text.match(pattern);
+    if (match) break;
+  }
   if (match) cachedTid = match[1];
   return match ? match[1] : '';
 }
@@ -978,7 +1003,13 @@ function restoreAppliedSummary() {
   try {
     const saved = normalizeAppliedSummary(JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null'));
     const age = saved ? Date.now() - saved.createdAt : -1;
-    if (saved && saved.path === location.pathname && age >= 0 && age < 24 * 60 * 60 * 1000) {
+    // Path alone identifies the claim on process sheets (one path per claim) but
+    // not on tpaOPD, where every claim shares the same path - the TID is the only
+    // thing that tells two different claims apart there, so require it to agree
+    // whenever both sides actually have one.
+    const currentTid = findTid();
+    const tidCompatible = saved && (!saved.tid || !currentTid || saved.tid === currentTid);
+    if (saved && saved.path === location.pathname && tidCompatible && age >= 0 && age < 24 * 60 * 60 * 1000) {
       lastAppliedSummary = saved;
     } else {
       sessionStorage.removeItem(APPLIED_SESSION_KEY);
@@ -1050,7 +1081,7 @@ function showSubmissionInterlock() {
 }
 
 function installSubmissionInterlock() {
-  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  if (!Core.isSupportedClaimPage(location.pathname)) return;
   restoreAppliedSummary();
   document.addEventListener('click', event => {
     if (!lastAppliedSummary || !isPortalSubmitControl(event.target) || Date.now() < submitArmedUntil) return;
@@ -1145,7 +1176,12 @@ function getMatchingRecoverySnapshot(callback) {
     const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
     const activeSnapshots = snapshots.filter(item => Date.now() - item.createdAt <= 24 * 60 * 60 * 1000);
     const tid = findTid();
-    const snapshot = [...activeSnapshots].reverse().find(item => item.url === location.href || (tid && item.tid === tid));
+    // location.href alone identifies the claim on process sheets, but on tpaOPD
+    // every claim shares the same URL - matching by URL there would restore a
+    // different claim's saved field values onto whatever claim is on screen now.
+    // Once a TID is known, it must agree; URL is only trusted when no TID exists.
+    const snapshot = [...activeSnapshots].reverse().find(item =>
+      tid ? item.tid === tid : item.url === location.href);
     callback(snapshot || null, activeSnapshots);
   });
 }
