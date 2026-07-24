@@ -129,8 +129,14 @@ Verified on 2026-07-24:
   secret, or nested-site files.
 - Production manifest contains only `https://rghs.rajasthan.gov.in/*`.
 
-A live RGHS smoke remains a separate runtime gate because it requires an
-authenticated portal session and refreshed content-script context.
+Authenticated RGHS runtime verification completed on 2026-07-24:
+
+- Claim Spark loaded on `/RGHS/processSheetSearch/*`.
+- Preview and Apply populated the expected eligible approved amounts and
+  deduction remarks.
+- Undo restored all 10 approved amounts to `0` and all 10 remarks to empty.
+- No Submit action occurred.
+- The refreshed page reported no browser warnings or errors.
 
 ## 7. Phase 0 exit criteria
 
@@ -143,8 +149,7 @@ authenticated portal session and refreshed content-script context.
 - [x] Full regression and build verification is current.
 - [x] Deterministic artifact SHA-256 is recorded.
 - [x] Baseline source commit ID is recorded.
-- [ ] Authenticated live RGHS smoke is completed or explicitly carried as a
-      runtime gate.
+- [x] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed.
 
 ## 8. Phase 1 entry rule
 

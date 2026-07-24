@@ -1,6 +1,6 @@
 # Claim Amount Auto-Fill B2B Architecture Blueprint
 
-Status: Phase 0 approved and in progress
+Status: Phase 0 complete; Phase 1 awaiting project decisions
 
 Target users: Approximately 50 authorized RGHS claim processors
 
