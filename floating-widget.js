@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  if (!window.location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  const Core = globalThis.ClaimAutoFillCore;
+  if (!Core || !Core.isSupportedClaimPage(window.location.pathname)) return;
   if (document.getElementById('claim-spark-widget-host')) return;
 
   const actions = globalThis.ClaimAutoFillActions;
