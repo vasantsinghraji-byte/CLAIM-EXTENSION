@@ -46,11 +46,13 @@ test('related findings become one decision group with calculated safe and overri
   assert.deepEqual(decisionForGroup(group, 'recommended'), {
     selectedKeys: ['ptca', 'cag'],
     approvedOverrides: { ptca: 97865, cag: 0 },
+    remarkDispositions: { ptca: 'approved', cag: 'deducted' },
     acknowledgementRequired: false
   });
   assert.deepEqual(decisionForGroup(group, 'approve-all'), {
     selectedKeys: ['ptca', 'cag'],
     approvedOverrides: { ptca: 97865, cag: 6325 },
+    remarkDispositions: { ptca: 'approved', cag: 'approved' },
     acknowledgementRequired: true
   });
   assert.deepEqual(decisionForGroup(group, 'main-only').approvedOverrides, { ptca: 97865, cag: 0 });

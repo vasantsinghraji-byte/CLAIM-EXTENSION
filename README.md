@@ -165,10 +165,11 @@ Medicine rows matching the configured RGHS descriptions receive a 12% deduction.
 
 ## Privacy & Security
 
-- **No Data Collection**: This extension does not collect, store, or transmit any data
-- **Local Processing**: All operations happen locally in your browser
-- **No External Servers**: No communication with external servers
+- **Local Processing**: Claim and process-sheet data is handled locally in the user's browser
+- **Local Storage**: Settings, audit/activity records, reviewer feedback, and short-lived recovery snapshots are stored in the current Chrome profile as described in `PRIVACY_POLICY.md`
+- **No Developer Servers**: The extension does not send claim, patient, browsing, or usage data to the developer, analytics services, or advertising services
 - **Restricted Production Access**: The distributed extension runs only on the official `rghs.rajasthan.gov.in` portal; localhost access exists only in the source manifest for unpacked development
+- **Privacy Policy**: See `PRIVACY_POLICY.md` for handled data, purposes, retention, sharing, and user controls
 - **Open Source**: Code is fully visible and auditable
 
 ## Browser Compatibility
@@ -285,6 +286,29 @@ data-driven decision backed by auditor feedback:
 The toolbar icon shows a per-tab badge with the number of open audit findings
 on the current process sheet. It is cleared when the tab begins a new navigation,
 so page transitions cannot leave a stale count visible.
+
+### Custom findings and portal remarks
+
+Open **Rules & Stats** and use **Custom findings** to create profile-local
+unbundling or upcoding-review rules without editing the generated
+`audit-rules.js`. Custom rules require a unique ID, an exact code or validated
+name pattern, a plain-language reason, and an optional reference. They always
+start and remain review-only; adding a rule can never silently enable an
+automatic deduction.
+
+The same page provides decision-specific remark templates for approved,
+deducted, rejected, and held rows. Approved Amount controls remain numeric-only;
+templates are written only to portal Remarks. A blank deducted or hold template
+keeps the specialized built-in wording. Configuration is stored in
+`chrome.storage.local`, applies to open RGHS tabs, and can be exported/imported
+as schema-versioned JSON without claim or patient data. Built-in generated rules
+remain immutable and the editor can reset all custom configuration safely.
+
+Every generated built-in rule listed on **Rules & Stats** also has an
+**Edit remarks** action. Per-rule text takes precedence over the global template
+only for that rule; for example, CA-01 can use different CAG wording without
+changing BI-01 CBC remarks. **Restore this rule** removes the override and
+immediately returns to the specialized generated wording.
 
 ## Contributing
 

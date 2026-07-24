@@ -120,6 +120,7 @@
   let currentPreview = null;
   let selectedKeys = new Set();
   let approvedOverrides = {};
+  let remarkOverrides = {};
   let exceptionalGroups = new Set();
   let recoveryArmed = false;
   let dragState = null;
@@ -247,6 +248,7 @@
     }
     selectedKeys = new Set(result.proposals.filter(proposal => proposal.risk !== 'high').map(proposal => proposal.key));
     approvedOverrides = {};
+    remarkOverrides = {};
     exceptionalGroups = new Set();
     reviewList.textContent = '';
     reviewList.hidden = !result.proposals.length;
@@ -329,6 +331,7 @@
           for (const proposal of group.proposals) {
             selectedKeys.delete(proposal.key);
             delete approvedOverrides[proposal.key];
+            delete remarkOverrides[proposal.key];
           }
           exceptionalGroups.delete(group.id);
           const decision = Review.decisionForGroup(group, mode);
@@ -339,6 +342,10 @@
           }
           for (const key of decision.selectedKeys) selectedKeys.add(key);
           Object.assign(approvedOverrides, decision.approvedOverrides);
+          for (const [key, disposition] of Object.entries(decision.remarkDispositions || {})) {
+            const proposal = group.proposals.find(item => item.key === key);
+            remarkOverrides[key] = proposal?.decisionRemarks?.[disposition] || '';
+          }
           if (decision.acknowledgementRequired) exceptionalGroups.add(group.id);
           actions.highlightDecisionRows(approvedOverrides);
           for (const sibling of buttons.querySelectorAll('button')) sibling.classList.remove('selected');
@@ -403,7 +410,7 @@
     withValidExtensionContext(() => renderPreview(actions.preview()));
   });
   ackCheck.addEventListener('change', updateReviewState);
-  function applySelection(keys, overrides, acknowledgedHighRisk) {
+  function applySelection(keys, overrides, remarks, acknowledgedHighRisk) {
     if (!currentPreview || !keys.length) return;
     let result;
     if (!withValidExtensionContext(() => {
@@ -411,6 +418,7 @@
         token: currentPreview.token,
         selectedRowKeys: keys,
         approvedOverrides: overrides,
+        remarkOverrides: remarks,
         acknowledgedHighRisk
       });
     })) return;
@@ -431,6 +439,7 @@
     currentPreview = null;
     selectedKeys.clear();
     approvedOverrides = {};
+    remarkOverrides = {};
     exceptionalGroups.clear();
     reviewList.textContent = '';
     reviewList.hidden = true;
@@ -448,12 +457,13 @@
     const safeKeys = currentPreview.proposals
       .filter(proposal => proposal.risk !== 'high')
       .map(proposal => proposal.key);
-    applySelection(safeKeys, {}, false);
+    applySelection(safeKeys, {}, {}, false);
   });
   applyButton.addEventListener('click', () => {
     applySelection(
       [...selectedKeys],
       approvedOverrides,
+      remarkOverrides,
       exceptionalGroups.size === 0 || ackCheck.checked
     );
   });

@@ -6,6 +6,7 @@ Editable extension files live at the repository root. Generated files live in `d
 
 - `claim-core.js`: pure calculation, matching, row-planning, and debounce helpers
 - `review-core.js`: deterministic preview fingerprints, reconciliation, expiry, and high-risk Apply gates
+- `custom-rules.js`: validation, schema normalization, templates, and safe runtime merging for profile-local rules
 - `content.js`: RGHS DOM integration, dynamic-row observation, and undo state
 - `popup.html`, `popup.css`, `popup.js`: preview/apply/undo interface
 - `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from RGHS styles
@@ -20,6 +21,14 @@ Its drag position is clamped to the viewport and stored in `chrome.storage.local
 Page load, route updates, DOM mutations, and enabling the extension must never call `fillAllApprovedAmounts()`. Only the explicit `preview` action may calculate proposed changes, and only the explicit `fillNow` / Claim Spark Apply action may write them. Every manual preview scans the current DOM, so dynamically loaded rows remain supported without automatic mutation.
 
 Preview tokens are deterministic fingerprints of row keys, current/proposed values, remarks, risks, and reasons. Apply recomputes the preview against the live DOM and blocks stale, expired, empty, unbalanced, or unacknowledged high-risk selections. Recovery snapshots contain only control IDs, before/after values, TID/URL context, timestamp, and extension version; they expire after 24 hours and are capped at 20 entries.
+
+Custom findings are stored under `customRuleConfig` in `chrome.storage.local`.
+They may extend only the unbundling and upcoding-review families, are validated
+before persistence, and merge as review-only rules. Never add a path that lets
+an imported custom rule set `autoDeductEligible`.
+Per-built-in-rule remark overrides live in the same object under
+`builtInRemarkOverrides`; they alter only presentation and never rule matching,
+eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
 `tests/fixtures/rghs-process-sheet.html` mirrors the live RGHS hidden-leading/trailing-cell structure. Its integration test covers mapping, normal and medicine proposals, selective reconciliation, Apply validation, and stale-preview detection without requiring a network session.
 - `manifest.json`: permissions and official RGHS origin scope

@@ -27,6 +27,23 @@ test('every documentation-dependent upcoding trigger produces a review finding',
   }
 });
 
+test('deduction remark formatting is safe for every non-unbundling finding family', () => {
+  const findings = [
+    { type: 'UPCODING_REVIEW', ruleId: 'UP-TEST', remarkReason: 'Verify higher package', rows: [1] },
+    { type: 'MUTUALLY_EXCLUSIVE', ruleId: 'MX-TEST', remarkReason: 'Variants billed together', rows: [1, 2] },
+    { type: 'ADDON_NO_BASE', ruleId: 'AO-TEST', remarkReason: 'No qualifying base package', rows: [1] },
+    { type: 'COMBINED_AVAILABLE', ruleId: 'CB-TEST', remarkReason: 'Combined package available', rows: [1, 2] },
+    { type: 'ADJUNCT_CLUSTER', ruleId: 'AC-TEST', remarkReason: 'Multiple adjuncts require review', rows: [1, 2] },
+    { type: 'MULTIPLE_MAJOR', ruleId: 'MULTI-MAJOR', remarkReason: 'Multiple major procedures', rows: [1, 2] },
+    { type: 'AMOUNT_MISMATCH', ruleId: 'AMT-CALC', remarkReason: 'Claim exceeds rate x units', rows: [1] }
+  ];
+  for (const finding of findings) {
+    const remark = AuditCore.formatRemark(finding, 'deduct', finding.rows[0]);
+    assert.match(remark, /has not been allowed after review/);
+    assert.doesNotMatch(remark, /undefined/);
+  }
+});
+
 test('multiple positive-value major procedures trigger cross-cutting review on every involved row', () => {
   const lines = [
     line(1, '1001 (Major procedure A)', 'Procedure', '10000'),

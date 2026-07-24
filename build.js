@@ -10,6 +10,7 @@ const files = [
   'manifest.json',
   'background.js',
   'audit-rules.js',
+  'custom-rules.js',
   'audit-core.js',
   'claim-core.js',
   'review-core.js',

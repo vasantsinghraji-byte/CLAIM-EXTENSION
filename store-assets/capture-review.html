@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claim Amount Auto-Fill - Claim Spark review</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin:0; width:1280px; height:800px; overflow:hidden; font-family:"Segoe UI",Arial,sans-serif; color:#1f2937; background:#f3f4f6; }
+    header { height:82px; padding:21px 44px; color:white; background:linear-gradient(90deg,#4338ca,#6d28d9); display:flex; align-items:center; justify-content:space-between; }
+    header h1 { margin:0; font-size:28px; } header span { opacity:.9; font-size:17px; }
+    .portal { padding:28px 38px; }
+    .banner { display:flex; align-items:center; gap:24px; margin-bottom:20px; }
+    .banner h2 { margin:0; font-size:24px; } .synthetic { padding:7px 12px; border-radius:20px; background:#e0e7ff; color:#3730a3; font-weight:650; }
+    table { width:100%; border-collapse:collapse; background:white; box-shadow:0 8px 28px rgba(15,23,42,.08); }
+    th,td { padding:14px 13px; border:1px solid #e2e8f0; text-align:left; }
+    th { background:#334155; color:white; font-size:14px; }
+    td { font-size:14px; } input { width:100%; padding:8px; border:1px solid #cbd5e1; border-radius:5px; background:white; }
+    .flag { background:#fff7ed; }
+    .spark {
+      position:absolute; right:38px; top:126px; width:430px; padding:22px; border-radius:16px; background:white;
+      border:2px solid #7c3aed; box-shadow:0 24px 70px rgba(76,29,149,.3);
+    }
+    .spark h3 { margin:0 0 5px; color:#5b21b6; font-size:24px; }
+    .spark .sub { color:#64748b; margin-bottom:16px; }
+    .totals { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:15px; }
+    .metric { padding:11px 8px; text-align:center; border-radius:8px; background:#f5f3ff; }
+    .metric b { display:block; color:#5b21b6; font-size:18px; }
+    .card { padding:14px; border:1px solid #fdba74; border-radius:10px; background:#fff7ed; margin-bottom:14px; }
+    .card strong { display:block; margin-bottom:5px; color:#9a3412; }
+    .choice { margin-top:9px; display:flex; gap:8px; }
+    .choice span { padding:7px 9px; border-radius:7px; background:white; border:1px solid #fdba74; font-size:12px; }
+    .choice .selected { background:#7c3aed; color:white; border-color:#7c3aed; }
+    .actions { display:flex; gap:10px; }
+    button { flex:1; padding:12px; border:0; border-radius:8px; font-weight:700; }
+    .secondary { background:#e2e8f0; color:#334155; } .primary { background:#7c3aed; color:white; }
+    .privacy { position:absolute; left:38px; bottom:25px; color:#475569; font-size:16px; font-weight:600; }
+  </style>
+</head>
+<body>
+  <header><h1>RGHS Process Sheet</h1><span>Claim Amount Auto-Fill demonstration</span></header>
+  <main class="portal">
+    <div class="banner"><h2>Approved amount review</h2><span class="synthetic">Synthetic claim data</span></div>
+    <table>
+      <thead><tr><th>Particular</th><th>Package</th><th>Claim amount</th><th>Approved amount</th><th>Remarks</th></tr></thead>
+      <tbody>
+        <tr><td>Procedure</td><td>PTCA package</td><td>₹97,865</td><td><input value=""></td><td><input value=""></td></tr>
+        <tr class="flag"><td>Investigation</td><td>Coronary angiography</td><td>₹6,325</td><td><input value=""></td><td><input value=""></td></tr>
+        <tr><td>Investigation</td><td>Standard laboratory service</td><td>₹460</td><td><input value=""></td><td><input value=""></td></tr>
+      </tbody>
+    </table>
+    <aside class="spark">
+      <h3>Claim Spark Review</h3>
+      <div class="sub">Preview created — no portal fields changed</div>
+      <div class="totals">
+        <div class="metric"><b>3</b>rows</div>
+        <div class="metric"><b>₹104,650</b>claim</div>
+        <div class="metric"><b>1</b>finding</div>
+      </div>
+      <div class="card">
+        <strong>Possible bundled component</strong>
+        PTCA includes diagnostic angiography. Verify the billed component before approval.
+        <div class="choice"><span class="selected">Approve main only</span><span>Hold</span></div>
+      </div>
+      <div class="actions"><button class="secondary">Undo / Recover</button><button class="primary">Apply Selected</button></div>
+    </aside>
+    <div class="privacy">Local browser processing • Explicit reviewer action • No automatic claim submission</div>
+  </main>
+</body>
+</html>
