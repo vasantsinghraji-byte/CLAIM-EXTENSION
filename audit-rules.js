@@ -9,8 +9,8 @@
   'use strict';
   return {
   "schemaVersion": 1,
-  "version": "2026-07-21",
-  "effectiveDate": "2026-07-21",
+  "version": "2026-07-24",
+  "effectiveDate": "2026-07-24",
   "source": "RGHS_Healthcare_Coding_Risk_Audit_Matrix.xlsx",
   "generatedBy": "tools/generate-audit-rules.py",
   "bundles": [
