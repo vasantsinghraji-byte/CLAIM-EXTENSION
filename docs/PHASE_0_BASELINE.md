@@ -2,7 +2,7 @@
 
 Status: Implementation baseline
 
-Extension version: 1.5.1
+Extension version: 1.6.0
 
 Architecture target: Invite-only, non-AI MVP
 
@@ -51,7 +51,7 @@ Safety contract:
 | Item | Phase 0 baseline |
 |---|---|
 | Production origin | `https://rghs.rajasthan.gov.in/*` |
-| Active workflow route | `/RGHS/processSheetSearch/*` |
+| Active workflow routes | `/RGHS/processSheetSearch/*`, `/RGHS/tpaOPD*` |
 | Development-only origins | `http://localhost/*`, `http://127.0.0.1/*` |
 | Production build rule | Development-only origins are removed by `npm run build` |
 | Portal writes | Approved-amount fields only after explicit Apply |
@@ -62,9 +62,18 @@ package descriptions, claim amounts, approved amounts, and the page/TID context
 needed for the two workflows. This scope must not be expanded without updating
 the blueprint, tests, privacy disclosures, and Web Store declarations.
 
+`/RGHS/tpaOPD*` was added to scope after the Phase 0 freeze (merged via PR #2,
+released as 1.5.0). Unlike process sheets, every tpaOPD claim shares one URL,
+so the extension identifies the active claim by TID rather than by
+`location.href`/`location.pathname` alone; Preview/Apply/Undo and recovery
+snapshot matching are all gated on TID agreement to prevent one claim's
+reviewed data from being restored onto a different claim on screen. This
+scope addition still needs the live-portal verification described in
+section 6.
+
 ## 3. Data inventory
 
-| Data | Location | Retention | Cloud transfer in v1.5.1 |
+| Data | Location | Retention | Cloud transfer in v1.6.0 |
 |---|---|---|---|
 | Claim and approved amounts | Active RGHS page; transient memory during review | Until page/review ends | None |
 | Package, treatment, diagnosis, and row text | Active RGHS page; transient rule evaluation | Until page/review ends | None |
@@ -119,17 +128,25 @@ baseline commit:
 | Reproducibility | Two builds produce the same SHA-256 |
 | Git whitespace check | `git diff --check` passes |
 
-Verified on 2026-07-24:
+Re-verified on 2026-07-24 after reconciling this branch with `main`'s tpaOPD
+merge (main was released as 1.5.0; this branch's own rule-editor line was
+renumbered to 1.6.0 on top of it - see `CHANGELOG.md`):
 
-- Baseline source commit before Phase 0 documentation: `08a4b33`.
-- Extension regression result: 100 passed, 0 failed.
+- Baseline source commit: `d24d86c` (release commit immediately preceding
+  this documentation update), reachable from the merge of `main` at `689a15e`.
+- Extension regression result: 100 passed, 0 failed (91 from `main` plus 9
+  rule-editor tests from this branch).
 - Production package SHA-256, identical across two consecutive builds:
-  `4CCC17AF2A3FFF2EDFEBBC17354AEC23857276A74C0D8A63B04685F552706299`.
+  `149649D121F1FE199E8363DBE4255A794D1E750BAE8D64F89611D0CD22096FBB`.
 - Production ZIP contains 19 expected runtime files and no development, test,
   secret, or nested-site files.
-- Production manifest contains only `https://rghs.rajasthan.gov.in/*`.
+- Production manifest contains only `https://rghs.rajasthan.gov.in/*`
+  (an origin-wide match; it already covered `/RGHS/tpaOPD*` before this
+  merge, since route restriction happens in `claim-core.js`, not the
+  manifest match pattern - no permission change was needed for tpaOPD).
 
-Authenticated RGHS runtime verification completed on 2026-07-24:
+Authenticated RGHS runtime verification completed on 2026-07-24, before the
+tpaOPD merge:
 
 - Claim Spark loaded on `/RGHS/processSheetSearch/*`.
 - Preview and Apply populated the expected eligible approved amounts and
@@ -137,6 +154,12 @@ Authenticated RGHS runtime verification completed on 2026-07-24:
 - Undo restored all 10 approved amounts to `0` and all 10 remarks to empty.
 - No Submit action occurred.
 - The refreshed page reported no browser warnings or errors.
+
+This smoke covered `/RGHS/processSheetSearch/*` only. `/RGHS/tpaOPD*` has unit
+and regression coverage (TID-based session isolation, panel-unbundling
+detection) but has **not** had an authenticated live-portal smoke test since
+being added to scope - carried as an open item below rather than assumed
+passing.
 
 ## 7. Phase 0 exit criteria
 
@@ -149,7 +172,10 @@ Authenticated RGHS runtime verification completed on 2026-07-24:
 - [x] Full regression and build verification is current.
 - [x] Deterministic artifact SHA-256 is recorded.
 - [x] Baseline source commit ID is recorded.
-- [x] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed.
+- [x] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed
+      for `/RGHS/processSheetSearch/*`.
+- [ ] Authenticated live RGHS Preview, Apply, Undo, and no-submit smoke passed
+      for `/RGHS/tpaOPD*`.
 
 ## 8. Phase 1 entry rule
 

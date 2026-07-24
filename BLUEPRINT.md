@@ -1,10 +1,12 @@
 # Claim Amount Auto-Fill B2B Architecture Blueprint
 
-Status: Phase 0 complete; Phase 1 awaiting project decisions
+Status: Phase 0 complete for the processSheetSearch workflow; tpaOPD support
+merged and in scope, live-portal verification still outstanding (see
+`docs/PHASE_0_BASELINE.md`); Phase 1 awaiting project decisions
 
 Target users: Approximately 50 authorized RGHS claim processors
 
-Baseline: Existing Manifest V3 extension version 1.5.1
+Baseline: Existing Manifest V3 extension version 1.6.0
 
 Recommended first milestone: Invite-only, non-AI MVP
 
