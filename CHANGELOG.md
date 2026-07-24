@@ -119,3 +119,7 @@
 ## 1.4.20 - 2026-07-19
 
 - Complete profile-local override isolation by deleting the legacy Chrome sync key only after its one-time local migration succeeds.
+
+## 1.5.0 - 2026-07-24
+
+- Add tpaOPD claim-page support with TID-based session isolation (prevents stale review/recovery data crossing claims that share one URL), KFT/LFT panel-unbundling detection, and make audit-rules.js version/effectiveDate deterministic instead of wall-clock-dependent.
