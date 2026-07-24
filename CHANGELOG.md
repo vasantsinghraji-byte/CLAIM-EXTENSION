@@ -123,3 +123,7 @@
 ## 1.5.0 - 2026-07-24
 
 - Add tpaOPD claim-page support with TID-based session isolation (prevents stale review/recovery data crossing claims that share one URL), KFT/LFT panel-unbundling detection, and make audit-rules.js version/effectiveDate deterministic instead of wall-clock-dependent.
+
+## 1.6.0 - 2026-07-24
+
+- Added a validated profile-local Rule Editor for custom unbundling and upcoding findings (decision-specific portal remark templates, safe JSON import/export, grouped-decision remark application), reversible per-built-in-rule remark overrides, and a type-safe fallback fix preventing grouped-decision remark generation from crashing on upcoding and other non-unbundling findings.
