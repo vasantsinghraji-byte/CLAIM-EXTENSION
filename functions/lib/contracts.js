@@ -98,6 +98,19 @@ function safeDocumentId(value, name = 'id') {
   return id;
 }
 
+// activateUser accepts either a uid or an email (never both/neither) so an
+// admin activating an invited processor doesn't need to look up their uid in
+// the console first. The actual Auth lookup for the email case stays in
+// index.js (Admin SDK I/O); this only validates the request shape.
+function resolveActivationTarget(data) {
+  const hasUid = Object.prototype.hasOwnProperty.call(data, 'uid');
+  const hasEmail = Object.prototype.hasOwnProperty.call(data, 'email');
+  if (hasUid === hasEmail) throw new Error('Provide exactly one of uid or email');
+  return hasUid
+    ? { by: 'uid', value: safeDocumentId(data.uid, 'uid') }
+    : { by: 'email', value: normalizedEmail(data.email) };
+}
+
 function licenceAccessDecision({ status, expiryMs, now, gracePeriodMs }) {
   if (status === 'suspended') {
     return { status: 'suspended', previewAllowed: false, applyAllowed: false };
@@ -127,6 +140,7 @@ module.exports = {
   licenceAccessDecision,
   normalizedEmail,
   requiredString,
+  resolveActivationTarget,
   safeDocumentId,
   tokenHash
 };

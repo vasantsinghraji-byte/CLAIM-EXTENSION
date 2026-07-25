@@ -58,6 +58,26 @@ body {
   margin-bottom: 6px;
 }
 
+.auth-link {
+  text-align: center;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.auth-link a {
+  color: #667eea;
+  text-decoration: none;
+}
+
+.auth-error {
+  color: #721c24;
+  font-weight: 600;
+}
+
+.auth-error:empty {
+  display: none;
+}
+
 .toggle-section {
   margin-bottom: 20px;
 }

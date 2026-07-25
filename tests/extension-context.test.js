@@ -83,6 +83,27 @@ test('background wires auth-core, the three auth message actions, and the licenc
   assert.match(background, /alarm\.name === LICENCE_RECHECK_ALARM/);
 });
 
+test('background wires the full sign-up, verify-email, accept-invitation, and activation-check chain', () => {
+  const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authAcceptInvitation', 'authCheckActivation', 'authCancelSignUp']) {
+    assert.match(background, new RegExp(`request\\?\\.action === '${action}'`));
+  }
+  assert.match(background, /AuthCore\.signUp\(/);
+  assert.match(background, /AuthCore\.sendEmailVerification\(/);
+  assert.match(background, /AuthCore\.accountInfo\(/);
+  assert.match(background, /error\.status === 'PERMISSION_DENIED'/);
+  assert.match(background, /name: 'acceptInvitation'/);
+});
+
+test('popup wires sign-up, verify-email, accept-invitation, and activation-check UI', () => {
+  const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authAcceptInvitation', 'authCheckActivation', 'authCancelSignUp']) {
+    assert.match(popup, new RegExp(`action: '${action}'`));
+  }
+  assert.match(popup, /password !== confirmPassword/);
+  assert.match(popup, /inviteErrorMessages/);
+});
+
 test('popup and floating widget explain every auth/licence block reason', () => {
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
   const widget = fs.readFileSync(path.join(__dirname, '..', 'floating-widget.js'), 'utf8');

@@ -57,6 +57,73 @@
     };
   }
 
+  async function signUp({ apiKey, email, password, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, returnSecureToken: true })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json();
+    if (!response.ok) throw normalizeRestError(payload);
+    return {
+      idToken: payload.idToken,
+      refreshToken: payload.refreshToken,
+      expiresAt: computeExpiresAt(payload.expiresIn),
+      uid: payload.localId,
+      email: payload.email
+    };
+  }
+
+  async function sendEmailVerification({ apiKey, idToken, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json();
+    if (!response.ok) throw normalizeRestError(payload);
+    return { email: payload.email };
+  }
+
+  // Live lookup of the current server-side account state (email_verified in
+  // particular) - more reliable than decoding the idToken's own claims, which
+  // only reflect verification status as of when that token was issued.
+  async function accountInfo({ apiKey, idToken, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json();
+    if (!response.ok) throw normalizeRestError(payload);
+    const user = (payload.users || [])[0] || {};
+    return { emailVerified: user.emailVerified === true };
+  }
+
   async function refreshIdToken({ apiKey, refreshToken, fetchImpl }) {
     let response;
     try {
@@ -110,6 +177,9 @@
 
   return {
     signInWithPassword,
+    signUp,
+    sendEmailVerification,
+    accountInfo,
     refreshIdToken,
     callFunction,
     computeExpiresAt,
