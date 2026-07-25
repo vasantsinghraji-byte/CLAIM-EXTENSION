@@ -8,6 +8,7 @@ const {
   boundedInteger,
   licenceAccessDecision,
   normalizedEmail,
+  resolveActivationTarget,
   safeDocumentId,
   tokenHash
 } = require('../lib/contracts');
@@ -41,6 +42,13 @@ test('invitation tokens are stored as deterministic hashes', () => {
   assert.equal(tokenHash('one-time-token'), tokenHash('one-time-token'));
   assert.notEqual(tokenHash('one-time-token'), tokenHash('another-token'));
   assert.equal(tokenHash('one-time-token').length, 64);
+});
+
+test('activateUser accepts exactly one of uid or email, never both or neither', () => {
+  assert.deepEqual(resolveActivationTarget({ uid: 'u1' }), { by: 'uid', value: 'u1' });
+  assert.deepEqual(resolveActivationTarget({ email: ' Processor@Example.COM ' }), { by: 'email', value: 'processor@example.com' });
+  assert.throws(() => resolveActivationTarget({}), /exactly one/);
+  assert.throws(() => resolveActivationTarget({ uid: 'u1', email: 'a@b.com' }), /exactly one/);
 });
 
 test('licence decisions preserve apply safety during grace and suspension', () => {

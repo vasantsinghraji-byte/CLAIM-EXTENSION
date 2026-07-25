@@ -18,6 +18,37 @@
         <input type="email" id="authEmail" name="authEmail" placeholder="Email" autocomplete="username">
         <input type="password" id="authPassword" name="authPassword" placeholder="Password" autocomplete="current-password">
         <button id="authSignInBtn" class="btn btn-primary">Sign In</button>
+        <p class="auth-link"><a href="#" id="showSignUpLink">New processor? Create an account</a></p>
+      </div>
+      <div id="authSignUpPanel" class="auth-section" hidden>
+        <input type="email" id="signUpEmail" name="signUpEmail" placeholder="Email" autocomplete="username">
+        <input type="password" id="signUpPassword" name="signUpPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
+        <input type="password" id="signUpConfirmPassword" name="signUpConfirmPassword" placeholder="Confirm password" autocomplete="new-password">
+        <input type="text" id="signUpDisplayName" name="signUpDisplayName" placeholder="Your name">
+        <input type="text" id="signUpInvitationToken" name="signUpInvitationToken" placeholder="Invitation token (from your administrator)">
+        <button id="signUpBtn" class="btn btn-primary">Create Account</button>
+        <p class="auth-link"><a href="#" id="showSignInLink">Already have an account? Sign in</a></p>
+      </div>
+      <div id="authVerifyEmail" class="auth-section" hidden>
+        <p id="verifyEmailLabel"></p>
+        <p>Check your inbox for a verification link, then continue.</p>
+        <div class="btn-row">
+          <button id="resendVerificationBtn" class="btn btn-secondary btn-small">Resend Email</button>
+          <button id="checkVerifiedBtn" class="btn btn-primary btn-small">I've Verified &mdash; Continue</button>
+        </div>
+        <p class="auth-link"><a href="#" id="cancelSignUpLink1">Start over</a></p>
+      </div>
+      <div id="authAcceptInvitation" class="auth-section" hidden>
+        <p id="acceptInvitationError" class="auth-error"></p>
+        <input type="text" id="acceptInvitationToken" name="acceptInvitationToken" placeholder="Invitation token">
+        <input type="text" id="acceptInvitationName" name="acceptInvitationName" placeholder="Your name">
+        <button id="acceptInvitationBtn" class="btn btn-primary">Accept Invitation</button>
+        <p class="auth-link"><a href="#" id="cancelSignUpLink2">Start over</a></p>
+      </div>
+      <div id="authAwaitingActivation" class="auth-section" hidden>
+        <p>Invitation accepted. Waiting for your administrator to activate your account.</p>
+        <button id="checkActivationBtn" class="btn btn-secondary btn-small">Check Status</button>
+        <p class="auth-link"><a href="#" id="cancelSignUpLink3">Start over</a></p>
       </div>
       <div id="authSignedIn" class="auth-section" hidden>
         <p id="authEmailLabel"></p>

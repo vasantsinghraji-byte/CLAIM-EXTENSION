@@ -168,6 +168,18 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         await storageSet(storage, { licenceState: state });
         return state;
       });
+    },
+    setPendingAuth(pending) {
+      return enqueue('pendingAuth', async () => {
+        await storageSet(storage, { pendingAuth: pending });
+        return pending;
+      });
+    },
+    clearPendingAuth() {
+      return enqueue('pendingAuth', async () => {
+        await storageSet(storage, { pendingAuth: null });
+        return null;
+      });
     }
   };
 }
@@ -231,6 +243,141 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
     if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
     return { success: true };
+  }
+
+  async function refreshPendingIfStale(pending) {
+    if (AuthCore.isTokenFresh(pending)) return pending;
+    const refreshed = await AuthCore.refreshIdToken({
+      apiKey: FIREBASE_WEB_API_KEY,
+      refreshToken: pending.refreshToken,
+      fetchImpl: fetch
+    });
+    const next = { ...pending, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
+    await storageWriter.setPendingAuth(next);
+    return next;
+  }
+
+  // Tries acceptInvitation with whatever invitation token/display name are on
+  // the pending record. Never throws: a failed attempt (bad/expired/already-
+  // used token) just stays at the 'accept-invitation' stage with lastError
+  // set, so the popup can show it and let the user correct the token.
+  async function attemptAcceptInvitation(pending) {
+    try {
+      await AuthCore.callFunction({
+        functionsBaseUrl: FUNCTIONS_BASE_URL,
+        name: 'acceptInvitation',
+        idToken: pending.idToken,
+        data: { token: pending.invitationToken, displayName: pending.displayName },
+        fetchImpl: fetch
+      });
+      const next = { ...pending, stage: 'awaiting-activation', lastError: null };
+      await storageWriter.setPendingAuth(next);
+      return next;
+    } catch (error) {
+      const next = { ...pending, stage: 'accept-invitation', lastError: String(error.status || error.message || error) };
+      await storageWriter.setPendingAuth(next);
+      return next;
+    }
+  }
+
+  async function handleAuthSignUp(email, password, displayName, invitationTokenValue) {
+    const session = await AuthCore.signUp({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
+    await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: session.idToken, fetchImpl: fetch });
+    await storageWriter.setPendingAuth({
+      uid: session.uid,
+      email: session.email,
+      idToken: session.idToken,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      displayName: String(displayName || '').trim(),
+      invitationToken: String(invitationTokenValue || '').trim(),
+      stage: 'verify-email',
+      lastError: null
+    });
+    return { success: true };
+  }
+
+  async function handleResendVerification() {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: pending.idToken, fetchImpl: fetch });
+    return { success: true };
+  }
+
+  // On success, immediately attempts acceptInvitation with the token/name
+  // collected at sign-up - no separate manual step for the common case where
+  // the invitation is still valid.
+  async function handleCheckEmailVerified() {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    const info = await AuthCore.accountInfo({ apiKey: FIREBASE_WEB_API_KEY, idToken: pending.idToken, fetchImpl: fetch });
+    if (!info.emailVerified) {
+      await storageWriter.setPendingAuth(pending);
+      return { success: true, emailVerified: false };
+    }
+    const afterAccept = await attemptAcceptInvitation({ ...pending, stage: 'accept-invitation' });
+    return { success: true, emailVerified: true, stage: afterAccept.stage, error: afterAccept.lastError };
+  }
+
+  // Manual retry, used when the auto-attempt above failed (e.g. the token was
+  // mistyped, expired, or already used) and the user corrects it.
+  async function handleAcceptInvitation(invitationTokenValue, displayName) {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    const result = await attemptAcceptInvitation({
+      ...pending,
+      invitationToken: String(invitationTokenValue || '').trim(),
+      displayName: String(displayName || '').trim()
+    });
+    return { success: !result.lastError, stage: result.stage, error: result.lastError };
+  }
+
+  // acceptInvitation leaves accountStatus 'invited', not 'active' - a platform
+  // admin still has to call activateUser. Until they do, getCurrentUserProfile
+  // (and everything else gated by activeUser()) fails PERMISSION_DENIED, which
+  // just means "keep waiting", not an error to surface.
+  async function handleCheckActivation() {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    let profile;
+    try {
+      profile = await AuthCore.callFunction({
+        functionsBaseUrl: FUNCTIONS_BASE_URL,
+        name: 'getCurrentUserProfile',
+        idToken: pending.idToken,
+        data: {},
+        fetchImpl: fetch
+      });
+    } catch (error) {
+      if (error.status === 'PERMISSION_DENIED') return { success: true, active: false };
+      throw error;
+    }
+    await storageWriter.setAuthSession({
+      uid: pending.uid,
+      email: pending.email,
+      displayName: profile?.displayName || pending.displayName || '',
+      organizationId: profile?.organizationId || null,
+      role: profile?.role || null,
+      idToken: pending.idToken,
+      refreshToken: pending.refreshToken,
+      expiresAt: pending.expiresAt,
+      signedInAt: Date.now()
+    });
+    const licence = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'verifyLicence',
+      idToken: pending.idToken,
+      data: { extensionVersion: chrome.runtime.getManifest().version },
+      fetchImpl: fetch
+    });
+    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    await storageWriter.clearPendingAuth();
+    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    return { success: true, active: true };
   }
 
   async function performLicenceRecheck() {
@@ -308,6 +455,42 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     if (request?.action === 'authRefreshLicence') {
       performLicenceRecheck()
         .then(licenceState => sendResponse({ success: true, licenceState }))
+        .catch(error => sendResponse({ success: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authSignUp') {
+      handleAuthSignUp(request.email, request.password, request.displayName, request.invitationToken)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authResendVerification') {
+      handleResendVerification()
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authCheckEmailVerified') {
+      handleCheckEmailVerified()
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authAcceptInvitation') {
+      handleAcceptInvitation(request.invitationToken, request.displayName)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authCheckActivation') {
+      handleCheckActivation()
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authCancelSignUp') {
+      storageWriter.clearPendingAuth()
+        .then(() => sendResponse({ success: true }))
         .catch(error => sendResponse({ success: false, error: String(error.message || error) }));
       return true;
     }

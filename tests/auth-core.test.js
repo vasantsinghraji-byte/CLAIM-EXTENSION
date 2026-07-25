@@ -61,6 +61,62 @@ test('a fetch failure is normalized to NETWORK_ERROR rather than leaking the raw
   );
 });
 
+test('signUp parses tokens for a newly created account', async () => {
+  const result = await AuthCore.signUp({
+    apiKey: 'test-key',
+    email: 'new-processor@example.com',
+    password: 'secret123',
+    fetchImpl: async () => jsonResponse(true, {
+      idToken: 'new-id-token', refreshToken: 'new-refresh-token', expiresIn: '3600', localId: 'uid-2', email: 'new-processor@example.com'
+    })
+  });
+  assert.equal(result.uid, 'uid-2');
+  assert.equal(result.idToken, 'new-id-token');
+});
+
+for (const code of ['EMAIL_EXISTS', 'WEAK_PASSWORD', 'INVALID_EMAIL', 'OPERATION_NOT_ALLOWED']) {
+  test(`signUp maps the Identity Toolkit ${code} error to a normalized code`, async () => {
+    await assert.rejects(
+      AuthCore.signUp({
+        apiKey: 'test-key',
+        email: 'new-processor@example.com',
+        password: 'x',
+        fetchImpl: async () => jsonResponse(false, { error: { message: code } })
+      }),
+      error => error.code === code
+    );
+  });
+}
+
+test('sendEmailVerification returns the target email on success', async () => {
+  const result = await AuthCore.sendEmailVerification({
+    apiKey: 'test-key',
+    idToken: 'id-token',
+    fetchImpl: async (url, init) => {
+      assert.match(url, /accounts:sendOobCode/);
+      assert.deepEqual(JSON.parse(init.body), { requestType: 'VERIFY_EMAIL', idToken: 'id-token' });
+      return jsonResponse(true, { email: 'new-processor@example.com' });
+    }
+  });
+  assert.equal(result.email, 'new-processor@example.com');
+});
+
+test('accountInfo reports emailVerified from the live lookup, not the cached token', async () => {
+  const verified = await AuthCore.accountInfo({
+    apiKey: 'test-key',
+    idToken: 'id-token',
+    fetchImpl: async () => jsonResponse(true, { users: [{ email: 'a@b.com', emailVerified: true }] })
+  });
+  assert.equal(verified.emailVerified, true);
+
+  const unverified = await AuthCore.accountInfo({
+    apiKey: 'test-key',
+    idToken: 'id-token',
+    fetchImpl: async () => jsonResponse(true, { users: [{ email: 'a@b.com' }] })
+  });
+  assert.equal(unverified.emailVerified, false);
+});
+
 test('refreshIdToken parses the Secure Token API snake_case response', async () => {
   const result = await AuthCore.refreshIdToken({
     apiKey: 'test-key',

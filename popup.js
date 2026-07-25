@@ -1,6 +1,10 @@
 // Popup script for controlling the extension
 
 const authSignedOut = document.getElementById('authSignedOut');
+const authSignUpPanel = document.getElementById('authSignUpPanel');
+const authVerifyEmail = document.getElementById('authVerifyEmail');
+const authAcceptInvitation = document.getElementById('authAcceptInvitation');
+const authAwaitingActivation = document.getElementById('authAwaitingActivation');
 const authSignedIn = document.getElementById('authSignedIn');
 const authEmailInput = document.getElementById('authEmail');
 const authPasswordInput = document.getElementById('authPassword');
@@ -9,6 +13,28 @@ const authEmailLabel = document.getElementById('authEmailLabel');
 const licenceStatusLabel = document.getElementById('licenceStatusLabel');
 const authRecheckBtn = document.getElementById('authRecheckBtn');
 const authSignOutBtn = document.getElementById('authSignOutBtn');
+const showSignUpLink = document.getElementById('showSignUpLink');
+const showSignInLink = document.getElementById('showSignInLink');
+const signUpEmailInput = document.getElementById('signUpEmail');
+const signUpPasswordInput = document.getElementById('signUpPassword');
+const signUpConfirmPasswordInput = document.getElementById('signUpConfirmPassword');
+const signUpDisplayNameInput = document.getElementById('signUpDisplayName');
+const signUpInvitationTokenInput = document.getElementById('signUpInvitationToken');
+const signUpBtn = document.getElementById('signUpBtn');
+const verifyEmailLabel = document.getElementById('verifyEmailLabel');
+const resendVerificationBtn = document.getElementById('resendVerificationBtn');
+const checkVerifiedBtn = document.getElementById('checkVerifiedBtn');
+const acceptInvitationError = document.getElementById('acceptInvitationError');
+const acceptInvitationTokenInput = document.getElementById('acceptInvitationToken');
+const acceptInvitationNameInput = document.getElementById('acceptInvitationName');
+const acceptInvitationBtn = document.getElementById('acceptInvitationBtn');
+const checkActivationBtn = document.getElementById('checkActivationBtn');
+const cancelSignUpLinks = [
+  document.getElementById('cancelSignUpLink1'),
+  document.getElementById('cancelSignUpLink2'),
+  document.getElementById('cancelSignUpLink3')
+];
+let showingSignUp = false;
 const toggle = document.getElementById('autoFillToggle');
 const auditModeSelect = document.getElementById('auditMode');
 const fillNowBtn = document.getElementById('fillNowBtn');
@@ -58,7 +84,19 @@ const authErrorMessages = {
   INVALID_LOGIN_CREDENTIALS: 'Incorrect email or password.',
   USER_DISABLED: 'This account has been disabled. Contact your administrator.',
   TOO_MANY_ATTEMPTS_TRY_LATER: 'Too many attempts. Try again later.',
-  NETWORK_ERROR: 'Unable to reach the sign-in service. Check your connection.'
+  NETWORK_ERROR: 'Unable to reach the sign-in service. Check your connection.',
+  EMAIL_EXISTS: 'An account already exists for that email. Try signing in instead.',
+  WEAK_PASSWORD: 'Password must be at least 6 characters.',
+  INVALID_EMAIL: 'Enter a valid email address.',
+  OPERATION_NOT_ALLOWED: 'Account creation is currently disabled. Contact your administrator.'
+};
+
+const inviteErrorMessages = {
+  NOT_FOUND: 'That invitation token is not valid. Double-check it with your administrator.',
+  FAILED_PRECONDITION: 'That invitation has already been used.',
+  DEADLINE_EXCEEDED: 'That invitation has expired. Ask your administrator to send a new one.',
+  PERMISSION_DENIED: 'That invitation was sent to a different email address.',
+  ALREADY_EXISTS: 'An account for this invitation already exists. Try signing in instead.'
 };
 
 function describeLicenceStatus(state) {
@@ -69,25 +107,158 @@ function describeLicenceStatus(state) {
   return 'Apply disabled. Contact your administrator.';
 }
 
-function renderAuthState(authSession, licenceState) {
-  const signedIn = !!authSession;
-  authSignedOut.hidden = signedIn;
-  authSignedIn.hidden = !signedIn;
-  if (signedIn) {
+function renderAuthState(authSession, licenceState, pendingAuth) {
+  const stage = authSession
+    ? 'signed-in'
+    : pendingAuth
+      ? pendingAuth.stage
+      : showingSignUp ? 'sign-up' : 'signed-out';
+
+  authSignedOut.hidden = stage !== 'signed-out';
+  authSignUpPanel.hidden = stage !== 'sign-up';
+  authVerifyEmail.hidden = stage !== 'verify-email';
+  authAcceptInvitation.hidden = stage !== 'accept-invitation';
+  authAwaitingActivation.hidden = stage !== 'awaiting-activation';
+  authSignedIn.hidden = stage !== 'signed-in';
+
+  if (stage === 'signed-in') {
     authEmailLabel.textContent = authSession.email || '';
     licenceStatusLabel.textContent = describeLicenceStatus(licenceState);
   }
+  if (stage === 'verify-email') {
+    verifyEmailLabel.textContent = pendingAuth.email || '';
+  }
+  if (stage === 'accept-invitation') {
+    acceptInvitationTokenInput.value = pendingAuth.invitationToken || '';
+    acceptInvitationNameInput.value = pendingAuth.displayName || '';
+    acceptInvitationError.textContent = pendingAuth.lastError ? (inviteErrorMessages[pendingAuth.lastError] || 'Unable to accept the invitation.') : '';
+  }
 }
 
-chrome.storage.local.get(['authSession', 'licenceState'], result => {
-  renderAuthState(result.authSession, result.licenceState);
-});
+function loadAuthState() {
+  chrome.storage.local.get(['authSession', 'licenceState', 'pendingAuth'], result => {
+    renderAuthState(result.authSession, result.licenceState, result.pendingAuth);
+  });
+}
+
+loadAuthState();
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (!changes.authSession && !changes.licenceState) return;
-  chrome.storage.local.get(['authSession', 'licenceState'], result => {
-    renderAuthState(result.authSession, result.licenceState);
+  if (!changes.authSession && !changes.licenceState && !changes.pendingAuth) return;
+  loadAuthState();
+});
+
+showSignUpLink.addEventListener('click', event => {
+  event.preventDefault();
+  showingSignUp = true;
+  loadAuthState();
+});
+
+showSignInLink.addEventListener('click', event => {
+  event.preventDefault();
+  showingSignUp = false;
+  loadAuthState();
+});
+
+for (const link of cancelSignUpLinks) {
+  link.addEventListener('click', event => {
+    event.preventDefault();
+    chrome.runtime.sendMessage({ action: 'authCancelSignUp' }, () => {
+      showingSignUp = false;
+      loadAuthState();
+    });
+  });
+}
+
+signUpBtn.addEventListener('click', () => {
+  const email = signUpEmailInput.value.trim();
+  const password = signUpPasswordInput.value;
+  const confirmPassword = signUpConfirmPasswordInput.value;
+  const displayName = signUpDisplayNameInput.value.trim();
+  const invitationToken = signUpInvitationTokenInput.value.trim();
+  if (!email || !password || !displayName || !invitationToken) {
+    showStatus('Fill in every field, including your invitation token', 'warning');
+    return;
+  }
+  if (password !== confirmPassword) {
+    showStatus('Passwords do not match', 'warning');
+    return;
+  }
+  signUpBtn.disabled = true;
+  signUpBtn.textContent = 'Creating account...';
+  chrome.runtime.sendMessage({ action: 'authSignUp', email, password, displayName, invitationToken }, response => {
+    signUpBtn.disabled = false;
+    signUpBtn.textContent = 'Create Account';
+    if (!response?.success) {
+      showStatus(authErrorMessages[response?.error] || 'Could not create account. Try again.', 'error');
+      return;
+    }
+    signUpPasswordInput.value = '';
+    signUpConfirmPasswordInput.value = '';
+    showStatus('Account created. Check your email to verify it.', 'success');
+    loadAuthState();
+  });
+});
+
+resendVerificationBtn.addEventListener('click', () => {
+  resendVerificationBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authResendVerification' }, response => {
+    resendVerificationBtn.disabled = false;
+    showStatus(response?.success ? 'Verification email sent' : 'Unable to resend right now', response?.success ? 'success' : 'error');
+  });
+});
+
+checkVerifiedBtn.addEventListener('click', () => {
+  checkVerifiedBtn.disabled = true;
+  checkVerifiedBtn.textContent = 'Checking...';
+  chrome.runtime.sendMessage({ action: 'authCheckEmailVerified' }, response => {
+    checkVerifiedBtn.disabled = false;
+    checkVerifiedBtn.textContent = "I've Verified — Continue";
+    if (!response?.success) {
+      showStatus('Unable to check verification status right now', 'error');
+      return;
+    }
+    if (!response.emailVerified) {
+      showStatus('Not verified yet. Check your inbox (and spam) for the link.', 'warning');
+      return;
+    }
+    showStatus(response.error ? 'Email verified. Confirm your invitation details below.' : 'Email verified. Invitation accepted.', response.error ? 'warning' : 'success');
+    loadAuthState();
+  });
+});
+
+acceptInvitationBtn.addEventListener('click', () => {
+  const invitationToken = acceptInvitationTokenInput.value.trim();
+  const displayName = acceptInvitationNameInput.value.trim();
+  if (!invitationToken || !displayName) {
+    showStatus('Enter both your name and invitation token', 'warning');
+    return;
+  }
+  acceptInvitationBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authAcceptInvitation', invitationToken, displayName }, response => {
+    acceptInvitationBtn.disabled = false;
+    if (!response?.success) {
+      showStatus('Unable to accept the invitation right now', 'error');
+      return;
+    }
+    showStatus(response.stage === 'awaiting-activation' ? 'Invitation accepted' : 'Unable to accept the invitation', response.stage === 'awaiting-activation' ? 'success' : 'error');
+    loadAuthState();
+  });
+});
+
+checkActivationBtn.addEventListener('click', () => {
+  checkActivationBtn.disabled = true;
+  checkActivationBtn.textContent = 'Checking...';
+  chrome.runtime.sendMessage({ action: 'authCheckActivation' }, response => {
+    checkActivationBtn.disabled = false;
+    checkActivationBtn.textContent = 'Check Status';
+    if (!response?.success) {
+      showStatus('Unable to check activation status right now', 'error');
+      return;
+    }
+    showStatus(response.active ? 'Account activated. Signed in.' : 'Still waiting for your administrator to activate your account.', response.active ? 'success' : 'info');
+    loadAuthState();
   });
 });
 

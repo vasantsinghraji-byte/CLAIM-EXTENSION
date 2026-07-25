@@ -20,6 +20,7 @@ const {
   licenceAccessDecision,
   normalizedEmail,
   requiredString,
+  resolveActivationTarget,
   safeDocumentId,
   tokenHash
 } = require('./lib/contracts');
@@ -284,12 +285,21 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
   }
 });
 
+async function resolveUid(target) {
+  if (target.by === 'uid') return target.value;
+  try {
+    return (await getAuth().getUserByEmail(target.value)).uid;
+  } catch {
+    fail('not-found', 'No account found for that email');
+  }
+}
+
 exports.activateUser = onCall(callableOptions, async request => {
   try {
     requirePlatformAdmin(request);
     const data = callableData(request);
-    assertKeys(data, ['uid'], ['uid']);
-    const uid = safeDocumentId(data.uid, 'uid');
+    assertKeys(data, ['uid', 'email']);
+    const uid = await resolveUid(resolveActivationTarget(data));
     const reference = db.doc(`users/${uid}`);
     const snapshot = await reference.get();
     if (!snapshot.exists) fail('not-found', 'User not found');

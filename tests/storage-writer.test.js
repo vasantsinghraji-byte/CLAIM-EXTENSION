@@ -119,6 +119,24 @@ test('auth session and licence state are written and cleared through the service
   assert.equal(storage.data.authSession, null);
 });
 
+test('pending sign-up state is written and cleared independently of a full auth session', async () => {
+  const storage = delayedStorage();
+  const writer = createSerializedStorageWriter(storage);
+  const pending = {
+    uid: 'uid-2', email: 'new@example.com', idToken: 'a', refreshToken: 'b', expiresAt: Date.now() + 3600000,
+    displayName: 'New Processor', invitationToken: 'tok', stage: 'verify-email', lastError: null
+  };
+  assert.deepEqual(await writer.setPendingAuth(pending), pending);
+  assert.deepEqual(storage.data.pendingAuth, pending);
+
+  const advanced = { ...pending, stage: 'accept-invitation' };
+  assert.deepEqual(await writer.setPendingAuth(advanced), advanced);
+  assert.deepEqual(storage.data.pendingAuth, advanced);
+
+  assert.equal(await writer.clearPendingAuth(), null);
+  assert.equal(storage.data.pendingAuth, null);
+});
+
 test('concurrent sign-in and licence-recheck writes never race on the same key', async () => {
   const storage = delayedStorage();
   const writer = createSerializedStorageWriter(storage);
