@@ -1,7 +1,7 @@
 # Phase 1 — Firebase Foundation
 
-Status: Local foundation and development Firestore complete; development
-Blaze, budget alerts and IAM review complete; Functions deployment pending
+Status: Development foundation deployed; Authentication and initial
+platform-administrator bootstrap complete; production remains release-gated
 
 Publisher: `NOCTURNAL_ADMIN`
 
@@ -39,6 +39,10 @@ administrators and billing users.
 
 - Firebase aliases for development and production.
 - Node.js 22 Cloud Functions runtime in `asia-south1`.
+- Eleven callable Cloud Functions deployed and active in development.
+- Email/password Authentication enabled with passwords required.
+- Verified, active `NOCTURNAL_ADMIN` platform-administrator identity, custom
+  claims, user profile and internal platform organization.
 - Authentication, Functions, Firestore and Storage emulators.
 - Deny-by-default Firestore rules and a deny-all Storage policy for any future
   Storage provisioning.
@@ -91,10 +95,16 @@ its Manifest V3 permissions, RGHS DOM behavior, Preview, Apply or Undo flow.
 The current Web Store privacy disclosures therefore remain accurate for
 version 1.6.0.
 
-Firestore rules and indexes are deployed to development. The earlier Functions
-deploy attempt stopped before any Function was created. Blaze and the budget
-guardrail are now configured, so the development Functions deployment may
-proceed after the standard pre-deployment checks.
+Firestore rules and indexes are deployed to development. All eleven Node.js 22
+callable Functions are deployed in `asia-south1` and were read back as
+`ACTIVE`. The generated Function images have a seven-day Artifact Registry
+cleanup policy to limit development storage costs.
+
+Email/password Authentication is enabled and requires a password. The initial
+account `nocturnaladmin@gmail.com` is email-verified, enabled and active with
+the `platformAdmin` role and `platform` organization in both custom claims and
+Firestore. A one-time password-setup email was sent to that address; no
+password, OAuth token or service-account key was written to the repository.
 
 The development IAM review found one human administrator:
 `nocturnaladmin@gmail.com` (`NOCTURNAL_ADMIN`) with Owner. The other principals
@@ -112,4 +122,4 @@ production tree reports eight moderate transitive advisories and no high or
 critical advisories. npm's suggested resolution requires `firebase-admin` 14,
 while the selected stable `firebase-functions` release declares support only
 through `firebase-admin` 13. A forced major or release-candidate upgrade was
-not applied. Recheck this boundary before the first deployed beta.
+not applied. Recheck this boundary before the first beta rollout.
