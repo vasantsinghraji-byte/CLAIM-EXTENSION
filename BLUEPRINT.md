@@ -2,7 +2,9 @@
 
 Status: Phase 0 complete, including live-portal verification for both
 processSheetSearch and tpaOPD (see `docs/PHASE_0_BASELINE.md`); Phase 1
-awaiting project decisions (see section 25)
+Firebase foundation implemented and locally verified, with development
+Functions deployment awaiting Blaze billing (see
+`docs/PHASE_1_FIREBASE_FOUNDATION.md`)
 
 Target users: Approximately 50 authorized RGHS claim processors
 
@@ -833,16 +835,16 @@ MVP commitment.
 
 | Decision | Required answer |
 |---|---|
-| Publisher identity | Legal or trading name shown publicly |
-| Support | Monitored public support email |
-| Firebase projects | Development and production project IDs |
-| Initial organizations | One organization or multiple customers |
-| Licence term | Monthly, quarterly, annual, or fixed pilot |
-| Seat enforcement | Named users and maximum seats |
-| Grace period | Duration and allowed degraded features |
+| Publisher identity | `NOCTURNAL_ADMIN` |
+| Support | `nocturnaladmin@gmail.com` |
+| Firebase projects | Development `claimextension`; production `claimextension-prod` |
+| Initial organizations | One organization for the initial pilot |
+| Licence term | Fixed 90-day pilot |
+| Seat enforcement | 50 named users maximum |
+| Grace period | 72 hours; Preview allowed and Apply disabled |
 | Data residency/legal review | Required organizational or legal constraints |
 | First beta users | Five authorized processors |
-| AI | Explicitly disabled for MVP unless separately approved |
+| AI | Disabled for the MVP |
 
 ## 26. Blueprint change control
 

@@ -1,0 +1,83 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function ownOrganization(organizationId) {
+      return signedIn()
+        && request.auth.token.organizationId is string
+        && request.auth.token.organizationId == organizationId;
+    }
+
+    function validSettings() {
+      return request.resource.data.keys().hasOnly([
+          'extensionPreferences',
+          'enabledFeatures',
+          'lastSyncedAt'
+        ])
+        && request.resource.data.extensionPreferences is map
+        && request.resource.data.extensionPreferences.keys().hasOnly([
+          'auditMode',
+          'claimToolsEnabled'
+        ])
+        && request.resource.data.enabledFeatures is map
+        && request.resource.data.enabledFeatures.keys().hasOnly([
+          'claimAssistance',
+          'packageAudit'
+        ])
+        && request.resource.data.lastSyncedAt == request.time;
+    }
+
+    match /organizations/{organizationId} {
+      allow read: if ownOrganization(organizationId);
+      allow write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if ownUser(uid);
+      allow write: if false;
+    }
+
+    match /userSettings/{uid} {
+      allow read: if ownUser(uid);
+      allow create, update: if ownUser(uid) && validSettings();
+      allow delete: if ownUser(uid);
+    }
+
+    match /appConfig/{environment} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /licences/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /invitations/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /usage/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /auditLogs/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /rateLimits/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
