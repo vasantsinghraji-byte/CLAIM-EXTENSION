@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "claimextension",
+    "development": "claimextension",
+    "production": "claimextension-prod"
+  }
+}

@@ -4,8 +4,12 @@
   "description": "Chrome extension that fills approved amounts from claim amounts and audits RGHS bundled packages for unbundling",
   "scripts": {
     "build": "node build.js",
+    "firebase:emulators": "firebase emulators:start --project claimextension",
+    "firebase:projects": "firebase projects:list",
     "release": "node scripts/release.js",
     "test": "node --test \"tests/*.test.js\"",
+    "test:firebase": "firebase emulators:exec --only firestore \"node --test tests/firebase/firestore-rules.test.js\" --project claimextension-test",
+    "test:functions": "npm --prefix functions test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks && git config commit.template .gitmessage",
@@ -21,7 +25,9 @@
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@firebase/rules-unit-testing": "^5.0.1",
     "eslint": "^10.7.0",
+    "firebase-tools": "^15.24.0",
     "nodemon": "^3.0.1"
   }
 }

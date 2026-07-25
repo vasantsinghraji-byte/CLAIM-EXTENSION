@@ -23,17 +23,31 @@ jobs:
           cache: pip
           cache-dependency-path: tools/requirements.txt
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Install Python dependencies
         run: pip install -r tools/requirements.txt
 
       - name: Install Node dependencies (locked)
         run: npm ci
 
+      - name: Install Functions dependencies (locked)
+        run: npm --prefix functions ci
+
       - name: Matrix coverage, syntax checks and unit tests
         run: npm run check
 
       - name: Lint
         run: npm run lint
+
+      - name: Functions contract tests
+        run: npm run test:functions
+
+      - name: Firestore security rules tests
+        run: npm run test:firebase
 
       - name: Rules are freshly generated
         run: |

@@ -42,7 +42,13 @@ const nodeGlobals = {
 module.exports = [
   {
     // Generated data and build output are not linted.
-    ignores: ['audit-rules.js', 'dist/**', 'node_modules/**', 'privacy-site/**']
+    ignores: [
+      'audit-rules.js',
+      'dist/**',
+      'node_modules/**',
+      'privacy-site/**',
+      'functions/node_modules/**'
+    ]
   },
   js.configs.recommended,
   {
@@ -67,7 +73,13 @@ module.exports = [
     languageOptions: { globals: browserGlobals }
   },
   {
-    files: ['build.js', 'scripts/release.js', 'tests/**/*.js', 'eslint.config.js'],
+    files: [
+      'build.js',
+      'scripts/release.js',
+      'tests/**/*.js',
+      'functions/**/*.js',
+      'eslint.config.js'
+    ],
     languageOptions: { globals: nodeGlobals }
   }
 ];
