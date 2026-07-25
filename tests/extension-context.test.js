@@ -73,6 +73,25 @@ test('options updates are serialized and refresh from storage changes', () => {
   assert.match(options, /openBuiltInRemarkEditor/);
 });
 
+test('background wires auth-core, the three auth message actions, and the licence-recheck alarm', () => {
+  const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  assert.match(background, /importScripts\('auth-core\.js'\)/);
+  assert.match(background, /request\?\.action === 'authSignIn'/);
+  assert.match(background, /request\?\.action === 'authSignOut'/);
+  assert.match(background, /request\?\.action === 'authRefreshLicence'/);
+  assert.match(background, /chrome\.alarms\.onAlarm\.addListener/);
+  assert.match(background, /alarm\.name === LICENCE_RECHECK_ALARM/);
+});
+
+test('popup and floating widget explain every auth/licence block reason', () => {
+  const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
+  const widget = fs.readFileSync(path.join(__dirname, '..', 'floating-widget.js'), 'utf8');
+  for (const reason of ['signed-out', 'licence-unverified', 'licence-apply-blocked']) {
+    assert.match(popup, new RegExp(`'${reason}':`));
+    assert.match(widget, new RegExp(`'${reason}':`));
+  }
+});
+
 test('navigation clears stale badges and popup BOM is explicit', () => {
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');

@@ -1,11 +1,27 @@
 // Background service worker: serialized storage writer plus per-tab audit badge.
 
+// Service workers can't use multiple <script> tags like content_scripts can,
+// so auth-core.js is pulled in here; skipped under Node (require()'d tests)
+// where importScripts does not exist.
+if (typeof importScripts === 'function') importScripts('auth-core.js');
+
 const STORAGE_POLICIES = Object.freeze({
   claimActivityLog: { limit: 500, timestampField: 'timestamp', maxAgeMs: 30 * 24 * 60 * 60 * 1000 },
   rghsAuditFeedback: { limit: 2000 },
   rghsAuditLog: { limit: 2000, dedupe: true },
   claimRecoverySnapshots: { limit: 20, timestampField: 'createdAt', maxAgeMs: 24 * 60 * 60 * 1000 }
 });
+
+// Web API keys identify a Firebase project; they are not secrets (Firebase's
+// own documented model - access is gated by Auth + Security Rules, not by
+// key secrecy). Development project only; production has no counterpart yet.
+const FIREBASE_WEB_API_KEY = 'AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs';
+const FUNCTIONS_BASE_URL = 'https://asia-south1-claimextension.cloudfunctions.net';
+const LICENCE_RECHECK_ALARM = 'claimExtensionLicenceRecheck';
+// How long Apply keeps trusting the last successful licence check if the
+// backend is simply unreachable (not an expired/suspended licence - a
+// network failure). Matches the ID token lifetime.
+const LICENCE_OUTAGE_TOLERANCE_MS = 60 * 60 * 1000;
 
 function auditLogEntryKey(entry) {
   return [entry.url, entry.tid, entry.ruleId, entry.rowNumber, entry.findingType, entry.action].join('|');
@@ -134,6 +150,24 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         await storageSet(storage, { customRuleConfig: config });
         return Array.isArray(config?.rules) ? config.rules.length : 0;
       });
+    },
+    setAuthSession(session) {
+      return enqueue('authSession', async () => {
+        await storageSet(storage, { authSession: session });
+        return session;
+      });
+    },
+    clearAuthSession() {
+      return enqueue('authSession', async () => {
+        await storageSet(storage, { authSession: null });
+        return null;
+      });
+    },
+    setLicenceState(state) {
+      return enqueue('licenceState', async () => {
+        await storageSet(storage, { licenceState: state });
+        return state;
+      });
     }
   };
 }
@@ -142,11 +176,140 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   const storageWriter = createSerializedStorageWriter(chrome.storage.local);
   const overrideMigration = migrateRuleOverridesToLocal(chrome.storage.local, chrome.storage.sync)
     .catch(() => false);
+  const AuthCore = globalThis.ClaimAuthCore;
+
+  async function handleAuthSignIn(email, password) {
+    const session = await AuthCore.signInWithPassword({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
+    let profile = null;
+    let requiresEmailVerification = false;
+    try {
+      profile = await AuthCore.callFunction({
+        functionsBaseUrl: FUNCTIONS_BASE_URL,
+        name: 'getCurrentUserProfile',
+        idToken: session.idToken,
+        data: {},
+        fetchImpl: fetch
+      });
+    } catch (error) {
+      if (error.status === 'FAILED_PRECONDITION') {
+        requiresEmailVerification = true;
+      } else {
+        throw error;
+      }
+    }
+    await storageWriter.setAuthSession({
+      uid: session.uid,
+      email: session.email,
+      displayName: profile?.displayName || '',
+      organizationId: profile?.organizationId || null,
+      role: profile?.role || null,
+      idToken: session.idToken,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      signedInAt: Date.now()
+    });
+    if (requiresEmailVerification) {
+      await storageWriter.setLicenceState({
+        status: 'unverified',
+        previewAllowed: false,
+        applyAllowed: false,
+        expiresAt: null,
+        graceEndsAt: null,
+        minimumVersion: null,
+        checkedAt: Date.now(),
+        source: 'server'
+      });
+      return { success: true, requiresEmailVerification: true };
+    }
+    const licence = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'verifyLicence',
+      idToken: session.idToken,
+      data: { extensionVersion: chrome.runtime.getManifest().version },
+      fetchImpl: fetch
+    });
+    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    return { success: true };
+  }
+
+  async function performLicenceRecheck() {
+    const { authSession } = await storageGet(chrome.storage.local, 'authSession');
+    if (!authSession) return null;
+    try {
+      let session = authSession;
+      if (!AuthCore.isTokenFresh(session)) {
+        const refreshed = await AuthCore.refreshIdToken({
+          apiKey: FIREBASE_WEB_API_KEY,
+          refreshToken: session.refreshToken,
+          fetchImpl: fetch
+        });
+        session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
+        await storageWriter.setAuthSession(session);
+      }
+      const licence = await AuthCore.callFunction({
+        functionsBaseUrl: FUNCTIONS_BASE_URL,
+        name: 'verifyLicence',
+        idToken: session.idToken,
+        data: { extensionVersion: chrome.runtime.getManifest().version },
+        fetchImpl: fetch
+      });
+      const state = { ...licence, checkedAt: Date.now(), source: 'server' };
+      await storageWriter.setLicenceState(state);
+      return state;
+    } catch {
+      const { licenceState: previous } = await storageGet(chrome.storage.local, 'licenceState');
+      const lastCheckedAt = previous?.checkedAt;
+      const withinTolerance = Number.isFinite(lastCheckedAt) && Date.now() - lastCheckedAt <= LICENCE_OUTAGE_TOLERANCE_MS;
+      const state = withinTolerance
+        ? { ...previous, source: 'error' }
+        : {
+          status: 'unknown',
+          previewAllowed: false,
+          applyAllowed: false,
+          expiresAt: null,
+          graceEndsAt: null,
+          minimumVersion: previous?.minimumVersion || null,
+          checkedAt: lastCheckedAt ?? Date.now(),
+          source: 'error'
+        };
+      await storageWriter.setLicenceState(state);
+      return state;
+    }
+  }
+
+  if (chrome.alarms) {
+    chrome.alarms.onAlarm.addListener(alarm => {
+      if (alarm.name === LICENCE_RECHECK_ALARM) performLicenceRecheck();
+    });
+  }
+
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request && request.action === 'setAuditBadge' && sender.tab && sender.tab.id !== undefined) {
       chrome.action.setBadgeText({ tabId: sender.tab.id, text: request.count > 0 ? String(request.count) : '' });
       chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: '#c0392b' });
       return undefined;
+    }
+    if (request?.action === 'authSignIn') {
+      handleAuthSignIn(request.email, request.password)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authSignOut') {
+      Promise.all([storageWriter.clearAuthSession(), storageWriter.setLicenceState(null)])
+        .then(() => {
+          if (chrome.alarms) chrome.alarms.clear(LICENCE_RECHECK_ALARM);
+          sendResponse({ success: true });
+        })
+        .catch(error => sendResponse({ success: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authRefreshLicence') {
+      performLicenceRecheck()
+        .then(licenceState => sendResponse({ success: true, licenceState }))
+        .catch(error => sendResponse({ success: false, error: String(error.message || error) }));
+      return true;
     }
     let mutation = null;
     if (request?.action === 'appendStorageEntries') {

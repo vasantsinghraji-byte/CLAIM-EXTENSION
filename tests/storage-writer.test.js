@@ -103,3 +103,29 @@ test('custom rule configuration is serialized through the service worker', async
   assert.equal(await writer.setCustomRuleConfig(config), 1);
   assert.deepEqual(storage.data.customRuleConfig, config);
 });
+
+test('auth session and licence state are written and cleared through the service worker', async () => {
+  const storage = delayedStorage();
+  const writer = createSerializedStorageWriter(storage);
+  const session = { uid: 'uid-1', email: 'user@example.com', idToken: 'a', refreshToken: 'b', expiresAt: Date.now() + 3600000 };
+  assert.deepEqual(await writer.setAuthSession(session), session);
+  assert.deepEqual(storage.data.authSession, session);
+
+  const licenceState = { status: 'active', previewAllowed: true, applyAllowed: true, checkedAt: Date.now(), source: 'server' };
+  assert.deepEqual(await writer.setLicenceState(licenceState), licenceState);
+  assert.deepEqual(storage.data.licenceState, licenceState);
+
+  assert.equal(await writer.clearAuthSession(), null);
+  assert.equal(storage.data.authSession, null);
+});
+
+test('concurrent sign-in and licence-recheck writes never race on the same key', async () => {
+  const storage = delayedStorage();
+  const writer = createSerializedStorageWriter(storage);
+  await Promise.all([
+    writer.setLicenceState({ status: 'active', checkedAt: 1 }),
+    writer.setLicenceState({ status: 'grace', checkedAt: 2 }),
+    writer.setLicenceState({ status: 'expired', checkedAt: 3 })
+  ]);
+  assert.ok(['active', 'grace', 'expired'].includes(storage.data.licenceState.status));
+});

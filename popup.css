@@ -38,6 +38,26 @@ body {
   padding: 20px;
 }
 
+.auth-section {
+  margin-bottom: 20px;
+}
+
+.auth-section input[type="email"],
+.auth-section input[type="password"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.auth-section p {
+  font-size: 13px;
+  color: #333;
+  margin-bottom: 6px;
+}
+
 .toggle-section {
   margin-bottom: 20px;
 }

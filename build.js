@@ -9,6 +9,7 @@ const zipPath = path.join(rootDir, 'claim-autofill-extension.zip');
 const files = [
   'manifest.json',
   'background.js',
+  'auth-core.js',
   'audit-rules.js',
   'custom-rules.js',
   'audit-core.js',
@@ -37,6 +38,7 @@ function createProductionManifest(sourceManifest) {
   for (const resource of manifest.web_accessible_resources || []) {
     resource.matches = (resource.matches || []).filter(origin => !developmentOrigins.has(origin));
   }
+  manifest.host_permissions = (manifest.host_permissions || []).filter(origin => !developmentOrigins.has(origin));
   assertProductionManifest(manifest);
   return manifest;
 }

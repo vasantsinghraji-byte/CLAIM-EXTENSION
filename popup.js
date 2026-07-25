@@ -1,5 +1,14 @@
 // Popup script for controlling the extension
 
+const authSignedOut = document.getElementById('authSignedOut');
+const authSignedIn = document.getElementById('authSignedIn');
+const authEmailInput = document.getElementById('authEmail');
+const authPasswordInput = document.getElementById('authPassword');
+const authSignInBtn = document.getElementById('authSignInBtn');
+const authEmailLabel = document.getElementById('authEmailLabel');
+const licenceStatusLabel = document.getElementById('licenceStatusLabel');
+const authRecheckBtn = document.getElementById('authRecheckBtn');
+const authSignOutBtn = document.getElementById('authSignOutBtn');
 const toggle = document.getElementById('autoFillToggle');
 const auditModeSelect = document.getElementById('auditMode');
 const fillNowBtn = document.getElementById('fillNowBtn');
@@ -42,6 +51,85 @@ chrome.storage.sync.get(['autoFillEnabled', 'auditMode'], (result) => {
 sendToActiveTab({ action: 'getStatus' })
   .then(response => { undoBtn.disabled = !response?.hasUndo; })
   .catch(() => { undoBtn.disabled = true; });
+
+const authErrorMessages = {
+  EMAIL_NOT_FOUND: 'No account found for that email.',
+  INVALID_PASSWORD: 'Incorrect password.',
+  INVALID_LOGIN_CREDENTIALS: 'Incorrect email or password.',
+  USER_DISABLED: 'This account has been disabled. Contact your administrator.',
+  TOO_MANY_ATTEMPTS_TRY_LATER: 'Too many attempts. Try again later.',
+  NETWORK_ERROR: 'Unable to reach the sign-in service. Check your connection.'
+};
+
+function describeLicenceStatus(state) {
+  if (!state) return '';
+  if (state.status === 'active') return `Licence active until ${new Date(state.expiresAt).toLocaleString()}`;
+  if (state.status === 'grace') return `Licence expired — Preview only until ${new Date(state.graceEndsAt).toLocaleString()}`;
+  if (state.status === 'unverified') return 'Verify your email to continue — check your inbox for a link from Firebase.';
+  return 'Apply disabled. Contact your administrator.';
+}
+
+function renderAuthState(authSession, licenceState) {
+  const signedIn = !!authSession;
+  authSignedOut.hidden = signedIn;
+  authSignedIn.hidden = !signedIn;
+  if (signedIn) {
+    authEmailLabel.textContent = authSession.email || '';
+    licenceStatusLabel.textContent = describeLicenceStatus(licenceState);
+  }
+}
+
+chrome.storage.local.get(['authSession', 'licenceState'], result => {
+  renderAuthState(result.authSession, result.licenceState);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (!changes.authSession && !changes.licenceState) return;
+  chrome.storage.local.get(['authSession', 'licenceState'], result => {
+    renderAuthState(result.authSession, result.licenceState);
+  });
+});
+
+authSignInBtn.addEventListener('click', () => {
+  const email = authEmailInput.value.trim();
+  const password = authPasswordInput.value;
+  if (!email || !password) {
+    showStatus('Enter both email and password', 'warning');
+    return;
+  }
+  authSignInBtn.disabled = true;
+  authSignInBtn.textContent = 'Signing in...';
+  chrome.runtime.sendMessage({ action: 'authSignIn', email, password }, response => {
+    authSignInBtn.disabled = false;
+    authSignInBtn.textContent = 'Sign In';
+    if (!response?.success) {
+      showStatus(authErrorMessages[response?.error] || 'Sign-in failed. Try again.', 'error');
+      return;
+    }
+    authPasswordInput.value = '';
+    showStatus(
+      response.requiresEmailVerification ? 'Signed in. Verify your email to continue.' : 'Signed in',
+      response.requiresEmailVerification ? 'warning' : 'success'
+    );
+  });
+});
+
+authSignOutBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ action: 'authSignOut' }, () => {
+    authEmailInput.value = '';
+    authPasswordInput.value = '';
+    showStatus('Signed out', 'info');
+  });
+});
+
+authRecheckBtn.addEventListener('click', () => {
+  authRecheckBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authRefreshLicence' }, response => {
+    authRecheckBtn.disabled = false;
+    showStatus(response?.success ? 'Licence rechecked' : 'Unable to recheck licence', response?.success ? 'success' : 'error');
+  });
+});
 
 // Handle toggle change
 toggle.addEventListener('change', async () => {
@@ -95,7 +183,11 @@ function blockedMessage(reason) {
   const messages = {
     'autofill-disabled': 'Claim Extension is OFF. Turn it on, then preview again.',
     'unsupported-layout': 'Unsupported RGHS portal layout. No fields were changed.',
-    'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.'
+    'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.',
+    'signed-out': 'Sign in to Claim Spark to apply changes.',
+    'licence-unverified': 'Verify your email to continue — check your inbox for a link from Firebase.',
+    'licence-apply-blocked': 'Your licence does not currently allow Apply. Preview remains available if allowed.',
+    'licence-preview-blocked': 'Your licence does not currently allow Preview. Contact your administrator.'
   };
   return messages[reason] || 'Apply was blocked because the preview is stale or unsafe. Preview again.';
 }

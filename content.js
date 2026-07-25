@@ -6,6 +6,7 @@ let isAutoFillEnabled = true;
 let auditMode = 'flag';
 let ruleOverrides = {};
 let customRuleConfig = null;
+let licenceState = null; // null = never checked yet (fresh install or signed out)
 let undoBatch = [];
 let lastPreview = null;
 let previewRowElements = new Map();
@@ -38,11 +39,12 @@ chrome.storage.sync.get(['autoFillEnabled', 'auditMode'], (result) => {
 
 chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
   void chrome.runtime.lastError;
-  chrome.storage.local.get(['ruleOverrides', 'customRuleConfig'], result => {
+  chrome.storage.local.get(['ruleOverrides', 'customRuleConfig', 'licenceState'], result => {
     ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' && !Array.isArray(result.ruleOverrides)
       ? result.ruleOverrides
       : {};
     customRuleConfig = result.customRuleConfig || null;
+    licenceState = result.licenceState || null;
     schedulePassiveAudit([document]);
   });
 });
@@ -58,6 +60,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
       ? changes.ruleOverrides.newValue
       : {};
     schedulePassiveAudit([document]);
+  }
+  if (area === 'local' && changes.licenceState) {
+    licenceState = changes.licenceState.newValue || null;
   }
   if (area !== 'sync') return;
 
@@ -281,6 +286,21 @@ function inspectPortalLayout() {
   return Core.validatePortalLayoutDescriptor({ pathname: location.pathname, tables });
 }
 
+// Preview stays local-first: a fresh install or signed-out session (state
+// is null) never blocks preview, only a real Apply requires a signed-in,
+// licensed session. Once signed in, previewAllowed can still gate Preview
+// for hard-blocked states (expired/suspended/unlicensed).
+function evaluateLicenceGate(state, apply) {
+  if (!state) return apply ? { blocked: true, reason: 'signed-out' } : { blocked: false };
+  if (apply && state.applyAllowed !== true) {
+    return { blocked: true, reason: state.status === 'unverified' ? 'licence-unverified' : 'licence-apply-blocked' };
+  }
+  if (!apply && state.previewAllowed !== true) {
+    return { blocked: true, reason: 'licence-preview-blocked' };
+  }
+  return { blocked: false };
+}
+
 function blockedFillResult(reason, details = []) {
   return {
     blocked: true,
@@ -302,6 +322,9 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   if (!isAutoFillEnabled && apply) {
     return blockedFillResult('autofill-disabled');
   }
+
+  const licenceGate = evaluateLicenceGate(licenceState, apply);
+  if (licenceGate.blocked) return blockedFillResult(licenceGate.reason);
 
   if (location.pathname.startsWith('/RGHS/processSheetSearch/')) {
     const layout = inspectPortalLayout();

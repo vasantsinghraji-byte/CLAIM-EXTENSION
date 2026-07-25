@@ -241,7 +241,9 @@
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         'unsupported-layout': 'BLOCKED: The RGHS process-sheet layout is not compatible with this extension version.',
-        'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.'
+        'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.',
+        'signed-out': 'BLOCKED: Sign in to Claim Spark to continue.',
+        'licence-preview-blocked': 'BLOCKED: Your licence does not currently allow Preview. Contact your administrator.'
       };
       showStatus(messages[result.blockReason] || 'Preview was blocked by a compatibility check.', 'error');
       return;
@@ -430,7 +432,10 @@
         'empty-selection': 'BLOCKED: Select at least one row.',
         'high-risk-unacknowledged': 'BLOCKED: Acknowledge selected high-risk findings.',
         'invalid-decision': 'BLOCKED: Preview again; the selected decision is no longer valid.',
-        unbalanced: 'BLOCKED: Selected totals do not reconcile.'
+        unbalanced: 'BLOCKED: Selected totals do not reconcile.',
+        'signed-out': 'BLOCKED: Sign in to Claim Spark to apply changes.',
+        'licence-unverified': 'BLOCKED: Verify your email to continue - check your inbox for a link from Firebase.',
+        'licence-apply-blocked': 'BLOCKED: Your licence does not currently allow Apply. Preview remains available if allowed.'
       };
       showStatus(messages[result.blockReason] || 'Apply was blocked for safety.', 'error');
       applyButton.disabled = true;
