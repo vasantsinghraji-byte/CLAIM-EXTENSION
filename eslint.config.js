@@ -22,7 +22,9 @@ const browserGlobals = {
   HTMLTextAreaElement: 'readonly',
   sessionStorage: 'readonly',
   navigator: 'readonly',
-  crypto: 'readonly'
+  crypto: 'readonly',
+  fetch: 'readonly',
+  importScripts: 'readonly'
 };
 
 const nodeGlobals = {
@@ -67,7 +69,7 @@ module.exports = [
   {
     files: [
       'content.js', 'popup.js', 'options.js', 'background.js',
-      'floating-widget.js', 'claim-core.js', 'audit-core.js', 'review-core.js',
+      'floating-widget.js', 'claim-core.js', 'audit-core.js', 'auth-core.js', 'review-core.js',
       'scripts/live-browser-smoke.js'
     ],
     languageOptions: { globals: browserGlobals }

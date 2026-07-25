@@ -14,6 +14,20 @@
     </div>
 
     <div class="content">
+      <div id="authSignedOut" class="auth-section">
+        <input type="email" id="authEmail" name="authEmail" placeholder="Email" autocomplete="username">
+        <input type="password" id="authPassword" name="authPassword" placeholder="Password" autocomplete="current-password">
+        <button id="authSignInBtn" class="btn btn-primary">Sign In</button>
+      </div>
+      <div id="authSignedIn" class="auth-section" hidden>
+        <p id="authEmailLabel"></p>
+        <p id="licenceStatusLabel"></p>
+        <div class="btn-row">
+          <button id="authRecheckBtn" class="btn btn-secondary btn-small">Recheck Licence</button>
+          <button id="authSignOutBtn" class="btn btn-secondary btn-small">Sign Out</button>
+        </div>
+      </div>
+
       <div class="toggle-section">
         <label class="toggle-label" for="autoFillToggle">
           <span>Claim tools enabled</span>

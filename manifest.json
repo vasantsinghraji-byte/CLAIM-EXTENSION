@@ -5,7 +5,13 @@
   "description": "Fills approved amounts from claim amounts and audits bundled RGHS packages for unbundling and duplicate billing",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://asia-south1-claimextension.cloudfunctions.net/*"
   ],
   "background": {
     "service_worker": "background.js"

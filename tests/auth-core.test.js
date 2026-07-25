@@ -1,0 +1,125 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const AuthCore = require('../auth-core');
+
+function jsonResponse(ok, body) {
+  return { ok, json: async () => body };
+}
+
+test('successful sign-in parses tokens and computes an expiry from expiresIn', async () => {
+  const before = Date.now();
+  const result = await AuthCore.signInWithPassword({
+    apiKey: 'test-key',
+    email: 'user@example.com',
+    password: 'secret',
+    fetchImpl: async () => jsonResponse(true, {
+      idToken: 'id-token', refreshToken: 'refresh-token', expiresIn: '3600', localId: 'uid-1', email: 'user@example.com'
+    })
+  });
+  assert.equal(result.idToken, 'id-token');
+  assert.equal(result.refreshToken, 'refresh-token');
+  assert.equal(result.uid, 'uid-1');
+  assert.equal(result.email, 'user@example.com');
+  assert.ok(result.expiresAt >= before + 3600 * 1000 && result.expiresAt <= Date.now() + 3600 * 1000 + 1000);
+});
+
+for (const code of ['EMAIL_NOT_FOUND', 'INVALID_PASSWORD', 'INVALID_LOGIN_CREDENTIALS', 'USER_DISABLED', 'TOO_MANY_ATTEMPTS_TRY_LATER']) {
+  test(`sign-in maps the Identity Toolkit ${code} error to a normalized code`, async () => {
+    await assert.rejects(
+      AuthCore.signInWithPassword({
+        apiKey: 'test-key',
+        email: 'user@example.com',
+        password: 'wrong',
+        fetchImpl: async () => jsonResponse(false, { error: { message: code } })
+      }),
+      error => error.code === code
+    );
+  });
+}
+
+test('sign-in normalizes a "CODE : detail" error message to just the code', async () => {
+  await assert.rejects(
+    AuthCore.signInWithPassword({
+      apiKey: 'test-key',
+      email: 'user@example.com',
+      password: 'wrong',
+      fetchImpl: async () => jsonResponse(false, { error: { message: 'TOO_MANY_ATTEMPTS_TRY_LATER : too many attempts' } })
+    }),
+    error => error.code === 'TOO_MANY_ATTEMPTS_TRY_LATER'
+  );
+});
+
+test('a fetch failure is normalized to NETWORK_ERROR rather than leaking the raw cause', async () => {
+  await assert.rejects(
+    AuthCore.signInWithPassword({
+      apiKey: 'test-key',
+      email: 'user@example.com',
+      password: 'secret',
+      fetchImpl: async () => { throw new TypeError('Failed to fetch'); }
+    }),
+    error => error.code === 'NETWORK_ERROR'
+  );
+});
+
+test('refreshIdToken parses the Secure Token API snake_case response', async () => {
+  const result = await AuthCore.refreshIdToken({
+    apiKey: 'test-key',
+    refreshToken: 'refresh-token',
+    fetchImpl: async () => jsonResponse(true, { id_token: 'new-id-token', refresh_token: 'new-refresh-token', expires_in: '3600' })
+  });
+  assert.equal(result.idToken, 'new-id-token');
+  assert.equal(result.refreshToken, 'new-refresh-token');
+  assert.ok(result.expiresAt > Date.now());
+});
+
+test('refreshIdToken rejects an expired/invalid refresh token with a normalized code', async () => {
+  await assert.rejects(
+    AuthCore.refreshIdToken({
+      apiKey: 'test-key',
+      refreshToken: 'stale-token',
+      fetchImpl: async () => jsonResponse(false, { error: { message: 'TOKEN_EXPIRED' } })
+    }),
+    error => error.code === 'TOKEN_EXPIRED'
+  );
+});
+
+test('callFunction unwraps the callable {result} envelope', async () => {
+  const result = await AuthCore.callFunction({
+    functionsBaseUrl: 'https://asia-south1-claimextension.cloudfunctions.net',
+    name: 'verifyLicence',
+    idToken: 'id-token',
+    data: { extensionVersion: '1.6.0' },
+    fetchImpl: async (url, init) => {
+      assert.equal(url, 'https://asia-south1-claimextension.cloudfunctions.net/verifyLicence');
+      assert.equal(init.headers.Authorization, 'Bearer id-token');
+      assert.deepEqual(JSON.parse(init.body), { data: { extensionVersion: '1.6.0' } });
+      return jsonResponse(true, { result: { status: 'active', previewAllowed: true, applyAllowed: true } });
+    }
+  });
+  assert.deepEqual(result, { status: 'active', previewAllowed: true, applyAllowed: true });
+});
+
+for (const status of ['UNAUTHENTICATED', 'FAILED_PRECONDITION', 'RESOURCE_EXHAUSTED']) {
+  test(`callFunction throws with the callable ${status} error status`, async () => {
+    await assert.rejects(
+      AuthCore.callFunction({
+        functionsBaseUrl: 'https://asia-south1-claimextension.cloudfunctions.net',
+        name: 'verifyLicence',
+        idToken: 'id-token',
+        data: {},
+        fetchImpl: async () => jsonResponse(false, { error: { message: 'denied', status } })
+      }),
+      error => error.status === status
+    );
+  });
+}
+
+test('computeExpiresAt and isTokenFresh boundary math', () => {
+  assert.equal(AuthCore.computeExpiresAt(3600, 1000), 1000 + 3600 * 1000);
+  assert.equal(AuthCore.computeExpiresAt('3600', 1000), 1000 + 3600 * 1000);
+
+  const now = 1_000_000;
+  assert.equal(AuthCore.isTokenFresh(null, now), false);
+  assert.equal(AuthCore.isTokenFresh({ expiresAt: now + 400_000 }, now, 300_000), true);
+  assert.equal(AuthCore.isTokenFresh({ expiresAt: now + 100_000 }, now, 300_000), false);
+});
