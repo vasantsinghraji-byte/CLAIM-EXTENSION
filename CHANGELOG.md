@@ -127,3 +127,7 @@
 ## 1.6.0 - 2026-07-24
 
 - Added a validated profile-local Rule Editor for custom unbundling and upcoding findings (decision-specific portal remark templates, safe JSON import/export, grouped-decision remark application), reversible per-built-in-rule remark overrides, and a type-safe fallback fix preventing grouped-decision remark generation from crashing on upcoding and other non-unbundling findings.
+
+## 1.7.0 - 2026-07-25
+
+- Wire the extension to Firebase Auth (email/password) and licence verification: sign-in/sign-out/recheck in the popup, a background licence-recheck alarm, and Apply gated on an active licence while Preview and all other local workflows stay fully local-first for signed-out sessions.
