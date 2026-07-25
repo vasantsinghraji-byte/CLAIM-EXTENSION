@@ -131,3 +131,7 @@
 ## 1.7.0 - 2026-07-25
 
 - Wire the extension to Firebase Auth (email/password) and licence verification: sign-in/sign-out/recheck in the popup, a background licence-recheck alarm, and Apply gated on an active licence while Preview and all other local workflows stay fully local-first for signed-out sessions.
+
+## 1.8.0 - 2026-07-25
+
+- Add self-service sign-up and accept-invitation onboarding to the extension popup (Sign Up -> Verify Email -> Accept Invitation -> Check Status), so invited processors no longer need an admin to bootstrap their account by hand. activateUser now also accepts an email instead of requiring a uid lookup.
