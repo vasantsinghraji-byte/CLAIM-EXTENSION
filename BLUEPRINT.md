@@ -5,7 +5,9 @@ processSheetSearch and tpaOPD (see `docs/PHASE_0_BASELINE.md`); Phase 1
 Firebase foundation implemented, verified and deployed to development;
 Authentication, initial platform-admin bootstrap, Blaze, budget alerts, IAM
 review and Functions deployment complete (see
-`docs/PHASE_1_FIREBASE_FOUNDATION.md`)
+`docs/PHASE_1_FIREBASE_FOUNDATION.md`); extension authentication released as
+1.7.0 and the authenticated development smoke passed (see
+`docs/PHASE_2_AUTH_SMOKE.md`)
 
 Target users: Approximately 50 authorized RGHS claim processors
 
