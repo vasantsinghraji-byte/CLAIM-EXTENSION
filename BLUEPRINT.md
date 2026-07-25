@@ -2,8 +2,8 @@
 
 Status: Phase 0 complete, including live-portal verification for both
 processSheetSearch and tpaOPD (see `docs/PHASE_0_BASELINE.md`); Phase 1
-Firebase foundation implemented and locally verified, with development
-Functions deployment awaiting Blaze billing (see
+Firebase foundation implemented and locally verified; development Blaze,
+budget alerts, and IAM review complete, with Functions deployment pending (see
 `docs/PHASE_1_FIREBASE_FOUNDATION.md`)
 
 Target users: Approximately 50 authorized RGHS claim processors

@@ -1,7 +1,7 @@
 # Phase 1 — Firebase Foundation
 
 Status: Local foundation and development Firestore complete; development
-Functions deployment blocked by the Firebase Blaze-plan requirement
+Blaze, budget alerts and IAM review complete; Functions deployment pending
 
 Publisher: `NOCTURNAL_ADMIN`
 
@@ -19,6 +19,11 @@ projects are active, separate Firebase projects. The development Firestore
 database is deployed in `asia-south1` with the tested rules. Production
 deployment is intentionally excluded from Phase 1: the production project is
 a controlled release target, not a development test surface.
+
+Development project `claimextension` is on Blaze. Its monthly budget is
+₹1,000 with actual-spend email alerts at ₹100, ₹500 and ₹1,000. The budget is
+read-only for project users, and email notifications go to billing
+administrators and billing users.
 
 ## 2. Frozen pilot decisions
 
@@ -86,15 +91,19 @@ its Manifest V3 permissions, RGHS DOM behavior, Preview, Apply or Undo flow.
 The current Web Store privacy disclosures therefore remain accurate for
 version 1.6.0.
 
-Firestore rules and indexes are deployed to development. The Functions deploy
-attempt correctly stopped because the project is not on the Blaze plan and
-Artifact Registry cannot be enabled. No Function was partially deployed.
+Firestore rules and indexes are deployed to development. The earlier Functions
+deploy attempt stopped before any Function was created. Blaze and the budget
+guardrail are now configured, so the development Functions deployment may
+proceed after the standard pre-deployment checks.
 
-Completion of the live Functions deployment requires the project owner to
-upgrade development project `claimextension` to Blaze, set a budget alert, and
-rerun the development deployment. Production deployment, beta accounts,
-extension authentication and licence enforcement belong to later controlled
-phases and require a fresh gate review.
+The development IAM review found one human administrator:
+`nocturnaladmin@gmail.com` (`NOCTURNAL_ADMIN`) with Owner. The other principals
+are the App Engine default and Firebase Admin SDK service accounts required by
+Firebase. No additional human administrator has access, and no service account
+role was removed.
+
+Production deployment, beta accounts, extension authentication and licence
+enforcement belong to later controlled phases and require a fresh gate review.
 
 ## 7. Dependency review
 
