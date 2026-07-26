@@ -61,7 +61,34 @@
 
       <details id="adminPanel" class="admin-panel" hidden>
         <summary>Administrator</summary>
-        <p class="admin-help">Manage the development organization without using Developer Tools.</p>
+        <p class="admin-help">Production administration. Every change is authorized and recorded server-side.</p>
+
+        <section class="admin-card">
+          <div class="admin-card-heading">
+            <h2>Organizations</h2>
+            <button id="adminRefreshOrganizationsBtn" class="btn btn-secondary btn-small">Refresh</button>
+          </div>
+          <label for="adminOrganizationId">Organization ID</label>
+          <input type="text" id="adminOrganizationId" value="platform">
+          <label for="adminOrganizationName">Organization name</label>
+          <input type="text" id="adminOrganizationName" value="Claim Spark Platform">
+          <div class="admin-grid">
+            <label for="adminOrganizationMaximumUsers">Maximum users
+              <input type="number" id="adminOrganizationMaximumUsers" min="1" max="500" value="1">
+            </label>
+            <label for="adminOrganizationStatus">Status
+              <select id="adminOrganizationStatus">
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+              </select>
+            </label>
+          </div>
+          <div class="btn-row">
+            <button id="adminCreateOrganizationBtn" class="btn btn-primary btn-small">Create</button>
+            <button id="adminUpdateOrganizationBtn" class="btn btn-secondary btn-small">Update</button>
+          </div>
+          <div id="adminOrganizationsList" class="admin-record-list" aria-live="polite"></div>
+        </section>
 
         <section class="admin-card">
           <h2>Licence</h2>
@@ -69,13 +96,21 @@
           <input type="text" id="adminLicenceOrganization" value="platform">
           <div class="admin-grid">
             <label for="adminMaximumUsers">Maximum users
-              <input type="number" id="adminMaximumUsers" min="1" max="500" value="50">
+              <input type="number" id="adminMaximumUsers" min="1" max="500" value="1">
             </label>
             <label for="adminTermDays">Term (days)
               <input type="number" id="adminTermDays" min="1" max="366" value="90">
             </label>
           </div>
           <button id="adminActivateLicenceBtn" class="btn btn-primary btn-small">Activate / Renew Licence</button>
+        </section>
+
+        <section class="admin-card">
+          <div class="admin-card-heading">
+            <h2>Invitations</h2>
+            <button id="adminRefreshInvitationsBtn" class="btn btn-secondary btn-small">Refresh</button>
+          </div>
+          <div id="adminInvitationsList" class="admin-record-list" aria-live="polite"></div>
         </section>
 
         <section class="admin-card">
@@ -96,10 +131,23 @@
         </section>
 
         <section class="admin-card">
-          <h2>Activate user</h2>
+          <div class="admin-card-heading">
+            <h2>Users</h2>
+            <button id="adminRefreshUsersBtn" class="btn btn-secondary btn-small">Refresh</button>
+          </div>
           <label for="adminActivateEmail">Invited user email</label>
           <input type="email" id="adminActivateEmail" autocomplete="off" placeholder="processor@example.com">
           <button id="adminActivateUserBtn" class="btn btn-primary btn-small">Activate User</button>
+          <div id="adminUsersList" class="admin-record-list" aria-live="polite"></div>
+        </section>
+
+        <section class="admin-card">
+          <div class="admin-card-heading">
+            <h2>Audit events</h2>
+            <button id="adminRefreshAuditBtn" class="btn btn-secondary btn-small">Refresh</button>
+          </div>
+          <p class="admin-help">Latest 100 privacy-safe administration and extension events.</p>
+          <div id="adminAuditList" class="admin-record-list admin-audit-list" aria-live="polite"></div>
         </section>
 
         <p id="adminStatus" class="admin-status" role="status" aria-live="polite"></p>

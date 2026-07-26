@@ -143,3 +143,7 @@
 ## 1.8.0 - 2026-07-25
 
 - Add self-service sign-up and accept-invitation onboarding to the extension popup (Sign Up -> Verify Email -> Accept Invitation -> Check Status), so invited processors no longer need an admin to bootstrap their account by hand. activateUser now also accepts an email instead of requiring a uid lookup.
+
+## 1.9.0 - 2026-07-26
+
+- Complete Phase 4 administrator lifecycle, production Firebase isolation, privacy and operations hardening, and controlled-distribution runbooks.

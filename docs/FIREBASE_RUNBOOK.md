@@ -65,6 +65,33 @@ Production requires:
 - privacy and Web Store disclosure consistency;
 - explicit production go/no-go.
 
+## Production deployment
+
+The production Web App is separately registered in `claimextension-prod`.
+The distributable build replaces the development public API key and Functions
+origin with the production values. Never copy development Auth users,
+invitations, licences or Firestore data into production.
+
+After all production gates in `PHASE_4_PRODUCTION_READINESS.md` pass:
+
+```powershell
+npx firebase deploy --only firestore --project claimextension-prod
+npx firebase deploy --only functions --project claimextension-prod
+```
+
+Enable Email/Password Authentication and bootstrap the platform administrator
+through a password-private human procedure. Do not create, transmit or store
+the administrator password in this repository.
+
+List backup schedules:
+
+```powershell
+npx firebase firestore:backups:schedules:list --database "(default)" --project claimextension-prod
+```
+
+The approved production target is one daily backup with 14-day retention.
+Record a restore drill into a separate database before publication.
+
 ## Incident defaults
 
 - Suspected credential exposure: revoke the credential and reauthenticate.

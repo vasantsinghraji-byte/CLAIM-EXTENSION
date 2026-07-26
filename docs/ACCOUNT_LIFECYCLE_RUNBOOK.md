@@ -1,0 +1,63 @@
+# Account and Invitation Lifecycle Runbook
+
+## Routine administration
+
+Open Claim Spark, sign in as a platform administrator, expand
+**Administrator**, then use **Refresh** in the relevant section.
+
+### Invite
+
+1. Select or enter the organization ID.
+2. Enter the user's email and role.
+3. Generate the invitation.
+4. Copy the message immediately. Only the token hash is retained by the
+   service.
+5. Send the message through an approved communication channel.
+
+### Replace or revoke
+
+- **Revoke** immediately invalidates a pending invitation.
+- **Replace** invalidates the pending invitation and displays a new token once.
+- Accepted invitations cannot be revoked or replaced. Suspend or delete the
+  resulting user instead.
+
+### Activate, suspend or reactivate
+
+- Activate only after the user has verified their email and accepted the
+  invitation.
+- Suspension disables Firebase Authentication and revokes refresh tokens.
+- Reactivation requires an active organization, active licence and available
+  seat.
+- Role changes revoke refresh tokens; the user must sign in again to receive
+  the new authorization claims.
+
+### Delete an account
+
+Account deletion is irreversible for the Firebase Authentication identity:
+
+1. Verify the requester's authority and the exact target email outside the
+   extension.
+2. Export any legally required privacy-safe audit evidence.
+3. Click **Delete account** and read the warning.
+4. Click the confirmation button a second time.
+5. Refresh Users and Audit events and verify the profile is `deleted` and
+   redacted.
+
+The process disables access and revokes tokens before deletion. A redacted
+profile and audit events remain for referential integrity.
+
+## Compromised account
+
+1. Suspend the user immediately.
+2. Inspect recent audit events.
+3. Record the incident time, actor, affected organization and containment.
+4. Require a password reset and security review.
+5. Reactivate only after authorization and seat checks pass.
+
+## Administrator lockout
+
+Self-suspension, self-deletion and self-role-change are blocked. If all
+platform administrators are nevertheless unavailable, use an authorized
+break-glass operator in the Firebase project to restore the claims and active
+profile. Record every break-glass action and rotate affected credentials.
+

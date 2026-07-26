@@ -4,8 +4,11 @@ An invite-only Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Current release: **1.8.1**. Phase 3's approved single-user development pilot is
-complete; Phase 4 production hardening and controlled distribution are next.
+Current release: **1.9.0**. Phase 4 adds production-isolated packaging and a
+server-authorized administrator interface for users, invitations,
+organizations, account deletion and audit-event viewing. See
+`docs/PHASE_4_PRODUCTION_READINESS.md` for the human-controlled production
+activation gates.
 
 ## Features
 

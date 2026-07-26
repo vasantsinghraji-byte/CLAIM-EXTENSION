@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const sourceManifest = require('../manifest.json');
-const { createProductionManifest, createBuildEntries, createStoredZip } = require('../build');
+const {
+  createProductionBackground,
+  createProductionManifest,
+  createBuildEntries,
+  createStoredZip
+} = require('../build');
 
 const developmentOrigins = ['http://localhost/*', 'http://127.0.0.1/*'];
 
@@ -20,17 +25,28 @@ test('production manifest strips development origins from every exposed match li
   assert.equal(production.content_scripts[0].all_frames, false);
 });
 
-test('host_permissions pass through production stripping unchanged today, and no prod Firebase host exists yet', () => {
+test('production host permissions isolate callable Functions from development', () => {
   const production = createProductionManifest(sourceManifest);
-  assert.deepEqual(production.host_permissions, sourceManifest.host_permissions);
-  assert.equal(JSON.stringify(sourceManifest).includes('claimextension-prod'), false,
-    'no production Firebase host should be referenced in manifest.json until production is actually provisioned');
+  assert.equal(production.host_permissions.includes('https://asia-south1-claimextension.cloudfunctions.net/*'), false);
+  assert.equal(production.host_permissions.includes('https://asia-south1-claimextension-prod.cloudfunctions.net/*'), true);
+  assert.equal(sourceManifest.host_permissions.includes('https://asia-south1-claimextension.cloudfunctions.net/*'), true);
+});
+
+test('production background replaces all development Firebase identifiers', () => {
+  const development = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'background.js'), 'utf8');
+  const production = createProductionBackground(development);
+  assert.equal(production.includes('AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs'), false);
+  assert.equal(production.includes('asia-south1-claimextension.cloudfunctions.net'), false);
+  assert.match(production, /AIzaSyCuDItElzmNWGztOd0_MgjvvZQii74H1C8/);
+  assert.match(production, /asia-south1-claimextension-prod\.cloudfunctions\.net/);
 });
 
 test('production dist and ZIP inputs contain only the sanitized manifest', () => {
   const entries = createBuildEntries();
   const manifestEntry = entries.find(entry => entry.name === 'manifest.json');
+  const backgroundEntry = entries.find(entry => entry.name === 'background.js');
   assert.ok(manifestEntry);
+  assert.ok(backgroundEntry);
   const manifestText = manifestEntry.data.toString('utf8');
   const zip = createStoredZip(entries);
 
@@ -38,4 +54,5 @@ test('production dist and ZIP inputs contain only the sanitized manifest', () =>
     assert.equal(manifestText.includes(origin), false);
     assert.equal(zip.includes(Buffer.from(origin)), false);
   }
+  assert.equal(zip.includes(Buffer.from('asia-south1-claimextension.cloudfunctions.net')), false);
 });

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'floating-widget.js'), 'utf8');
+const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
 test('stale floating widget guards Chrome API calls after extension reload', () => {
   assert.match(source, /function hasValidExtensionContext\(\)/);
@@ -147,6 +148,70 @@ test('platform administrators get licence, invitation, and user activation contr
   assert.match(background, /authSession\.role !== 'platformAdmin'/);
   assert.match(background, /name: functionName/);
   assert.doesNotMatch(background, /invitationToken:\s*result/);
+});
+
+test('Phase 4 administrator lifecycle controls are server-routed and rendered safely', () => {
+  const popupHtml = read('popup.html');
+  const popup = read('popup.js');
+  const background = read('background.js');
+  const functions = read('functions/index.js');
+  for (const id of [
+    'adminOrganizationsList',
+    'adminInvitationsList',
+    'adminUsersList',
+    'adminAuditList',
+    'adminCreateOrganizationBtn',
+    'adminUpdateOrganizationBtn'
+  ]) {
+    assert.match(popupHtml, new RegExp(`id="${id}"`));
+  }
+  for (const action of [
+    'adminListUsers',
+    'adminListInvitations',
+    'adminRevokeInvitation',
+    'adminReplaceInvitation',
+    'adminSuspendUser',
+    'adminReactivateUser',
+    'adminChangeUserRole',
+    'adminDeleteUserAccount',
+    'adminCreateOrganization',
+    'adminUpdateOrganization',
+    'adminListOrganizations',
+    'adminListAuditEvents'
+  ]) {
+    assert.match(background, new RegExp(`${action}:`));
+    assert.match(popup, new RegExp(`['"]${action}['"]`));
+  }
+  for (const callable of [
+    'listUsers',
+    'listInvitations',
+    'revokeInvitation',
+    'replaceInvitation',
+    'changeUserRole',
+    'deleteUserAccount',
+    'updateOrganization',
+    'listOrganizations',
+    'listAuditEvents'
+  ]) {
+    assert.match(functions, new RegExp(`exports\\.${callable} = onCall`));
+  }
+  assert.doesNotMatch(popup, /\.innerHTML\s*=/);
+  assert.match(functions, /You cannot suspend your own administrator account/);
+  assert.match(functions, /You cannot delete your own administrator account/);
+  assert.match(functions, /You cannot change your own administrator role/);
+  assert.match(functions, /profile\.accountStatus !== 'active' \|\| profile\.role !== 'platformAdmin'/);
+  assert.doesNotMatch(functions, /const auth = requirePlatformAdmin\(request\)/);
+});
+
+test('Phase 4 invitation and account deletion controls preserve secret and privacy boundaries', () => {
+  const functions = read('functions/index.js');
+  assert.match(functions, /invitationId: replacementId/);
+  assert.match(functions, /status: 'replaced'/);
+  assert.match(functions, /status: 'revoked'/);
+  assert.match(functions, /email: `deleted-\$\{uid\}@redacted\.invalid`/);
+  assert.match(functions, /await getAuth\(\)\.revokeRefreshTokens\(uid\)/);
+  assert.match(functions, /await getAuth\(\)\.deleteUser\(uid\)/);
+  assert.doesNotMatch(functions, /token,\s*\n\s*\.\.\.invitation/);
 });
 
 test('navigation clears stale badges and popup BOM is explicit', () => {
