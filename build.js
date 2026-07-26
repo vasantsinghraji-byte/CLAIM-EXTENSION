@@ -5,10 +5,14 @@ const path = require('path');
 
 const rootDir = __dirname;
 const distDir = path.join(rootDir, 'dist');
+const hostingSourceDir = path.join(rootDir, 'hosting');
+const hostingBuildDir = path.join(rootDir, 'hosting-build');
 const zipPath = path.join(rootDir, 'claim-autofill-extension.zip');
+const localConfigPath = path.join(rootDir, '.firebase-build-config.json');
 const files = [
   'manifest.json',
   'background.js',
+  'runtime-config.js',
   'auth-core.js',
   'audit-rules.js',
   'custom-rules.js',
@@ -31,8 +35,56 @@ const files = [
 const developmentOrigins = new Set(['http://localhost/*', 'http://127.0.0.1/*']);
 const developmentFunctionsOrigin = 'https://asia-south1-claimextension.cloudfunctions.net/*';
 const productionFunctionsOrigin = 'https://asia-south1-claimextension-prod.cloudfunctions.net/*';
-const developmentApiKey = 'AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs';
-const productionApiKey = 'AIzaSyCuDItElzmNWGztOd0_MgjvvZQii74H1C8';
+
+function validateEnvironmentConfig(value, name) {
+  if (!value || typeof value !== 'object') throw new Error(`${name} Firebase configuration is missing`);
+  const apiKey = String(value.apiKey || '').trim();
+  const functionsBaseUrl = String(value.functionsBaseUrl || '').trim().replace(/\/+$/, '');
+  if (apiKey.length < 20 || /obtain-from|placeholder/i.test(apiKey)) {
+    throw new Error(`${name} Firebase API key is invalid`);
+  }
+  if (!/^https:\/\/[a-z0-9-]+\.cloudfunctions\.net$/i.test(functionsBaseUrl)) {
+    throw new Error(`${name} Functions URL is invalid`);
+  }
+  return { apiKey, functionsBaseUrl };
+}
+
+function readBuildConfig(configPath = localConfigPath) {
+  if (!fs.existsSync(configPath)) {
+    if (process.env.CI === 'true') {
+      console.warn('CI validation build: using non-deployable placeholder Firebase configuration');
+      return {
+        development: validateEnvironmentConfig({
+          apiKey: 'ci-development-key-not-a-real-credential',
+          functionsBaseUrl: 'https://asia-south1-ci-development.cloudfunctions.net'
+        }, 'CI development'),
+        production: validateEnvironmentConfig({
+          apiKey: 'ci-production-key-not-a-real-credential',
+          functionsBaseUrl: 'https://asia-south1-ci-production.cloudfunctions.net'
+        }, 'CI production')
+      };
+    }
+    throw new Error('Missing .firebase-build-config.json. Copy firebase-build-config.example.json and add rotated keys locally.');
+  }
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  return {
+    development: validateEnvironmentConfig(config.development, 'Development'),
+    production: validateEnvironmentConfig(config.production, 'Production')
+  };
+}
+
+function runtimeConfigSource(config) {
+  return [
+    '(function (root) {',
+    "  'use strict';",
+    `  root.ClaimSparkRuntimeConfig = Object.freeze(${JSON.stringify({
+      firebaseApiKey: config.apiKey,
+      functionsBaseUrl: config.functionsBaseUrl
+    })});`,
+    '})(globalThis);',
+    ''
+  ].join('\n');
+}
 
 function createProductionManifest(sourceManifest) {
   const manifest = JSON.parse(JSON.stringify(sourceManifest));
@@ -49,23 +101,6 @@ function createProductionManifest(sourceManifest) {
   }
   assertProductionManifest(manifest);
   return manifest;
-}
-
-function createProductionBackground(source) {
-  const output = source
-    .replace(developmentApiKey, productionApiKey)
-    .replace(
-      'https://asia-south1-claimextension.cloudfunctions.net',
-      'https://asia-south1-claimextension-prod.cloudfunctions.net'
-    )
-    .replace('Development project only; production has no counterpart yet.', 'Production project configuration.');
-  if (output.includes(developmentApiKey) || output.includes('asia-south1-claimextension.cloudfunctions.net')) {
-    throw new Error('Development Firebase configuration leaked into production background');
-  }
-  if (!output.includes(productionApiKey) || !output.includes('asia-south1-claimextension-prod.cloudfunctions.net')) {
-    throw new Error('Production Firebase configuration is incomplete');
-  }
-  return output;
 }
 
 function assertProductionManifest(manifest) {
@@ -130,14 +165,14 @@ function createStoredZip(entries) {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-function createBuildEntries() {
+function createBuildEntries(productionConfig = readBuildConfig().production) {
   return [...files].sort().map(relativePath => {
     const source = path.join(rootDir, relativePath);
     let data;
     if (relativePath === 'manifest.json') {
       data = Buffer.from(`${JSON.stringify(createProductionManifest(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`);
-    } else if (relativePath === 'background.js') {
-      data = Buffer.from(createProductionBackground(fs.readFileSync(source, 'utf8')));
+    } else if (relativePath === 'runtime-config.js') {
+      data = Buffer.from(runtimeConfigSource(productionConfig));
     } else {
       data = fs.readFileSync(source);
     }
@@ -145,8 +180,25 @@ function createBuildEntries() {
   });
 }
 
+function createHostingBuild(productionConfig) {
+  fs.rmSync(hostingBuildDir, { recursive: true, force: true });
+  fs.mkdirSync(hostingBuildDir, { recursive: true });
+  for (const name of fs.readdirSync(hostingSourceDir)) {
+    const source = path.join(hostingSourceDir, name);
+    if (!fs.statSync(source).isFile()) continue;
+    let content = fs.readFileSync(source);
+    if (name === 'firebase-client.js') {
+      content = Buffer.from(content.toString('utf8')
+        .replace('__FIREBASE_API_KEY__', productionConfig.apiKey)
+        .replace('__FUNCTIONS_BASE_URL__', productionConfig.functionsBaseUrl));
+    }
+    fs.writeFileSync(path.join(hostingBuildDir, name), content);
+  }
+}
+
 function main() {
-  for (const relativePath of files) {
+  const config = readBuildConfig();
+  for (const relativePath of files.filter(file => file !== 'runtime-config.js')) {
     if (!fs.existsSync(path.join(rootDir, relativePath))) {
       throw new Error(`Required extension file is missing: ${relativePath}`);
     }
@@ -155,7 +207,9 @@ function main() {
   fs.rmSync(distDir, { recursive: true, force: true });
   fs.mkdirSync(distDir, { recursive: true });
 
-  const entries = createBuildEntries();
+  fs.writeFileSync(path.join(rootDir, 'runtime-config.js'), runtimeConfigSource(config.development));
+  createHostingBuild(config.production);
+  const entries = createBuildEntries(config.production);
   for (const entry of entries) {
     const destination = path.join(distDir, entry.name);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -174,4 +228,12 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { createProductionBackground, createProductionManifest, createBuildEntries, createStoredZip };
+module.exports = {
+  createBuildEntries,
+  createHostingBuild,
+  createProductionManifest,
+  createStoredZip,
+  readBuildConfig,
+  runtimeConfigSource,
+  validateEnvironmentConfig
+};

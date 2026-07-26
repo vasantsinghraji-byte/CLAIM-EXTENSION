@@ -1,8 +1,8 @@
 (function (root) {
   'use strict';
 
-  const API_KEY = 'AIzaSyCuDItElzmNWGztOd0_MgjvvZQii74H1C8';
-  const FUNCTIONS_ORIGIN = 'https://asia-south1-claimextension-prod.cloudfunctions.net';
+  const API_KEY = '__FIREBASE_API_KEY__';
+  const FUNCTIONS_ORIGIN = '__FUNCTIONS_BASE_URL__';
   const SESSION_KEY = 'claimSparkAdminSession';
 
   function normalizedError(payload, fallback) {

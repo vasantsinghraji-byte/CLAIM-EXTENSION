@@ -1,9 +1,8 @@
 // Background service worker: serialized storage writer plus per-tab audit badge.
 
-// Service workers can't use multiple <script> tags like content_scripts can,
-// so auth-core.js is pulled in here; skipped under Node (require()'d tests)
-// where importScripts does not exist.
-if (typeof importScripts === 'function') importScripts('auth-core.js');
+// runtime-config.js is generated from the git-ignored Firebase build config.
+// It must load before auth-core.js in the service worker.
+if (typeof importScripts === 'function') importScripts('runtime-config.js', 'auth-core.js');
 
 const STORAGE_POLICIES = Object.freeze({
   claimActivityLog: { limit: 500, timestampField: 'timestamp', maxAgeMs: 30 * 24 * 60 * 60 * 1000 },
@@ -12,11 +11,8 @@ const STORAGE_POLICIES = Object.freeze({
   claimRecoverySnapshots: { limit: 20, timestampField: 'createdAt', maxAgeMs: 24 * 60 * 60 * 1000 }
 });
 
-// Web API keys identify a Firebase project; they are not secrets (Firebase's
-// own documented model - access is gated by Auth + Security Rules, not by
-// key secrecy). Development project only; production has no counterpart yet.
-const FIREBASE_WEB_API_KEY = 'AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs';
-const FUNCTIONS_BASE_URL = 'https://asia-south1-claimextension.cloudfunctions.net';
+const FIREBASE_WEB_API_KEY = globalThis.ClaimSparkRuntimeConfig?.firebaseApiKey || '';
+const FUNCTIONS_BASE_URL = globalThis.ClaimSparkRuntimeConfig?.functionsBaseUrl || '';
 const LICENCE_RECHECK_ALARM = 'claimExtensionLicenceRecheck';
 // How long Apply keeps trusting the last successful licence check if the
 // backend is simply unreachable (not an expired/suspended licence - a

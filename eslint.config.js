@@ -49,6 +49,7 @@ module.exports = [
     ignores: [
       'audit-rules.js',
       'dist/**',
+      'hosting-build/**',
       'node_modules/**',
       'privacy-site/**',
       'functions/node_modules/**'
@@ -79,6 +80,7 @@ module.exports = [
   {
     files: [
       'build.js',
+      'tools/check-no-secrets.js',
       'scripts/release.js',
       'scripts/hosting-smoke.js',
       'tests/**/*.js',

@@ -9,12 +9,12 @@
     "release": "node scripts/release.js",
     "test": "node --test \"tests/*.test.js\"",
     "test:firebase": "firebase emulators:exec --only firestore \"node --test tests/firebase/firestore-rules.test.js\" --project claimextension-test",
-    "test:hosting": "firebase emulators:exec --only hosting \"node scripts/hosting-smoke.js\" --project claimextension",
+    "test:hosting": "npm run build && firebase emulators:exec --only hosting \"node scripts/hosting-smoke.js\" --project claimextension",
     "test:functions": "npm --prefix functions test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "git config core.hooksPath .githooks && git config commit.template .gitmessage",
-    "check": "python tools/validate-matrix-coverage.py && node --check build.js && node --check audit-rules.js && node --check custom-rules.js && node --check audit-core.js && node --check auth-core.js && node --check claim-core.js && node --check review-core.js && node --check content.js && node --check background.js && node --check options.js && node --check floating-widget.js && node --check popup.js && node --check hosting/firebase-client.js && node --check hosting/admin.js && node --check scripts/hosting-smoke.js && node --check scripts/live-browser-smoke.js && node --check scripts/release.js && node --test \"tests/*.test.js\"",
+    "check": "python tools/validate-matrix-coverage.py && node tools/check-no-secrets.js && node --check build.js && node --check audit-rules.js && node --check custom-rules.js && node --check audit-core.js && node --check auth-core.js && node --check claim-core.js && node --check review-core.js && node --check content.js && node --check background.js && node --check options.js && node --check floating-widget.js && node --check popup.js && node --check hosting/firebase-client.js && node --check hosting/admin.js && node --check scripts/hosting-smoke.js && node --check scripts/live-browser-smoke.js && node --check scripts/release.js && node --test \"tests/*.test.js\"",
     "watch": "nodemon --watch . --ignore dist --ignore tests -e js,html,css,json --exec npm run build"
   },
   "keywords": [
