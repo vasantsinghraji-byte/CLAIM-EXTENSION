@@ -1,6 +1,6 @@
 {
   "name": "claim-autofill-extension",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "Chrome extension that fills approved amounts from claim amounts and audits RGHS bundled packages for unbundling",
   "scripts": {
     "build": "node build.js",
