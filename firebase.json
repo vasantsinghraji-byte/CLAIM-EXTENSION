@@ -43,12 +43,7 @@
           {
             "key": "Cross-Origin-Opener-Policy",
             "value": "same-origin"
-          }
-        ]
-      },
-      {
-        "source": "**/*.@(js|css|html)",
-        "headers": [
+          },
           {
             "key": "Cache-Control",
             "value": "no-store"
