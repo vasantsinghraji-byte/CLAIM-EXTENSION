@@ -219,7 +219,9 @@ test('navigation clears stale badges and popup BOM is explicit', () => {
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
   assert.match(background, /chrome\.tabs\.onUpdated\.addListener/);
   assert.match(background, /changeInfo\.status !== 'loading'/);
-  assert.match(background, /setBadgeText\(\{ tabId, text: '' \}\)/);
+  assert.match(background, /setTabBadge\(tabId, ''\)/);
+  assert.match(background, /setBadgeText\(\{ tabId, text \}, ignoreMissingTabError\)/);
+  assert.match(background, /void globalThis\.chrome\?\.runtime\?\.lastError/);
   assert.match(popup, /'\\uFEFF' \+ csv/);
   assert.equal(popup.includes(String.fromCharCode(0xFEFF)), false);
 });

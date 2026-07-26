@@ -155,3 +155,7 @@
 ## 1.9.2 - 2026-07-26
 
 - Finalize production activation controls and verified administrator bootstrap procedure.
+
+## 1.9.3 - 2026-07-26
+
+- Handle tabs closed during asynchronous badge updates without service-worker errors.
