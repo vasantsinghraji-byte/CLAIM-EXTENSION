@@ -1,63 +1,28 @@
-# Quick Start Guide
+# Quick Start
 
-## Extension Rebuilt with Proper Structure! ✅
+## Administrator
 
-Your extension has been reorganized into a professional structure:
+1. Sign in using the platform-administrator account.
+2. Open **Administrator** in the extension popup.
+3. Activate or renew the development licence.
+4. Generate an invitation for the exact processor email.
+5. Send the generated message through an approved private channel.
+6. After the processor accepts it, activate that same email.
 
-```
-📁 claim-autofill-extension/
-├── 📁 src/          ← Edit files here
-│   ├── 📁 content/
-│   ├── 📁 popup/
-│   ├── 📁 assets/
-│   └── manifest.json
-├── 📁 dist/         ← Load this in Chrome
-└── build.js         ← Build script
-```
+Invitation messages are copied manually in 1.8.1; automatic email delivery is
+not implemented.
 
-## Load the Extension
+## Processor
 
-### Step 1: Build (if not done already)
-```bash
-node build.js
-```
+1. Install the production package using `INSTALL.md`.
+2. Choose **New processor? Create an account**.
+3. Use the invited email and one-time invitation token.
+4. Verify the Firebase email.
+5. Continue until the invitation is accepted.
+6. Ask the administrator to activate the account.
+7. Select **Check Status**.
+8. Use Preview, explicit Apply, and Undo on an authorized RGHS process sheet.
 
-### Step 2: Load in Chrome
-1. Go to `chrome://extensions/`
-2. Remove the old extension (if loaded)
-3. Enable "Developer mode" (toggle in top-right)
-4. Click "Load unpacked"
-5. Navigate to and select: `c:\Users\wgshx\claim-autofill-extension\dist`
-
-### Step 3: Test
-Open [test-page.html](test-page.html) or the Rajasthan Government Health website.
-
-## Making Changes
-
-1. Edit files in `src/` folder
-2. Run `node build.js` to rebuild
-3. Click reload icon on extension in `chrome://extensions/`
-4. Refresh your test page
-
-## Current Status
-
-✅ Project restructured
-✅ Build system created
-✅ Extension built to `dist/`
-⏳ Ready for testing
-
-## Known Issue to Fix
-
-The extension detects columns correctly but needs debugging for input field detection.
-
-Check console (F12) for detailed logs showing:
-- Tables found
-- Columns detected (Claim: 4, Approved: 5)
-- Row processing details
-
-## Next Steps
-
-1. Load the rebuilt extension from `dist/` folder
-2. Test on test-page.html
-3. Check console for detailed debug logs
-4. Report any issues for further debugging
+If an account exists but its onboarding profile is missing, sign in normally.
+The extension will request the matching invitation token once and recover only
+when the authenticated UID and email match the accepted invitation.

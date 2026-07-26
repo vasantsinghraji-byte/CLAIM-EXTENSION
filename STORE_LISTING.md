@@ -1,6 +1,8 @@
 # Chrome Web Store listing pack
 
-Prepared from the production Manifest V3 package for version 1.5.1.
+Prepared from the controlled Manifest V3 release candidate for version 1.8.1.
+The current package targets the development Firebase project; Web Store upload
+remains blocked until the Phase 4 production configuration gate passes.
 
 ## Store listing
 
@@ -37,12 +39,15 @@ Key features:
 - Configure review-only custom findings and remark templates.
 - Require a final acknowledgement after extension-applied changes before the
   portal claim can be submitted.
+- Require invite-only, verified and administrator-activated accounts with an
+  active organization licence.
 
 Privacy and security:
 
 - Claim processing happens locally in the user's browser.
-- The extension does not send claim, patient, browsing, or usage data to the
-  developer or to an external analytics or advertising service.
+- Firebase receives account, organization, licence, rate-limit, extension
+  version, and privacy-safe access metadata. Claim, patient, clinical, amount,
+  URL, document, and free-text remark content is not sent to Firebase.
 - Local audit records can contain claim identifiers, RGHS page URLs, package
   and amount details, rule results, and reviewer actions.
 - Recovery snapshots can temporarily contain the prior and replacement values
@@ -109,6 +114,19 @@ review-only rules, widget position, audit feedback, audit/activity records, and
 short-lived recovery snapshots. Claim data is not sent to the developer or an
 external server.
 
+### Permission justification: alarms
+
+Used to schedule a bounded licence recheck. The alarm never reads or changes
+RGHS portal fields and never initiates Preview, Apply, Undo, or submission.
+
+### Host access justification: Firebase authentication and Functions
+
+`identitytoolkit.googleapis.com` and `securetoken.googleapis.com` provide
+email/password authentication and token refresh. The configured
+`asia-south1` callable Functions origin verifies the account, organization,
+role and licence and performs administrator-authorized mutations. Claim and
+patient content is not included in these requests.
+
 ### Host access justification: https://rghs.rajasthan.gov.in/*
 
 Required to run the extension only on the official RGHS portal. The content
@@ -140,9 +158,12 @@ data types conservatively:
 - User activity
 - Website content
 
-Do not select:
+Also select:
 
 - Authentication information
+
+Do not select:
+
 - Personal communications
 - Location
 
@@ -198,7 +219,7 @@ patient or claim data.
 
 - [ ] Run `npm run check`.
 - [ ] Run `npm run build`.
-- [ ] Confirm `dist/manifest.json` version is 1.5.1 or higher than the last
+- [ ] Confirm `dist/manifest.json` version is 1.8.1 or higher than the last
       uploaded version.
 - [ ] Confirm production matches contain only
       `https://rghs.rajasthan.gov.in/*`.
@@ -216,7 +237,7 @@ patient or claim data.
 - [ ] Upload `store-assets/small-promo-tile.png` as the 440x280 small promo
       tile.
 - [x] Public homepage, support, and privacy-policy URLs are deployed.
-- [ ] Verify that listing claims match version 1.5.1 behavior.
+- [ ] Verify that listing claims match version 1.8.1 behavior.
 
 ### Privacy practices
 

@@ -13,6 +13,20 @@ const authEmailLabel = document.getElementById('authEmailLabel');
 const licenceStatusLabel = document.getElementById('licenceStatusLabel');
 const authRecheckBtn = document.getElementById('authRecheckBtn');
 const authSignOutBtn = document.getElementById('authSignOutBtn');
+const adminPanel = document.getElementById('adminPanel');
+const adminLicenceOrganization = document.getElementById('adminLicenceOrganization');
+const adminMaximumUsers = document.getElementById('adminMaximumUsers');
+const adminTermDays = document.getElementById('adminTermDays');
+const adminActivateLicenceBtn = document.getElementById('adminActivateLicenceBtn');
+const adminInviteEmail = document.getElementById('adminInviteEmail');
+const adminInviteRole = document.getElementById('adminInviteRole');
+const adminInviteBtn = document.getElementById('adminInviteBtn');
+const adminInvitationResult = document.getElementById('adminInvitationResult');
+const adminInvitationMessage = document.getElementById('adminInvitationMessage');
+const adminCopyInvitationBtn = document.getElementById('adminCopyInvitationBtn');
+const adminActivateEmail = document.getElementById('adminActivateEmail');
+const adminActivateUserBtn = document.getElementById('adminActivateUserBtn');
+const adminStatus = document.getElementById('adminStatus');
 const showSignUpLink = document.getElementById('showSignUpLink');
 const showSignInLink = document.getElementById('showSignInLink');
 const signUpEmailInput = document.getElementById('signUpEmail');
@@ -120,10 +134,14 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   authAcceptInvitation.hidden = stage !== 'accept-invitation';
   authAwaitingActivation.hidden = stage !== 'awaiting-activation';
   authSignedIn.hidden = stage !== 'signed-in';
+  adminPanel.hidden = stage !== 'signed-in' || authSession?.role !== 'platformAdmin';
 
   if (stage === 'signed-in') {
     authEmailLabel.textContent = authSession.email || '';
     licenceStatusLabel.textContent = describeLicenceStatus(licenceState);
+    if (authSession.role === 'platformAdmin' && authSession.organizationId) {
+      adminLicenceOrganization.value = authSession.organizationId;
+    }
   }
   if (stage === 'verify-email') {
     verifyEmailLabel.textContent = pendingAuth.email || '';
@@ -280,8 +298,14 @@ authSignInBtn.addEventListener('click', () => {
     }
     authPasswordInput.value = '';
     showStatus(
-      response.requiresEmailVerification ? 'Signed in. Verify your email to continue.' : 'Signed in',
-      response.requiresEmailVerification ? 'warning' : 'success'
+      response.requiresEmailVerification
+        ? 'Signed in. Verify your email to continue.'
+        : response.requiresProfileRecovery
+          ? 'Account verified. Enter your original invitation token once to repair onboarding.'
+          : response.awaitingActivation
+            ? 'Invitation already accepted. Waiting for administrator activation.'
+            : 'Signed in',
+      response.requiresEmailVerification || response.requiresProfileRecovery || response.awaitingActivation ? 'warning' : 'success'
     );
   });
 });
@@ -300,6 +324,115 @@ authRecheckBtn.addEventListener('click', () => {
     authRecheckBtn.disabled = false;
     showStatus(response?.success ? 'Licence rechecked' : 'Unable to recheck licence', response?.success ? 'success' : 'error');
   });
+});
+
+function setAdminStatus(message, type = '') {
+  adminStatus.textContent = message;
+  adminStatus.className = `admin-status ${type}`.trim();
+}
+
+function sendAdminAction(action, data, button, pendingLabel) {
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = pendingLabel;
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ action, data }, response => {
+      button.disabled = false;
+      button.textContent = originalLabel;
+      resolve(response || { success: false, error: chrome.runtime.lastError?.message || 'No response' });
+    });
+  });
+}
+
+adminActivateLicenceBtn.addEventListener('click', async () => {
+  const organizationId = adminLicenceOrganization.value.trim();
+  const maximumUsers = Number(adminMaximumUsers.value);
+  const termDays = Number(adminTermDays.value);
+  if (!organizationId || !Number.isInteger(maximumUsers) || maximumUsers < 1 || maximumUsers > 500
+      || !Number.isInteger(termDays) || termDays < 1 || termDays > 366) {
+    setAdminStatus('Enter an organization, 1-500 users, and a term of 1-366 days.', 'error');
+    return;
+  }
+  const response = await sendAdminAction(
+    'adminActivateLicence',
+    { organizationId, maximumUsers, termDays },
+    adminActivateLicenceBtn,
+    'Activating...'
+  );
+  if (!response.success) {
+    setAdminStatus(`Licence activation failed: ${response.error}`, 'error');
+    return;
+  }
+  setAdminStatus(`Licence active for ${termDays} days (maximum ${maximumUsers} users).`, 'success');
+  loadAuthState();
+});
+
+adminInviteBtn.addEventListener('click', async () => {
+  const email = adminInviteEmail.value.trim().toLowerCase();
+  const organizationId = adminLicenceOrganization.value.trim();
+  const role = adminInviteRole.value;
+  adminInvitationResult.hidden = true;
+  adminInvitationMessage.value = '';
+  if (!email || !organizationId || !['processor', 'organizationAdmin'].includes(role)) {
+    setAdminStatus('Enter the user email, organization, and role.', 'error');
+    return;
+  }
+  const response = await sendAdminAction(
+    'adminInviteUser',
+    { email, organizationId, role },
+    adminInviteBtn,
+    'Generating...'
+  );
+  const token = response?.result?.token;
+  if (!response.success || !token) {
+    setAdminStatus(`Invitation failed: ${response?.error || 'No token returned'}`, 'error');
+    return;
+  }
+  const validHours = Math.round(Number(response.result.expiresInSeconds || 0) / 3600);
+  adminInvitationMessage.value = [
+    'You have been invited to Claim Spark.',
+    '',
+    `Use this email: ${email}`,
+    'Open Claim Spark and choose "New processor? Create an account".',
+    'Enter the one-time invitation token below:',
+    '',
+    token,
+    '',
+    validHours ? `This invitation expires in ${validHours} hours.` : 'This invitation expires automatically.',
+    'Do not share this token with anyone else.'
+  ].join('\n');
+  adminInvitationResult.hidden = false;
+  setAdminStatus('Invitation generated. Copy it now; Claim Spark does not save the token.', 'success');
+});
+
+adminCopyInvitationBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(adminInvitationMessage.value);
+    setAdminStatus('Invitation message copied.', 'success');
+  } catch {
+    adminInvitationMessage.focus();
+    adminInvitationMessage.select();
+    setAdminStatus('Copy was blocked. The invitation message is selected; press Ctrl+C.', 'error');
+  }
+});
+
+adminActivateUserBtn.addEventListener('click', async () => {
+  const email = adminActivateEmail.value.trim().toLowerCase();
+  if (!email) {
+    setAdminStatus('Enter the invited user email.', 'error');
+    return;
+  }
+  const response = await sendAdminAction(
+    'adminActivateUser',
+    { email },
+    adminActivateUserBtn,
+    'Activating...'
+  );
+  if (!response.success) {
+    setAdminStatus(`User activation failed: ${response.error}`, 'error');
+    return;
+  }
+  setAdminStatus(`${email} is active. Ask the user to click Check Status.`, 'success');
 });
 
 // Handle toggle change

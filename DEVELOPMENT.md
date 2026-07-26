@@ -11,7 +11,9 @@ Editable extension files live at the repository root. Generated files live in `d
 - `popup.html`, `popup.css`, `popup.js`: preview/apply/undo interface
 - `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from RGHS styles
 
-Claim Spark is limited to `/RGHS/processSheetSearch/` routes. It starts hidden until the synced Auto-fill setting is read, then follows enabled-state events from the content script.
+Claim Spark supports the verified `/RGHS/processSheetSearch/` and
+`/RGHS/tpaOPD*` workflows. It starts hidden until the stored claim-tools
+setting is read, then follows enabled-state events from the content script.
 
 Production process-sheet routes fail closed when the expected claim table headers or stable approved controls cannot be mapped. Audit rule data is schema-validated before claim processing. Submission acknowledgement only arms the next user-initiated portal Submit; extension code never submits the form.
 Its drag position is clamped to the viewport and stored in `chrome.storage.local` as `claimSparkPosition`. The action panel flips below or right when the mascot is near an edge.
@@ -39,9 +41,11 @@ eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
 1. Edit the root source files.
 2. Run `npm run check`.
-3. Run `npm run build`.
-4. Load or reload `dist/` at `chrome://extensions/`.
-5. Refresh the RGHS claim page or local `test-page.html` fixture.
+3. Run `npm run lint`, `npm run test:functions`, and `npm run test:firebase`
+   before a release.
+4. Run `npm run build`.
+5. Load or reload `dist/` at `chrome://extensions/`.
+6. Refresh the RGHS claim page or local `test-page.html` fixture.
 
 The build fails when a required production file is missing. It produces a deterministic `claim-autofill-extension.zip` without another dependency.
 

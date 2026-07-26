@@ -34,6 +34,7 @@ test('live-browser smoke runs preview, apply, and undo and proves exact restorat
 
   assert.equal(result.passed, true);
   assert.equal(result.submitted, false);
+  assert.equal(result.restoredControls, 2);
   assert.deepEqual(calls, [
     'preview',
     ['apply', { token: 'safe-token', selectedRowKeys: ['row-0'], acknowledgedHighRisk: false }],
@@ -45,5 +46,18 @@ test('live-browser smoke refuses to run while the extension is off', async () =>
   await assert.rejects(
     runSmoke({ status: () => ({ enabled: false }) }, { querySelectorAll: () => [] }),
     /Extension is OFF/
+  );
+});
+
+test('live-browser smoke refuses to apply when it cannot snapshot portal controls', async () => {
+  await assert.rejects(
+    runSmoke(
+      {
+        status: () => ({ enabled: true }),
+        preview: () => { throw new Error('preview must not run'); }
+      },
+      { querySelectorAll: () => [] }
+    ),
+    /no portal controls to protect/
   );
 });

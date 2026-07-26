@@ -1,8 +1,8 @@
 # Privacy Policy for Claim Amount Auto-Fill
 
-**Effective date:** 24 July 2026
+**Effective date:** 26 July 2026
 
-**Extension version reviewed:** 1.5.1
+**Extension version reviewed:** 1.8.1
 
 Claim Amount Auto-Fill is a Chrome extension for authorized Rajasthan
 Government Health Scheme (RGHS) claim reviewers. It helps users preview, audit,
@@ -21,6 +21,14 @@ on the page, this can include:
 - audit rule identifiers, findings, reviewer feedback, and extension actions;
 - extension settings, custom review rules, remark templates, and widget
   position.
+
+For invite-only access, the service also handles:
+
+- account email, Firebase UID, verified-email status, and authentication tokens;
+- display name, organization, role, and account status;
+- invitation status and a SHA-256 hash of the one-time invitation token;
+- licence status, expiry, seat limit, extension version, rate-limit counters,
+  and privacy-safe administrative or extension-event metadata.
 
 This information can constitute personally identifiable information, health
 information, financial information, website content, browsing activity, and
@@ -67,10 +75,15 @@ extension-removal behavior.
 
 ## Data sharing and transmission
 
-Claim Amount Auto-Fill does not send claim, patient, browsing, or extension
-usage data to the developer, advertising services, analytics services, or other
-third parties. It has no developer-operated backend and does not include
-external analytics or advertising code.
+Claim Amount Auto-Fill uses a Firebase development backend for invite-only
+authentication, account and organization authorization, licence verification,
+configuration, rate limiting, and privacy-safe audit metadata. Firebase
+receives the minimum account and access data listed above. The extension does
+not send patient names, TIDs or claim identifiers, diagnoses, treatment text,
+claim/approved/deduction amounts, RGHS URLs, medical documents, or portal
+remarks to Firebase.
+
+The extension does not include advertising or third-party analytics code.
 
 The extension operates on the RGHS page already opened by the user. Changes
 explicitly applied by the user become part of that page and may later be sent
@@ -86,7 +99,9 @@ governed by Google's own terms and privacy policy.
 The production extension runs only on `https://rghs.rajasthan.gov.in/*`. All
 executable code is packaged with the extension; the extension does not download
 or execute remote code. It requests only the `activeTab` and `storage`
-permissions in addition to its RGHS host access.
+permissions plus `alarms` for bounded licence rechecks. It contacts only the
+Firebase Identity Toolkit, Secure Token API, the configured callable Functions
+origin, and the RGHS host declared in its manifest.
 
 No method of local storage can be guaranteed to prevent access by a person or
 software that already controls the user's browser profile or device. Users
@@ -105,6 +120,10 @@ Users can:
 - export or clear local audit/activity records;
 - reset local rule overrides and custom configuration; and
 - uninstall the extension.
+
+Users may request account deletion or access assistance through the support
+contact. The Phase 4 production gate requires the account-deletion operating
+procedure to be tested before publication.
 
 ## Limited Use
 

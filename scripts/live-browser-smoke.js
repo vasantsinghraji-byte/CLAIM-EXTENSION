@@ -7,12 +7,18 @@
 
   function controls(document) {
     return [...document.querySelectorAll(
-      '[name="packageFinalAmounts"], [id^="packageFinalAmount_"], [id^="packageremarks_"], [name*="remark" i]'
+      'input, textarea, select, [contenteditable="true"], [contenteditable=""]'
     )];
   }
 
   function snapshot(document) {
-    return controls(document).map(element => ({ id: element.id, name: element.name, value: element.value }));
+    return controls(document).map((element, index) => ({
+      index,
+      id: element.id || '',
+      name: element.name || '',
+      value: 'value' in element ? element.value : element.textContent,
+      checked: 'checked' in element ? element.checked : undefined
+    }));
   }
 
   return async function runClaimExtensionLiveSmoke(
@@ -23,6 +29,7 @@
     if (actions.status().enabled !== true) throw new Error('Claim Extension is OFF. Enable it before running the smoke test.');
 
     const before = snapshot(document);
+    if (!before.length) throw new Error('Smoke test found no portal controls to protect. Do not run Apply.');
     const preview = actions.preview();
     const selectedRowKeys = preview.proposals
       .filter(proposal => proposal.risk !== 'high')
