@@ -84,6 +84,21 @@ Enable Email/Password Authentication and bootstrap the platform administrator
 through a password-private human procedure. Do not create, transmit or store
 the administrator password in this repository.
 
+After the owner creates `nocturnaladmin@gmail.com` in Production Authentication
+and stores the password privately, the Firebase CLI operator must be signed in
+as that same account. Bootstrap the empty production project exactly once:
+
+```powershell
+node tools/bootstrap-production-admin.js --confirm claimextension-prod:nocturnaladmin@gmail.com
+```
+
+The tool refuses the wrong CLI account, project confirmation, existing custom
+claims, disabled identity, or any pre-existing protected bootstrap document. It
+sets the verified active `platformAdmin` claims and atomically creates the
+one-user platform organization, 90-day licence, user profile, application
+configuration and privacy-safe bootstrap audit event. It never reads or accepts
+the administrator password.
+
 List backup schedules:
 
 ```powershell

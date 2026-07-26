@@ -81,6 +81,7 @@ module.exports = [
     files: [
       'build.js',
       'tools/check-no-secrets.js',
+      'tools/bootstrap-production-admin.js',
       'scripts/release.js',
       'scripts/hosting-smoke.js',
       'tests/**/*.js',
