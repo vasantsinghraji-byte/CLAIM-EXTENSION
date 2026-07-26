@@ -1,0 +1,10 @@
+{
+  "development": {
+    "apiKey": "obtain-from-firebase-console",
+    "functionsBaseUrl": "https://asia-south1-DEVELOPMENT_PROJECT.cloudfunctions.net"
+  },
+  "production": {
+    "apiKey": "obtain-from-firebase-console",
+    "functionsBaseUrl": "https://asia-south1-PRODUCTION_PROJECT.cloudfunctions.net"
+  }
+}

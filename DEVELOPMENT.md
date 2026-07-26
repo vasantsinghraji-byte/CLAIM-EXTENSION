@@ -1,5 +1,19 @@
 # Development Guide
 
+## Local Firebase configuration
+
+Tracked source contains no Firebase API key values. Copy
+`firebase-build-config.example.json` to `.firebase-build-config.json`, then
+obtain the development and production Web App values from the corresponding
+Firebase project. The local file is ignored by Git.
+
+`npm run build` generates `runtime-config.js` for unpacked development use,
+`dist/runtime-config.js` for the production extension package, and
+`hosting-build/firebase-client.js` for Firebase Hosting.
+
+Never add the generated configuration files to Git. `npm run check` scans all
+tracked files and fails on Google API key patterns.
+
 ## Source layout
 
 Editable extension files live at the repository root. Generated files live in `dist/` and `claim-autofill-extension.zip`; do not edit generated copies.

@@ -2,6 +2,10 @@
 
 Current release: **1.9.1**
 
+Before building from source, create the ignored
+`.firebase-build-config.json` described in `DEVELOPMENT.md`. Never commit that
+file or generated `runtime-config.js`.
+
 ## Controlled pilot installation
 
 1. Obtain `claim-autofill-extension.zip` from the administrator.

@@ -76,7 +76,7 @@ test('options updates are serialized and refresh from storage changes', () => {
 
 test('background wires auth-core, the three auth message actions, and the licence-recheck alarm', () => {
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
-  assert.match(background, /importScripts\('auth-core\.js'\)/);
+  assert.match(background, /importScripts\('runtime-config\.js', 'auth-core\.js'\)/);
   assert.match(background, /request\?\.action === 'authSignIn'/);
   assert.match(background, /request\?\.action === 'authSignOut'/);
   assert.match(background, /request\?\.action === 'authRefreshLicence'/);

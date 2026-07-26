@@ -4,6 +4,9 @@ tools/vendor/
 
 # Build output
 dist/
+hosting-build/
+runtime-config.js
+.firebase-build-config.json
 
 # OS files
 .DS_Store

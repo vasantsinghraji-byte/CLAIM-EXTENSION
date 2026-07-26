@@ -8,7 +8,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('Firebase Hosting serves the public site and authenticated administrator dashboard', () => {
   const firebase = JSON.parse(read('firebase.json'));
-  assert.equal(firebase.hosting.public, 'hosting');
+  assert.equal(firebase.hosting.public, 'hosting-build');
   for (const file of [
     'hosting/index.html',
     'hosting/admin.html',
@@ -81,7 +81,7 @@ test('hosting security headers deny framing, remote scripts, sensitive browser c
 
 test('hosted Firebase client is pinned to the isolated production project', () => {
   const client = read('hosting/firebase-client.js');
-  assert.match(client, /asia-south1-claimextension-prod\.cloudfunctions\.net/);
-  assert.doesNotMatch(client, /asia-south1-claimextension\.cloudfunctions\.net/);
-  assert.doesNotMatch(client, /AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs/);
+  assert.match(client, /__FIREBASE_API_KEY__/);
+  assert.match(client, /__FUNCTIONS_BASE_URL__/);
+  assert.doesNotMatch(client, /AIza[0-9A-Za-z_-]{30,}/);
 });
