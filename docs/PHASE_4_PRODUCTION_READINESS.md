@@ -7,6 +7,10 @@ Date: 26 July 2026
 
 ## Delivered controls
 
+The primary production administrator interface is the static dashboard under
+`hosting/`, deployed through Firebase Hosting. The popup administrator panel is
+retained only as a pilot/break-glass substitute.
+
 - List up to 100 users with status, role and organization.
 - Activate, suspend and reactivate users. Suspension disables Firebase
   Authentication and revokes refresh tokens.
@@ -26,6 +30,13 @@ Date: 26 July 2026
 - Enforce active organization, active licence and seat limit during activation.
 - Build the production ZIP with production Firebase identifiers and remove
   development origins and development Functions configuration.
+- Serve public home, privacy, support, terms and account-deletion pages plus
+  the authenticated administrator dashboard through Firebase Hosting.
+- Apply a strict Content Security Policy, framing denial, no-sniff,
+  no-referrer, capability restrictions and no-store headers to hosted
+  administrator assets.
+- Keep dashboard authentication tokens in session storage only. Passwords are
+  sent directly to Firebase Authentication and are never stored by the site.
 
 ## Security boundaries
 
@@ -78,7 +89,8 @@ automation alone:
 1. Confirm production billing, budget alerts and authorized administrators.
 2. Enable Email/Password Authentication and bootstrap the production
    `platformAdmin` identity without sharing its password.
-3. Deploy reviewed Firestore rules and Functions to `claimextension-prod`.
+3. Deploy reviewed Firestore rules, Functions and Hosting to
+   `claimextension-prod`.
 4. Enable a daily Firestore backup schedule with 14-day retention, then perform
    and record a restore drill into a separate recovery database.
 5. Complete the privacy/legal review for retention, support response and RGHS

@@ -9,7 +9,7 @@
 5. Send the generated message through an approved private channel.
 6. After the processor accepts it, activate that same email.
 
-Invitation messages are copied manually in 1.9.0; automatic email delivery is
+Invitation messages are copied manually in 1.9.1; automatic email delivery is
 not implemented.
 
 ## Processor

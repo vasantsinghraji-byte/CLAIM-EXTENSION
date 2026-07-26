@@ -4,7 +4,9 @@ Status: Phase 0 baseline, Phase 1 Firebase development foundation, Phase 2
 authenticated extension integration, and the revised Phase 3 single-user
 development pilot are complete. Phase 4 repository implementation adds the
 complete administrator lifecycle, production-isolated packaging, privacy and
-operations runbooks, and controlled-distribution controls. Production
+operations runbooks, a Firebase-hosted administrator dashboard, and
+controlled-distribution controls. The extension popup retains a constrained
+break-glass/pilot panel; it is not the primary production dashboard. Production
 activation and Chrome Web Store publication remain explicit human-controlled
 gates.
 See `docs/PHASE_0_BASELINE.md`, `docs/PHASE_1_FIREBASE_FOUNDATION.md`,
@@ -12,7 +14,7 @@ See `docs/PHASE_0_BASELINE.md`, `docs/PHASE_1_FIREBASE_FOUNDATION.md`,
 
 Target users: Approximately 50 authorized RGHS claim processors
 
-Current release: Manifest V3 extension version 1.9.0
+Current release: Manifest V3 extension version 1.9.1
 
 Recommended first milestone: Invite-only, non-AI MVP
 

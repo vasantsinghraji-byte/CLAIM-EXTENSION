@@ -4,9 +4,11 @@ An invite-only Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Current release: **1.9.0**. Phase 4 adds production-isolated packaging and a
+Current release: **1.9.1**. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
-organizations, account deletion and audit-event viewing. See
+organizations, account deletion and audit-event viewing. The Firebase-hosted
+dashboard is the primary production interface; the popup panel is retained as
+a constrained fallback. See
 `docs/PHASE_4_PRODUCTION_READINESS.md` for the human-controlled production
 activation gates.
 

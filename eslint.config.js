@@ -24,6 +24,8 @@ const browserGlobals = {
   navigator: 'readonly',
   crypto: 'readonly',
   fetch: 'readonly',
+  FormData: 'readonly',
+  URLSearchParams: 'readonly',
   importScripts: 'readonly'
 };
 
@@ -70,7 +72,7 @@ module.exports = [
     files: [
       'content.js', 'popup.js', 'options.js', 'background.js',
       'floating-widget.js', 'claim-core.js', 'audit-core.js', 'auth-core.js', 'review-core.js',
-      'scripts/live-browser-smoke.js'
+      'scripts/live-browser-smoke.js', 'hosting/**/*.js'
     ],
     languageOptions: { globals: browserGlobals }
   },
@@ -78,6 +80,7 @@ module.exports = [
     files: [
       'build.js',
       'scripts/release.js',
+      'scripts/hosting-smoke.js',
       'tests/**/*.js',
       'functions/**/*.js',
       'eslint.config.js'

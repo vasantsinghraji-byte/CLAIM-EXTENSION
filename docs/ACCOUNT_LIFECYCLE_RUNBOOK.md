@@ -2,8 +2,10 @@
 
 ## Routine administration
 
-Open Claim Spark, sign in as a platform administrator, expand
-**Administrator**, then use **Refresh** in the relevant section.
+Open the production Firebase-hosted Claim Spark administrator dashboard and
+sign in as a platform administrator. Use **Refresh** in the relevant section.
+The extension popup panel is a constrained break-glass fallback, not the
+routine production interface.
 
 ### Invite
 

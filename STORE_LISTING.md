@@ -1,8 +1,15 @@
 # Chrome Web Store listing pack
 
-Prepared from the controlled Manifest V3 release candidate for version 1.9.0.
+Prepared from the controlled Manifest V3 release candidate for version 1.9.1.
 The package targets the isolated production Firebase project; Web Store upload
 remains blocked until the Phase 4 human-controlled activation gates pass.
+
+Production policy and support URLs after Hosting deployment:
+
+- `https://claimextension-prod.web.app/privacy`
+- `https://claimextension-prod.web.app/support`
+- `https://claimextension-prod.web.app/terms`
+- `https://claimextension-prod.web.app/deletion`
 
 ## Store listing
 
@@ -219,7 +226,7 @@ patient or claim data.
 
 - [ ] Run `npm run check`.
 - [ ] Run `npm run build`.
-- [ ] Confirm `dist/manifest.json` version is 1.9.0 or higher than the last
+- [ ] Confirm `dist/manifest.json` version is 1.9.1 or higher than the last
       uploaded version.
 - [ ] Confirm production matches contain only
       `https://rghs.rajasthan.gov.in/*`.
@@ -237,7 +244,7 @@ patient or claim data.
 - [ ] Upload `store-assets/small-promo-tile.png` as the 440x280 small promo
       tile.
 - [x] Public homepage, support, and privacy-policy URLs are deployed.
-- [ ] Verify that listing claims match version 1.9.0 behavior.
+- [ ] Verify that listing claims match version 1.9.1 behavior.
 
 ### Privacy practices
 

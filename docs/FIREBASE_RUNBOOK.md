@@ -77,6 +77,7 @@ After all production gates in `PHASE_4_PRODUCTION_READINESS.md` pass:
 ```powershell
 npx firebase deploy --only firestore --project claimextension-prod
 npx firebase deploy --only functions --project claimextension-prod
+npx firebase deploy --only hosting --project claimextension-prod
 ```
 
 Enable Email/Password Authentication and bootstrap the platform administrator
