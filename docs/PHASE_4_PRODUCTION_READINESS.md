@@ -116,11 +116,11 @@ recorded as passed.
 | Firestore, Functions and Hosting deployment | Passed | Production rules/indexes, 20 active Gen2 Functions and Hosting deployed; `/admin` verified with no-store and security headers |
 | Daily backup and restore drill | In progress | Daily backup schedule enabled with 14-day retention; separate-database restore must wait for the first scheduled backup |
 | Privacy/legal review | Not passed | Requires the accountable human owner to approve retention, support response and authority to process RGHS data |
-| Clean-profile extension smoke | Not passed | Release 1.9.2 built; sign-in/licence and authorized synthetic RGHS test-claim Preview/Apply/Undo remain to be witnessed |
+| Clean-profile extension smoke | Partially passed | Version 1.9.2 installation, production sign-in, active licence and off-domain Apply blocking confirmed 26 July 2026; the resulting stale-tab badge race was corrected in 1.9.3. Version 1.9.3 recheck and authorized synthetic RGHS test-claim Preview/Apply/Undo remain to be witnessed |
 | Private Chrome Web Store upload | Not started | Blocked by restore, privacy/legal and clean-profile smoke gates |
 | Store review and explicit publication | Not started | Blocked by all preceding gates |
 
-The candidate production artifact is version 1.9.2. Its SHA-256 is recorded in
+The candidate production artifact is version 1.9.3. Its SHA-256 is recorded in
 `release-manifest.json`; operators must calculate the ZIP hash again immediately
 before upload and require an exact match.
 

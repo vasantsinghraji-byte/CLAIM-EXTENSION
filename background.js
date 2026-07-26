@@ -47,6 +47,19 @@ function storageRemove(storage, key) {
   }));
 }
 
+function ignoreMissingTabError() {
+  // A tab can disappear between an event/message and the badge update. Reading
+  // lastError in the callback consumes that expected Chrome race instead of
+  // leaving a rejected Promise in the service-worker error log.
+  void globalThis.chrome?.runtime?.lastError;
+}
+
+function setTabBadge(tabId, text, color) {
+  if (!Number.isInteger(tabId) || !chrome.action) return;
+  chrome.action.setBadgeText({ tabId, text }, ignoreMissingTabError);
+  if (color) chrome.action.setBadgeBackgroundColor({ tabId, color }, ignoreMissingTabError);
+}
+
 async function migrateRuleOverridesToLocal(localStorage, syncStorage) {
   const [markerResult, localResult] = await Promise.all([
     storageGet(localStorage, 'ruleOverridesMigratedToLocal'),
@@ -515,8 +528,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request && request.action === 'setAuditBadge' && sender.tab && sender.tab.id !== undefined) {
-      chrome.action.setBadgeText({ tabId: sender.tab.id, text: request.count > 0 ? String(request.count) : '' });
-      chrome.action.setBadgeBackgroundColor({ tabId: sender.tab.id, color: '#c0392b' });
+      setTabBadge(sender.tab.id, request.count > 0 ? String(request.count) : '', '#c0392b');
       return undefined;
     }
     if (request?.action === 'authSignIn') {
@@ -608,11 +620,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   if (chrome.tabs?.onUpdated && chrome.action) {
     chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       if (changeInfo.status !== 'loading') return;
-      chrome.action.setBadgeText({ tabId, text: '' });
+      setTabBadge(tabId, '');
     });
   }
 }
 
 if (typeof module === 'object' && module.exports) {
-  module.exports = { STORAGE_POLICIES, auditLogEntryKey, createSerializedStorageWriter, migrateRuleOverridesToLocal };
+  module.exports = {
+    STORAGE_POLICIES,
+    auditLogEntryKey,
+    createSerializedStorageWriter,
+    ignoreMissingTabError,
+    migrateRuleOverridesToLocal,
+    setTabBadge
+  };
 }
