@@ -151,3 +151,7 @@
 ## 1.9.1 - 2026-07-26
 
 - Add the Firebase-hosted production administrator dashboard, public policy pages, strict Hosting security headers, and emulator route validation.
+
+## 1.9.2 - 2026-07-26
+
+- Finalize production activation controls and verified administrator bootstrap procedure.

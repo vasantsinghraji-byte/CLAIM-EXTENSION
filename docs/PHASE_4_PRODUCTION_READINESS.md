@@ -1,7 +1,8 @@
 # Phase 4 Production Readiness
 
-Status: Repository implementation complete; production activation remains
-behind the human-controlled gates below.
+Status: Production infrastructure and administrator activation complete;
+backup restore, privacy/legal, clean-profile extension and distribution gates
+remain open.
 
 Date: 26 July 2026
 
@@ -105,4 +106,21 @@ automation alone:
 
 No production user should receive the package before all eight gates are
 recorded as passed.
+
+## Production gate record
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Billing, budget and authorized administrator | Passed | Blaze enabled for `claimextension-prod`; INR 1,000 monthly budget with 10%, 50% and 100% alerts; operator confirmed 26 July 2026 |
+| Authentication and administrator bootstrap | Passed | Email/Password enabled; `nocturnaladmin@gmail.com` verified as active `platformAdmin`; hosted dashboard sign-in and organization/licence/audit visibility confirmed 26 July 2026 |
+| Firestore, Functions and Hosting deployment | Passed | Production rules/indexes, 20 active Gen2 Functions and Hosting deployed; `/admin` verified with no-store and security headers |
+| Daily backup and restore drill | In progress | Daily backup schedule enabled with 14-day retention; separate-database restore must wait for the first scheduled backup |
+| Privacy/legal review | Not passed | Requires the accountable human owner to approve retention, support response and authority to process RGHS data |
+| Clean-profile extension smoke | Not passed | Release 1.9.2 built; sign-in/licence and authorized synthetic RGHS test-claim Preview/Apply/Undo remain to be witnessed |
+| Private Chrome Web Store upload | Not started | Blocked by restore, privacy/legal and clean-profile smoke gates |
+| Store review and explicit publication | Not started | Blocked by all preceding gates |
+
+The candidate production artifact is version 1.9.2. Its SHA-256 is recorded in
+`release-manifest.json`; operators must calculate the ZIP hash again immediately
+before upload and require an exact match.
 
