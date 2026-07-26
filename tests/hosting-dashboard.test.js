@@ -68,7 +68,10 @@ test('hosted dashboard keeps authentication session-only and renders untrusted d
 
 test('hosting security headers deny framing, remote scripts, sensitive browser capabilities and caching', () => {
   const firebase = JSON.parse(read('firebase.json'));
-  const headers = firebase.hosting.headers.flatMap(rule => rule.headers);
+  const globalRule = firebase.hosting.headers.find(rule => rule.source === '**');
+  assert.ok(globalRule, 'all hosted routes must receive the security headers');
+  assert.equal(firebase.hosting.headers.length, 1, 'clean URLs must not bypass a file-extension-specific cache rule');
+  const headers = globalRule.headers;
   const values = Object.fromEntries(headers.map(header => [header.key, header.value]));
   assert.match(values['Content-Security-Policy'], /script-src 'self'/);
   assert.doesNotMatch(values['Content-Security-Policy'], /'unsafe-inline'|'unsafe-eval'/);
