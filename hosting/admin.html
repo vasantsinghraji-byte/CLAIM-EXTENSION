@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Claim Spark Administration</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a href="/" class="brand">Claim Spark</a>
+    <span>Administration</span>
+  </header>
+  <main class="dashboard-shell">
+    <section id="signInView" class="auth-card">
+      <h1>Administrator sign in</h1>
+      <p>Use a verified, active platform-administrator account.</p>
+      <form id="signInForm">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="6">
+        <button id="signInButton" class="button primary" type="submit">Sign in</button>
+      </form>
+      <p id="signInError" class="message error" role="alert"></p>
+    </section>
+
+    <section id="dashboardView" hidden>
+      <div class="dashboard-heading">
+        <div>
+          <h1>Administrator dashboard</h1>
+          <p id="sessionLabel"></p>
+        </div>
+        <button id="signOutButton" class="button secondary" type="button">Sign out</button>
+      </div>
+      <p id="globalMessage" class="message" role="status" aria-live="polite"></p>
+
+      <nav class="tabs" aria-label="Administrator sections">
+        <button type="button" data-tab="users" class="active">Users</button>
+        <button type="button" data-tab="invitations">Invitations</button>
+        <button type="button" data-tab="organizations">Organizations</button>
+        <button type="button" data-tab="licences">Licences</button>
+        <button type="button" data-tab="audit">Audit events</button>
+      </nav>
+
+      <section id="usersPanel" class="panel" data-panel="users">
+        <div class="panel-heading">
+          <h2>Users</h2>
+          <button id="refreshUsers" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div id="usersList" class="record-list"></div>
+      </section>
+
+      <section id="invitationsPanel" class="panel" data-panel="invitations" hidden>
+        <div class="panel-heading">
+          <h2>Invitations</h2>
+          <button id="refreshInvitations" class="button secondary" type="button">Refresh</button>
+        </div>
+        <form id="inviteForm" class="inline-form">
+          <label>Email <input name="email" type="email" required></label>
+          <label>Organization <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Role
+            <select name="role">
+              <option value="processor">Processor</option>
+              <option value="organizationAdmin">Organization administrator</option>
+            </select>
+          </label>
+          <button class="button primary" type="submit">Create invitation</button>
+        </form>
+        <section id="invitationSecret" class="secret-box" hidden>
+          <h3>Copy this invitation now</h3>
+          <p>The plaintext token is returned once and is not retained by the dashboard.</p>
+          <textarea id="invitationMessage" readonly rows="8"></textarea>
+          <button id="copyInvitation" class="button secondary" type="button">Copy message</button>
+        </section>
+        <div id="invitationsList" class="record-list"></div>
+      </section>
+
+      <section id="organizationsPanel" class="panel" data-panel="organizations" hidden>
+        <div class="panel-heading">
+          <h2>Organizations</h2>
+          <button id="refreshOrganizations" class="button secondary" type="button">Refresh</button>
+        </div>
+        <form id="organizationForm" class="inline-form">
+          <label>ID <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Name <input name="name" required maxlength="160"></label>
+          <label>Maximum users <input name="maximumUsers" type="number" min="1" max="500" value="1" required></label>
+          <label>Status
+            <select name="status">
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </label>
+          <div class="form-actions">
+            <button class="button primary" type="submit" name="mode" value="create">Create</button>
+            <button class="button secondary" type="submit" name="mode" value="update">Update</button>
+          </div>
+        </form>
+        <div id="organizationsList" class="record-list"></div>
+      </section>
+
+      <section id="licencesPanel" class="panel" data-panel="licences" hidden>
+        <h2>Activate or renew licence</h2>
+        <form id="licenceForm" class="inline-form">
+          <label>Organization <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Maximum users <input name="maximumUsers" type="number" min="1" max="500" value="1" required></label>
+          <label>Term in days <input name="termDays" type="number" min="1" max="366" value="90" required></label>
+          <div class="form-actions">
+            <button class="button primary" type="submit" name="mode" value="activate">Activate / renew</button>
+            <button class="button secondary danger" type="submit" name="mode" value="suspend">Suspend licence</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="auditPanel" class="panel" data-panel="audit" hidden>
+        <div class="panel-heading">
+          <h2>Audit events</h2>
+          <button id="refreshAudit" class="button secondary" type="button">Refresh</button>
+        </div>
+        <p>Latest 100 privacy-safe server events.</p>
+        <div id="auditList" class="record-list"></div>
+      </section>
+    </section>
+  </main>
+  <script src="/firebase-client.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>

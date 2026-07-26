@@ -147,3 +147,7 @@
 ## 1.9.0 - 2026-07-26
 
 - Complete Phase 4 administrator lifecycle, production Firebase isolation, privacy and operations hardening, and controlled-distribution runbooks.
+
+## 1.9.1 - 2026-07-26
+
+- Add the Firebase-hosted production administrator dashboard, public policy pages, strict Hosting security headers, and emulator route validation.
