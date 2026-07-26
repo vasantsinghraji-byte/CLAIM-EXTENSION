@@ -2,8 +2,8 @@
 
 Date detected: 26 July 2026
 
-Status: Tracked-source remediation complete; cloud rotation and historical
-purge require owner-controlled actions.
+Status: Contained and revoked. Historical purge was not performed because it
+requires a separate, disruptive owner decision.
 
 ## Summary
 
@@ -16,7 +16,7 @@ Cloud Functions access. Authorization remains enforced by Firebase
 Authentication, live server-side role checks, Firestore Security Rules and
 callable-function validation. Nevertheless, committed identifiers can consume
 restricted quota and create recurring secret-scanning alerts, so both
-environment keys are treated as exposed and must be rotated.
+environment keys were treated as exposed and rotated.
 
 ## Repository remediation
 
@@ -29,26 +29,27 @@ environment keys are treated as exposed and must be rotated.
 - Generated extension, Hosting and local runtime configuration remains
   untracked.
 
-## Cloud owner actions
+## Cloud remediation completed
 
 For both `claimextension` and `claimextension-prod`:
 
-1. Open Google Cloud Console → APIs & Services → Credentials.
-2. Open the Firebase browser key used by the Web App.
-3. Confirm API restrictions allow only required Firebase APIs, specifically
-   Identity Toolkit and Token Service for the current application.
-4. Confirm unrelated APIs, especially Generative Language API, are absent.
-5. Choose **Rotate key**, preserve the restrictions and record the new value
-   only in local `.firebase-build-config.json`.
-6. Rebuild and test both environments.
-7. Delete the old key after successful verification.
+1. The Firebase browser key was rotated in Google Cloud Console.
+2. The replacement was stored only in ignored local configuration.
+3. Both replacements were verified to differ from both historically committed
+   keys and from each other.
+4. The tracked-file scanner, syntax checks, 144 automated tests, lint and
+   production build passed.
+5. Development Firebase Authentication responded successfully. Production
+   returned `CONFIGURATION_NOT_FOUND`, documenting that Authentication has not
+   yet been initialized in the production Firebase project.
+6. The owner confirmed deletion of both replaced keys on 26 July 2026.
 
 Google documents console rotation as an owner-controlled action. Do not send
-the replacement key through email, chat, issues, commits or pull requests.
+replacement keys through email, chat, issues, commits or pull requests.
 
 ## History and alert actions
 
-After rotation:
+Rotation and revocation are complete. The remaining optional action is:
 
 1. Decide whether to rewrite all branches and tags. Rewriting is disruptive,
    changes commit hashes and requires every existing clone to be discarded or
@@ -57,11 +58,8 @@ After rotation:
    from a fresh mirror clone, verify every ref, temporarily coordinate branch
    protection, and force-push the rewritten mirror.
 3. Ask collaborators to re-clone.
-4. Close GitHub secret-scanning alert 1 as **Revoked** after the old key is
-   deleted. If rotation is deliberately not performed after restrictions are
-   verified, close it as **False positive** with Firebase public-key
-   documentation and restriction evidence.
+4. Close GitHub secret-scanning alert 1 as **Revoked**.
 
-No history rewrite or alert closure should claim revocation before Google Cloud
-confirms the old key is deleted.
-
+The historical values are no longer valid credentials. Their presence in old
+commits remains a scanner and repository-hygiene concern, not an active-key
+exposure.
