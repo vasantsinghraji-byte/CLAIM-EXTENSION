@@ -1,6 +1,6 @@
 # Install Claim Amount Auto-Fill
 
-Current release: **1.8.1**
+Current release: **1.9.0**
 
 ## Controlled pilot installation
 

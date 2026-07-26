@@ -2,7 +2,7 @@
 
 **Effective date:** 26 July 2026
 
-**Extension version reviewed:** 1.8.1
+**Extension version reviewed:** 1.9.0
 
 Claim Amount Auto-Fill is a Chrome extension for authorized Rajasthan
 Government Health Scheme (RGHS) claim reviewers. It helps users preview, audit,
@@ -122,8 +122,10 @@ Users can:
 - uninstall the extension.
 
 Users may request account deletion or access assistance through the support
-contact. The Phase 4 production gate requires the account-deletion operating
-procedure to be tested before publication.
+contact. An authorized platform administrator can delete the authentication
+account through the administrator interface. The service retains only a
+redacted user record and privacy-safe audit events for security and
+referential-integrity purposes, subject to the approved retention policy.
 
 ## Limited Use
 

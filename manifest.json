@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claim Amount Auto-Fill",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "description": "Fills approved amounts from claim amounts and audits bundled RGHS packages for unbundling and duplicate billing",
   "permissions": [
     "activeTab",
@@ -11,7 +11,8 @@
   "host_permissions": [
     "https://identitytoolkit.googleapis.com/*",
     "https://securetoken.googleapis.com/*",
-    "https://asia-south1-claimextension.cloudfunctions.net/*"
+    "https://asia-south1-claimextension.cloudfunctions.net/*",
+    "https://asia-south1-claimextension-prod.cloudfunctions.net/*"
   ],
   "background": {
     "service_worker": "background.js"

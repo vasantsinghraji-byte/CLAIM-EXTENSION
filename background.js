@@ -465,7 +465,19 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   const ADMIN_FUNCTIONS = Object.freeze({
     adminActivateLicence: 'activateLicence',
     adminInviteUser: 'inviteUser',
-    adminActivateUser: 'activateUser'
+    adminActivateUser: 'activateUser',
+    adminListUsers: 'listUsers',
+    adminListInvitations: 'listInvitations',
+    adminRevokeInvitation: 'revokeInvitation',
+    adminReplaceInvitation: 'replaceInvitation',
+    adminSuspendUser: 'suspendUser',
+    adminReactivateUser: 'activateUser',
+    adminChangeUserRole: 'changeUserRole',
+    adminDeleteUserAccount: 'deleteUserAccount',
+    adminCreateOrganization: 'createOrganization',
+    adminUpdateOrganization: 'updateOrganization',
+    adminListOrganizations: 'listOrganizations',
+    adminListAuditEvents: 'listAuditEvents'
   });
 
   async function handleAdminAction(action, data) {

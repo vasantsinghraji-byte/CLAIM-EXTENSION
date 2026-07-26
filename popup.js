@@ -26,6 +26,20 @@ const adminInvitationMessage = document.getElementById('adminInvitationMessage')
 const adminCopyInvitationBtn = document.getElementById('adminCopyInvitationBtn');
 const adminActivateEmail = document.getElementById('adminActivateEmail');
 const adminActivateUserBtn = document.getElementById('adminActivateUserBtn');
+const adminOrganizationId = document.getElementById('adminOrganizationId');
+const adminOrganizationName = document.getElementById('adminOrganizationName');
+const adminOrganizationMaximumUsers = document.getElementById('adminOrganizationMaximumUsers');
+const adminOrganizationStatus = document.getElementById('adminOrganizationStatus');
+const adminCreateOrganizationBtn = document.getElementById('adminCreateOrganizationBtn');
+const adminUpdateOrganizationBtn = document.getElementById('adminUpdateOrganizationBtn');
+const adminRefreshOrganizationsBtn = document.getElementById('adminRefreshOrganizationsBtn');
+const adminOrganizationsList = document.getElementById('adminOrganizationsList');
+const adminRefreshInvitationsBtn = document.getElementById('adminRefreshInvitationsBtn');
+const adminInvitationsList = document.getElementById('adminInvitationsList');
+const adminRefreshUsersBtn = document.getElementById('adminRefreshUsersBtn');
+const adminUsersList = document.getElementById('adminUsersList');
+const adminRefreshAuditBtn = document.getElementById('adminRefreshAuditBtn');
+const adminAuditList = document.getElementById('adminAuditList');
 const adminStatus = document.getElementById('adminStatus');
 const showSignUpLink = document.getElementById('showSignUpLink');
 const showSignInLink = document.getElementById('showSignInLink');
@@ -344,6 +358,290 @@ function sendAdminAction(action, data, button, pendingLabel) {
   });
 }
 
+function adminElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+
+function formatAdminDate(value) {
+  if (!value) return 'not recorded';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'invalid date' : date.toLocaleString();
+}
+
+function adminButton(label, action, className = 'btn btn-secondary btn-small') {
+  const button = adminElement('button', className, label);
+  button.type = 'button';
+  button.dataset.adminAction = action;
+  return button;
+}
+
+function showAdminEmpty(container, message) {
+  container.replaceChildren(adminElement('p', 'admin-empty', message));
+}
+
+async function loadAdminOrganizations() {
+  showAdminEmpty(adminOrganizationsList, 'Loading organizations...');
+  const response = await sendAdminAction('adminListOrganizations', {}, adminRefreshOrganizationsBtn, 'Loading...');
+  if (!response.success) {
+    showAdminEmpty(adminOrganizationsList, `Unable to load: ${response.error}`);
+    return;
+  }
+  const records = response.result.organizations || [];
+  adminOrganizationsList.replaceChildren(...records.map(organization => {
+    const record = adminElement('article', 'admin-record');
+    record.append(
+      adminElement('div', 'admin-record-title', `${organization.name} (${organization.organizationId})`),
+      adminElement('div', 'admin-record-meta',
+        `${organization.status} · maximum ${organization.maximumUsers} · updated ${formatAdminDate(organization.updatedAt)}`)
+    );
+    const select = adminButton('Edit', 'select-organization');
+    select.dataset.organization = JSON.stringify(organization);
+    record.append(adminElement('div', 'admin-record-actions')).lastChild.append(select);
+    return record;
+  }));
+  if (!records.length) showAdminEmpty(adminOrganizationsList, 'No organizations found.');
+}
+
+async function loadAdminInvitations() {
+  showAdminEmpty(adminInvitationsList, 'Loading invitations...');
+  const response = await sendAdminAction('adminListInvitations', {}, adminRefreshInvitationsBtn, 'Loading...');
+  if (!response.success) {
+    showAdminEmpty(adminInvitationsList, `Unable to load: ${response.error}`);
+    return;
+  }
+  const records = response.result.invitations || [];
+  adminInvitationsList.replaceChildren(...records.map(invitation => {
+    const record = adminElement('article', 'admin-record');
+    record.append(
+      adminElement('div', 'admin-record-title', invitation.email),
+      adminElement('div', 'admin-record-meta',
+        `${invitation.status} · ${invitation.role} · ${invitation.organizationId}`),
+      adminElement('div', 'admin-record-meta', `Expires ${formatAdminDate(invitation.expiresAt)}`)
+    );
+    if (invitation.status === 'pending') {
+      const actions = adminElement('div', 'admin-record-actions');
+      for (const [label, action] of [['Revoke', 'revoke-invitation'], ['Replace', 'replace-invitation']]) {
+        const button = adminButton(label, action, action === 'revoke-invitation'
+          ? 'btn btn-secondary btn-small admin-danger'
+          : 'btn btn-secondary btn-small');
+        button.dataset.invitationId = invitation.invitationId;
+        button.dataset.email = invitation.email;
+        actions.append(button);
+      }
+      record.append(actions);
+    }
+    return record;
+  }));
+  if (!records.length) showAdminEmpty(adminInvitationsList, 'No invitations found.');
+}
+
+async function loadAdminUsers() {
+  showAdminEmpty(adminUsersList, 'Loading users...');
+  const response = await sendAdminAction('adminListUsers', {}, adminRefreshUsersBtn, 'Loading...');
+  if (!response.success) {
+    showAdminEmpty(adminUsersList, `Unable to load: ${response.error}`);
+    return;
+  }
+  const records = response.result.users || [];
+  adminUsersList.replaceChildren(...records.map(user => {
+    const record = adminElement('article', 'admin-record');
+    record.append(
+      adminElement('div', 'admin-record-title', `${user.displayName || 'Unnamed user'} · ${user.email}`),
+      adminElement('div', 'admin-record-meta', `${user.accountStatus} · ${user.role} · ${user.organizationId}`)
+    );
+    if (user.accountStatus !== 'deleted') {
+      const actions = adminElement('div', 'admin-record-actions');
+      const role = adminElement('select');
+      role.dataset.uid = user.uid;
+      role.setAttribute('aria-label', `Role for ${user.email}`);
+      for (const value of ['processor', 'organizationAdmin', 'platformAdmin']) {
+        const option = adminElement('option', '', value);
+        option.value = value;
+        option.selected = value === user.role;
+        role.append(option);
+      }
+      actions.append(role);
+      const changeRole = adminButton('Save role', 'change-role');
+      changeRole.dataset.uid = user.uid;
+      actions.append(changeRole);
+      const statusAction = user.accountStatus === 'suspended' ? 'reactivate-user' : 'suspend-user';
+      const statusButton = adminButton(
+        user.accountStatus === 'suspended' ? 'Reactivate' : 'Suspend',
+        statusAction,
+        'btn btn-secondary btn-small'
+      );
+      statusButton.dataset.uid = user.uid;
+      actions.append(statusButton);
+      const deleteButton = adminButton('Delete account', 'delete-user', 'btn btn-secondary btn-small admin-danger');
+      deleteButton.dataset.uid = user.uid;
+      deleteButton.dataset.email = user.email;
+      actions.append(deleteButton);
+      record.append(actions);
+    }
+    return record;
+  }));
+  if (!records.length) showAdminEmpty(adminUsersList, 'No users found.');
+}
+
+async function loadAdminAudit() {
+  showAdminEmpty(adminAuditList, 'Loading audit events...');
+  const response = await sendAdminAction('adminListAuditEvents', {}, adminRefreshAuditBtn, 'Loading...');
+  if (!response.success) {
+    showAdminEmpty(adminAuditList, `Unable to load: ${response.error}`);
+    return;
+  }
+  const records = response.result.events || [];
+  adminAuditList.replaceChildren(...records.map(event => {
+    const record = adminElement('article', 'admin-record');
+    record.append(
+      adminElement('div', 'admin-record-title', event.action || 'unknown action'),
+      adminElement('div', 'admin-record-meta',
+        `${formatAdminDate(event.timestamp)} · actor ${event.actorId || 'system'}`),
+      adminElement('div', 'admin-record-meta',
+        event.targetType ? `${event.targetType}: ${event.targetId || 'unknown'}` : (event.result || ''))
+    );
+    return record;
+  }));
+  if (!records.length) showAdminEmpty(adminAuditList, 'No audit events found.');
+}
+
+async function refreshAdminData() {
+  await Promise.all([
+    loadAdminOrganizations(),
+    loadAdminInvitations(),
+    loadAdminUsers(),
+    loadAdminAudit()
+  ]);
+}
+
+adminPanel.addEventListener('toggle', () => {
+  if (adminPanel.open) refreshAdminData();
+});
+
+adminRefreshOrganizationsBtn.addEventListener('click', loadAdminOrganizations);
+adminRefreshInvitationsBtn.addEventListener('click', loadAdminInvitations);
+adminRefreshUsersBtn.addEventListener('click', loadAdminUsers);
+adminRefreshAuditBtn.addEventListener('click', loadAdminAudit);
+
+adminCreateOrganizationBtn.addEventListener('click', async () => {
+  const data = {
+    organizationId: adminOrganizationId.value.trim(),
+    name: adminOrganizationName.value.trim(),
+    maximumUsers: Number(adminOrganizationMaximumUsers.value)
+  };
+  const response = await sendAdminAction(
+    'adminCreateOrganization', data, adminCreateOrganizationBtn, 'Creating...'
+  );
+  setAdminStatus(response.success ? 'Organization created.' : `Create failed: ${response.error}`,
+    response.success ? 'success' : 'error');
+  if (response.success) {
+    adminLicenceOrganization.value = data.organizationId;
+    loadAdminOrganizations();
+  }
+});
+
+adminUpdateOrganizationBtn.addEventListener('click', async () => {
+  const data = {
+    organizationId: adminOrganizationId.value.trim(),
+    name: adminOrganizationName.value.trim(),
+    maximumUsers: Number(adminOrganizationMaximumUsers.value),
+    status: adminOrganizationStatus.value
+  };
+  const response = await sendAdminAction(
+    'adminUpdateOrganization', data, adminUpdateOrganizationBtn, 'Updating...'
+  );
+  setAdminStatus(response.success ? 'Organization updated.' : `Update failed: ${response.error}`,
+    response.success ? 'success' : 'error');
+  if (response.success) loadAdminOrganizations();
+});
+
+adminOrganizationsList.addEventListener('click', event => {
+  const button = event.target.closest('[data-admin-action="select-organization"]');
+  if (!button) return;
+  const organization = JSON.parse(button.dataset.organization);
+  adminOrganizationId.value = organization.organizationId;
+  adminOrganizationName.value = organization.name;
+  adminOrganizationMaximumUsers.value = organization.maximumUsers;
+  adminOrganizationStatus.value = organization.status;
+  adminLicenceOrganization.value = organization.organizationId;
+  setAdminStatus('Organization loaded into the form.', 'success');
+});
+
+adminInvitationsList.addEventListener('click', async event => {
+  const button = event.target.closest('[data-admin-action]');
+  if (!button) return;
+  const action = button.dataset.adminAction;
+  if (!['revoke-invitation', 'replace-invitation'].includes(action)) return;
+  const response = await sendAdminAction(
+    action === 'revoke-invitation' ? 'adminRevokeInvitation' : 'adminReplaceInvitation',
+    { invitationId: button.dataset.invitationId },
+    button,
+    action === 'revoke-invitation' ? 'Revoking...' : 'Replacing...'
+  );
+  if (!response.success) {
+    setAdminStatus(`Invitation change failed: ${response.error}`, 'error');
+    return;
+  }
+  if (action === 'replace-invitation') {
+    const token = response.result.token;
+    adminInvitationMessage.value = [
+      'Your Claim Spark invitation has been replaced.',
+      '',
+      `Use this email: ${button.dataset.email}`,
+      'Use this new one-time invitation token:',
+      '',
+      token,
+      '',
+      'The previous token no longer works.'
+    ].join('\n');
+    adminInvitationResult.hidden = false;
+  }
+  setAdminStatus(action === 'revoke-invitation' ? 'Invitation revoked.' : 'Invitation replaced. Copy the new token now.', 'success');
+  loadAdminInvitations();
+  loadAdminAudit();
+});
+
+adminUsersList.addEventListener('click', async event => {
+  const button = event.target.closest('[data-admin-action]');
+  if (!button) return;
+  const action = button.dataset.adminAction;
+  const uid = button.dataset.uid;
+  let adminAction;
+  let data = { uid };
+  if (action === 'change-role') {
+    const select = [...adminUsersList.querySelectorAll('select[data-uid]')]
+      .find(element => element.dataset.uid === uid);
+    if (!select) return;
+    adminAction = 'adminChangeUserRole';
+    data = { uid, role: select.value };
+  } else if (action === 'suspend-user') {
+    adminAction = 'adminSuspendUser';
+  } else if (action === 'reactivate-user') {
+    adminAction = 'adminReactivateUser';
+  } else if (action === 'delete-user') {
+    if (button.dataset.armed !== 'true') {
+      button.dataset.armed = 'true';
+      button.textContent = 'Click again to confirm';
+      setAdminStatus(`Deletion is permanent. Click again to delete ${button.dataset.email}.`, 'error');
+      return;
+    }
+    adminAction = 'adminDeleteUserAccount';
+    data = { uid, confirmEmail: button.dataset.email };
+  } else {
+    return;
+  }
+  const response = await sendAdminAction(adminAction, data, button, 'Working...');
+  setAdminStatus(response.success ? 'User updated.' : `User change failed: ${response.error}`,
+    response.success ? 'success' : 'error');
+  if (response.success) {
+    loadAdminUsers();
+    loadAdminAudit();
+  }
+});
+
 adminActivateLicenceBtn.addEventListener('click', async () => {
   const organizationId = adminLicenceOrganization.value.trim();
   const maximumUsers = Number(adminMaximumUsers.value);
@@ -403,6 +701,8 @@ adminInviteBtn.addEventListener('click', async () => {
   ].join('\n');
   adminInvitationResult.hidden = false;
   setAdminStatus('Invitation generated. Copy it now; Claim Spark does not save the token.', 'success');
+  loadAdminInvitations();
+  loadAdminAudit();
 });
 
 adminCopyInvitationBtn.addEventListener('click', async () => {
@@ -433,6 +733,8 @@ adminActivateUserBtn.addEventListener('click', async () => {
     return;
   }
   setAdminStatus(`${email} is active. Ask the user to click Check Status.`, 'success');
+  loadAdminUsers();
+  loadAdminAudit();
 });
 
 // Handle toggle change

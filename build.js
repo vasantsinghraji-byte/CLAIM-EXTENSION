@@ -29,6 +29,10 @@ const files = [
   'icons/claim-spark.png'
 ];
 const developmentOrigins = new Set(['http://localhost/*', 'http://127.0.0.1/*']);
+const developmentFunctionsOrigin = 'https://asia-south1-claimextension.cloudfunctions.net/*';
+const productionFunctionsOrigin = 'https://asia-south1-claimextension-prod.cloudfunctions.net/*';
+const developmentApiKey = 'AIzaSyD8pZzOBh22-a3dPCMzGThwbMpPKNUIGOs';
+const productionApiKey = 'AIzaSyCuDItElzmNWGztOd0_MgjvvZQii74H1C8';
 
 function createProductionManifest(sourceManifest) {
   const manifest = JSON.parse(JSON.stringify(sourceManifest));
@@ -39,8 +43,29 @@ function createProductionManifest(sourceManifest) {
     resource.matches = (resource.matches || []).filter(origin => !developmentOrigins.has(origin));
   }
   manifest.host_permissions = (manifest.host_permissions || []).filter(origin => !developmentOrigins.has(origin));
+  manifest.host_permissions = manifest.host_permissions.filter(origin => origin !== developmentFunctionsOrigin);
+  if (!manifest.host_permissions.includes(productionFunctionsOrigin)) {
+    manifest.host_permissions.push(productionFunctionsOrigin);
+  }
   assertProductionManifest(manifest);
   return manifest;
+}
+
+function createProductionBackground(source) {
+  const output = source
+    .replace(developmentApiKey, productionApiKey)
+    .replace(
+      'https://asia-south1-claimextension.cloudfunctions.net',
+      'https://asia-south1-claimextension-prod.cloudfunctions.net'
+    )
+    .replace('Development project only; production has no counterpart yet.', 'Production project configuration.');
+  if (output.includes(developmentApiKey) || output.includes('asia-south1-claimextension.cloudfunctions.net')) {
+    throw new Error('Development Firebase configuration leaked into production background');
+  }
+  if (!output.includes(productionApiKey) || !output.includes('asia-south1-claimextension-prod.cloudfunctions.net')) {
+    throw new Error('Production Firebase configuration is incomplete');
+  }
+  return output;
 }
 
 function assertProductionManifest(manifest) {
@@ -108,9 +133,14 @@ function createStoredZip(entries) {
 function createBuildEntries() {
   return [...files].sort().map(relativePath => {
     const source = path.join(rootDir, relativePath);
-    const data = relativePath === 'manifest.json'
-      ? Buffer.from(`${JSON.stringify(createProductionManifest(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`)
-      : fs.readFileSync(source);
+    let data;
+    if (relativePath === 'manifest.json') {
+      data = Buffer.from(`${JSON.stringify(createProductionManifest(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`);
+    } else if (relativePath === 'background.js') {
+      data = Buffer.from(createProductionBackground(fs.readFileSync(source, 'utf8')));
+    } else {
+      data = fs.readFileSync(source);
+    }
     return { name: relativePath, data };
   });
 }
@@ -144,4 +174,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { createProductionManifest, createBuildEntries, createStoredZip };
+module.exports = { createProductionBackground, createProductionManifest, createBuildEntries, createStoredZip };
