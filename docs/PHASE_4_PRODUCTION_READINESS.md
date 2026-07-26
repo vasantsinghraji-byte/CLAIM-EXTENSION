@@ -115,7 +115,7 @@ recorded as passed.
 | Authentication and administrator bootstrap | Passed | Email/Password enabled; `nocturnaladmin@gmail.com` verified as active `platformAdmin`; hosted dashboard sign-in and organization/licence/audit visibility confirmed 26 July 2026 |
 | Firestore, Functions and Hosting deployment | Passed | Production rules/indexes, 20 active Gen2 Functions and Hosting deployed; `/admin` verified with no-store and security headers |
 | Daily backup and restore drill | In progress | Daily backup schedule enabled with 14-day retention; separate-database restore must wait for the first scheduled backup |
-| Privacy/legal review | Not passed | Requires the accountable human owner to approve retention, support response and authority to process RGHS data |
+| Privacy/legal review | Passed (owner attestation) | Responsible business owner Vasant S Raji approved the six documented privacy/operational statements on 26 July 2026, including RGHS authorization, browser-only claim/patient content, privacy-safe Firebase metadata, stated retention, support/deletion handling and disabled AI. This is an internal operational approval, not independent legal advice or an RGHS-issued authorization |
 | Clean-profile extension smoke | Partially passed | Version 1.9.2 installation, production sign-in, active licence and off-domain Apply blocking confirmed 26 July 2026; the resulting stale-tab badge race was corrected in 1.9.3. Version 1.9.3 recheck and authorized synthetic RGHS test-claim Preview/Apply/Undo remain to be witnessed |
 | Private Chrome Web Store upload | Not started | Blocked by restore, privacy/legal and clean-profile smoke gates |
 | Store review and explicit publication | Not started | Blocked by all preceding gates |
@@ -123,4 +123,21 @@ recorded as passed.
 The candidate production artifact is version 1.9.3. Its SHA-256 is recorded in
 `release-manifest.json`; operators must calculate the ZIP hash again immediately
 before upload and require an exact match.
+
+### Privacy and operational approval record
+
+On 26 July 2026, Vasant S Raji, acting as the responsible business owner for
+Claim Spark, explicitly confirmed and approved:
+
+1. authorization to use the extension with RGHS;
+2. keeping claim and patient content inside the browser;
+3. sending only privacy-safe operational metadata to Firebase;
+4. retaining audit events for 365 days;
+5. retaining deleted-account metadata for up to 90 days;
+6. handling support and deletion requests through the published contact while
+   AI processing remains disabled.
+
+This attestation closes the project's internal privacy/operations gate. It is
+not independent legal advice and does not substitute for any separate approval
+that RGHS, an employer, a data controller or applicable law may require.
 
