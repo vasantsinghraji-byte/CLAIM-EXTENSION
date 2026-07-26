@@ -105,7 +105,13 @@ async function enforceRateLimit(uid, action, limit, windowMs) {
 exports.getCurrentUserProfile = onCall(callableOptions, async request => {
   const auth = requireVerifiedEmail(request);
   await enforceRateLimit(auth.uid, 'profile', 120, 60 * 60 * 1000);
-  const user = await activeUser(auth.uid);
+  // This endpoint is also the recovery path after an invitation has been
+  // accepted but before an administrator activates the account. It is safe to
+  // return the caller's own profile, including its status; privileged
+  // operations continue to use activeUser().
+  const snapshot = await db.doc(`users/${auth.uid}`).get();
+  if (!snapshot.exists) fail('not-found', 'User profile not found');
+  const user = snapshot.data();
   return {
     uid: auth.uid,
     email: user.email,
@@ -250,14 +256,44 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
     const invitationReference = db.doc(`invitations/${hash}`);
     const userReference = db.doc(`users/${auth.uid}`);
     let accepted;
+    let alreadyAccepted = false;
+    let acceptedAccountStatus = 'invited';
     await db.runTransaction(async transaction => {
-      const invitationSnapshot = await transaction.get(invitationReference);
+      const [invitationSnapshot, userSnapshot] = await Promise.all([
+        transaction.get(invitationReference),
+        transaction.get(userReference)
+      ]);
       if (!invitationSnapshot.exists) fail('not-found', 'Invitation is invalid');
       const invitation = invitationSnapshot.data();
+      if (invitation.status === 'accepted'
+        && invitation.acceptedBy === auth.uid
+        && invitation.email === authenticatedEmail) {
+        if (userSnapshot.exists && userSnapshot.data().email !== authenticatedEmail) {
+          fail('failed-precondition', 'Existing user profile does not match invitation');
+        }
+        if (userSnapshot.exists) {
+          acceptedAccountStatus = userSnapshot.data().accountStatus;
+        }
+        if (!userSnapshot.exists) {
+          transaction.create(userReference, {
+            email: authenticatedEmail,
+            displayName,
+            organizationId: invitation.organizationId,
+            role: invitation.role,
+            accountStatus: 'invited',
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            recoveredAt: FieldValue.serverTimestamp()
+          });
+        }
+        accepted = invitation;
+        alreadyAccepted = true;
+        return;
+      }
       if (invitation.status !== 'pending') fail('failed-precondition', 'Invitation was already used');
       if (timestampMillis(invitation.expiresAt) < Date.now()) fail('deadline-exceeded', 'Invitation expired');
       if (invitation.email !== authenticatedEmail) fail('permission-denied', 'Invitation email does not match');
-      if ((await transaction.get(userReference)).exists) fail('already-exists', 'User profile already exists');
+      if (userSnapshot.exists) fail('already-exists', 'User profile already exists');
       accepted = invitation;
       transaction.create(userReference, {
         email: authenticatedEmail,
@@ -277,9 +313,9 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
     await getAuth().setCustomUserClaims(auth.uid, {
       organizationId: accepted.organizationId,
       role: accepted.role,
-      accountStatus: 'invited'
+      accountStatus: acceptedAccountStatus
     });
-    return { status: 'accepted', activationRequired: true };
+    return { status: 'accepted', activationRequired: true, alreadyAccepted };
   } catch (error) {
     translateValidation(error);
   }

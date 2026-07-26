@@ -2,7 +2,9 @@
 
 Date: 2026-07-25
 
-Release under test: `1.7.0` (`9a24542`)
+Initial release under test: `1.7.0` (`9a24542`)
+
+Follow-on release: `1.8.1`
 
 Firebase project: `claimextension`
 
@@ -37,6 +39,7 @@ No RGHS claim data was read or sent to Firebase during this smoke.
 
 ## Gate decision
 
-The authenticated development boundary is ready for the next controlled step:
-creating the pilot organization/licence and onboarding the first five invited
-users. Production remains release-gated.
+The authenticated development boundary passed and advanced to the revised
+single-user pilot. The completed pilot and the invitation-recovery defect found
+during real onboarding are recorded in `PHASE_3_SINGLE_USER_PILOT.md`.
+Production remains release-gated.

@@ -1,6 +1,11 @@
 # Claim Amount Auto-Fill Chrome Extension
 
-A Chrome extension that automatically fills approved amount fields with corresponding claim amounts, eliminating the need for repetitive copy-pasting.
+An invite-only Chrome extension that locally previews RGHS approved-amount
+proposals and applies only the rows explicitly selected by an authorized
+reviewer.
+
+Current release: **1.8.1**. Phase 3's approved single-user development pilot is
+complete; Phase 4 production hardening and controlled distribution are next.
 
 ## Features
 
@@ -13,6 +18,12 @@ A Chrome extension that automatically fills approved amount fields with correspo
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
+- **Invite-only Access**: Firebase email/password authentication, verified
+  email, administrator activation, and organization licence checks
+- **Administrator Controls**: Development licence renewal, invitation
+  generation, and user activation without service-worker console commands
+- **Onboarding Recovery**: Idempotent invitation handling safely repairs a
+  missing profile only for the matching authenticated UID and email
 - **Smart Matching**: Uses multiple strategies to find field pairs:
   - Name/ID attribute matching
   - Table structure analysis
@@ -26,31 +37,23 @@ Once published, you'll be able to install directly from the Chrome Web Store.
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
 1. **Download the Extension**
-   - Download or clone this repository to your computer
-   - Make sure all files are in the `claim-autofill-extension` folder
+   - For controlled distribution, extract `claim-autofill-extension.zip`
+   - For development, clone the repository and run `npm run build`
 
-2. **Add Icons (Optional but Recommended)**
-   - Add icon files to the `icons` folder:
-     - `icon16.png` (16x16 pixels)
-     - `icon48.png` (48x48 pixels)
-     - `icon128.png` (128x128 pixels)
-   - You can use online icon generators or create custom icons
-   - The extension will work without custom icons (Chrome will use defaults)
-
-3. **Open Chrome Extensions Page**
+2. **Open Chrome Extensions Page**
    - Open Google Chrome
    - Navigate to `chrome://extensions/`
    - Or click the three-dot menu → More Tools → Extensions
 
-4. **Enable Developer Mode**
+3. **Enable Developer Mode**
    - Toggle the "Developer mode" switch in the top-right corner
 
-5. **Load the Extension**
+4. **Load the Extension**
    - Click "Load unpacked" button
    - Run `npm run build`, then select the generated `dist` folder
    - Click "Select Folder"
 
-6. **Verify Installation**
+5. **Verify Installation**
    - The extension should now appear in your extensions list
    - Pin the extension to your toolbar for easy access
 
@@ -58,14 +61,17 @@ Once published, you'll be able to install directly from the Chrome Web Store.
 
 ### Basic Usage
 
-1. **Navigate to Your Claim Form**
-   - Open any webpage with claim and approved amount fields
+1. **Sign in**
+   - Use the exact invited and activated email account
 
-2. **Safe Manual Filling**
+2. **Navigate to Your Claim Form**
+   - Open an authorized RGHS process sheet
+
+3. **Safe Manual Filling**
    - Opening or updating a process sheet never modifies approved amounts
    - Use Preview, review the proposed counts, and explicitly Apply
 
-3. **Manual Control**
+4. **Manual Control**
    - Click the extension icon in your toolbar
    - Use the toggle to enable/disable the claim tools and floating widget
    - Click "Preview Fill", review the counts, then apply the changes
@@ -128,7 +134,8 @@ The extension recognizes fields with these naming patterns:
 5. **Console Logs**
    - Open Developer Tools (F12)
    - Check Console tab for any error messages
-   - Look for "Auto-filled X approved amount(s)" messages
+   - Record the exact message and consult the service-worker console only for
+     controlled development troubleshooting
 
 ### Extension Icon Not Showing?
 
@@ -136,28 +143,9 @@ The extension recognizes fields with these naming patterns:
 
 ## Customization
 
-### Modify Field Detection
-
-Edit `content.js` to customize how fields are detected:
-
-```javascript
-// Add custom field patterns in findAmountPairs() function
-if (name.includes('your_custom_keyword') || id.includes('your_custom_keyword')) {
-  // Custom logic here
-}
-```
-
-### Change Auto-Fill Behavior
-
-Adjust the `fillApprovedAmount()` function to modify filling logic:
-
-```javascript
-// Example: Always fill even if approved field has a value
-if (claimValue) {  // Remove the check for empty approved field
-  approvedInput.value = claimValue;
-  return true;
-}
-```
+Portal-field detection and Apply behavior are safety-critical. Change them only
+through the tested workflow in `DEVELOPMENT.md`; do not bypass the empty-field,
+Preview, selection, stale-data, or acknowledgement gates.
 
 ## Calculation Rule
 
@@ -167,7 +155,9 @@ Medicine rows matching the configured RGHS descriptions receive a 12% deduction.
 
 - **Local Processing**: Claim and process-sheet data is handled locally in the user's browser
 - **Local Storage**: Settings, audit/activity records, reviewer feedback, and short-lived recovery snapshots are stored in the current Chrome profile as described in `PRIVACY_POLICY.md`
-- **No Developer Servers**: The extension does not send claim, patient, browsing, or usage data to the developer, analytics services, or advertising services
+- **Minimum Cloud Data**: Firebase receives authentication, organization,
+  licence, configuration, rate-limit, and privacy-safe event metadata. Claim,
+  patient, clinical, amount, URL, and free-text remark content remains local.
 - **Restricted Production Access**: The distributed extension runs only on the official `rghs.rajasthan.gov.in` portal; localhost access exists only in the source manifest for unpacked development
 - **Privacy Policy**: See `PRIVACY_POLICY.md` for handled data, purposes, retention, sharing, and user controls
 - **Open Source**: Code is fully visible and auditable
@@ -201,8 +191,9 @@ claim-autofill-extension/
 
 ### Technologies Used
 - Manifest V3 (latest Chrome extension format)
-- Vanilla JavaScript (no external dependencies)
+- Vanilla JavaScript extension runtime (no remotely executed code)
 - Chrome Extension APIs (storage, messaging, tabs)
+- Firebase Authentication and callable Cloud Functions
 
 ### Build and Test
 

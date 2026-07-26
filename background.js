@@ -194,6 +194,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     const session = await AuthCore.signInWithPassword({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
     let profile = null;
     let requiresEmailVerification = false;
+    let requiresProfileRecovery = false;
     try {
       profile = await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -205,11 +206,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     } catch (error) {
       if (error.status === 'FAILED_PRECONDITION') {
         requiresEmailVerification = true;
+      } else if (error.status === 'NOT_FOUND') {
+        requiresProfileRecovery = true;
       } else {
         throw error;
       }
     }
-    await storageWriter.setAuthSession({
+    const localSession = {
       uid: session.uid,
       email: session.email,
       displayName: profile?.displayName || '',
@@ -219,8 +222,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       refreshToken: session.refreshToken,
       expiresAt: session.expiresAt,
       signedInAt: Date.now()
-    });
+    };
     if (requiresEmailVerification) {
+      await storageWriter.setAuthSession(localSession);
       await storageWriter.setLicenceState({
         status: 'unverified',
         previewAllowed: false,
@@ -233,6 +237,36 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       });
       return { success: true, requiresEmailVerification: true };
     }
+    if (requiresProfileRecovery) {
+      await storageWriter.setPendingAuth({
+        ...localSession,
+        displayName: '',
+        invitationToken: '',
+        stage: 'accept-invitation',
+        lastError: null
+      });
+      await Promise.all([
+        storageWriter.clearAuthSession(),
+        storageWriter.setLicenceState(null)
+      ]);
+      return { success: true, requiresProfileRecovery: true };
+    }
+    if (profile?.accountStatus === 'invited') {
+      await storageWriter.setPendingAuth({
+        ...localSession,
+        displayName: profile.displayName || '',
+        invitationToken: '',
+        stage: 'awaiting-activation',
+        lastError: null
+      });
+      await Promise.all([
+        storageWriter.clearAuthSession(),
+        storageWriter.setLicenceState(null)
+      ]);
+      return { success: true, awaitingActivation: true };
+    }
+    await storageWriter.setAuthSession(localSession);
+    await storageWriter.clearPendingAuth();
     const licence = await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
       name: 'verifyLicence',
@@ -356,6 +390,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       if (error.status === 'PERMISSION_DENIED') return { success: true, active: false };
       throw error;
     }
+    if (profile?.accountStatus !== 'active') {
+      return { success: true, active: false };
+    }
     await storageWriter.setAuthSession({
       uid: pending.uid,
       email: pending.email,
@@ -425,6 +462,43 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     }
   }
 
+  const ADMIN_FUNCTIONS = Object.freeze({
+    adminActivateLicence: 'activateLicence',
+    adminInviteUser: 'inviteUser',
+    adminActivateUser: 'activateUser'
+  });
+
+  async function handleAdminAction(action, data) {
+    const functionName = ADMIN_FUNCTIONS[action];
+    if (!functionName) throw new Error('Unsupported administrator action');
+    const { authSession } = await storageGet(chrome.storage.local, 'authSession');
+    if (!authSession) throw new Error('Sign in first');
+    if (authSession.role !== 'platformAdmin') throw new Error('Platform administrator required');
+
+    let session = authSession;
+    if (!AuthCore.isTokenFresh(session)) {
+      const refreshed = await AuthCore.refreshIdToken({
+        apiKey: FIREBASE_WEB_API_KEY,
+        refreshToken: session.refreshToken,
+        fetchImpl: fetch
+      });
+      session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
+      await storageWriter.setAuthSession(session);
+    }
+
+    const result = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: functionName,
+      idToken: session.idToken,
+      data: data && typeof data === 'object' && !Array.isArray(data) ? data : {},
+      fetchImpl: fetch
+    });
+    const licenceState = action === 'adminActivateLicence'
+      ? await performLicenceRecheck()
+      : undefined;
+    return { success: true, result, licenceState };
+  }
+
   if (chrome.alarms) {
     chrome.alarms.onAlarm.addListener(alarm => {
       if (alarm.name === LICENCE_RECHECK_ALARM) performLicenceRecheck();
@@ -492,6 +566,15 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       storageWriter.clearPendingAuth()
         .then(() => sendResponse({ success: true }))
         .catch(error => sendResponse({ success: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (Object.prototype.hasOwnProperty.call(ADMIN_FUNCTIONS, request?.action)) {
+      handleAdminAction(request.action, request.data)
+        .then(sendResponse)
+        .catch(error => sendResponse({
+          success: false,
+          error: String(error.code || error.status || error.message || error)
+        }));
       return true;
     }
     let mutation = null;

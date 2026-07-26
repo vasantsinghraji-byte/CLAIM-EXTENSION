@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.1 - 2026-07-26
+
+- Add an in-extension platform-administrator panel for development licence activation, invitation generation, and user activation.
+- Make invitation acceptance idempotent for the same authenticated user and safely recover a missing onboarding profile only when the accepted invitation matches both the authenticated UID and email.
+- Resume already-invited users at activation after sign-in instead of requesting a consumed token again.
+- Expand the live-browser smoke snapshot to protect all form controls and fail closed when no controls can be captured.
+- Record completion of the single-user development pilot and replace the former five-user entry gate with an explicitly approved one-user pilot scope.
+
 ## 1.2.0 - 2026-07-19
 
 - Added submission acknowledgement, fail-closed RGHS layout checks, versioned rule validation, privacy-safe activity history, and automated release packaging.

@@ -60,7 +60,8 @@ Production requires:
 - reviewed commit and clean worktree;
 - successful development deployment;
 - invitation and authentication tests;
-- five-user beta approval;
+- completed single-user development-pilot approval;
+- Phase 4 security, privacy, backup and distribution review;
 - privacy and Web Store disclosure consistency;
 - explicit production go/no-go.
 

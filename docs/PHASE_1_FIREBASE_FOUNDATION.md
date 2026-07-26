@@ -3,6 +3,10 @@
 Status: Development foundation deployed; Authentication and initial
 platform-administrator bootstrap complete; production remains release-gated
 
+Historical boundary note: this document records the Phase 1 state. Extension
+authentication was connected in Phase 2 and the approved single-user
+development pilot completed in Phase 3. Production remains release-gated.
+
 Publisher: `NOCTURNAL_ADMIN`
 
 Support: `nocturnaladmin@gmail.com`

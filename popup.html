@@ -59,6 +59,52 @@
         </div>
       </div>
 
+      <details id="adminPanel" class="admin-panel" hidden>
+        <summary>Administrator</summary>
+        <p class="admin-help">Manage the development organization without using Developer Tools.</p>
+
+        <section class="admin-card">
+          <h2>Licence</h2>
+          <label for="adminLicenceOrganization">Organization ID</label>
+          <input type="text" id="adminLicenceOrganization" value="platform">
+          <div class="admin-grid">
+            <label for="adminMaximumUsers">Maximum users
+              <input type="number" id="adminMaximumUsers" min="1" max="500" value="50">
+            </label>
+            <label for="adminTermDays">Term (days)
+              <input type="number" id="adminTermDays" min="1" max="366" value="90">
+            </label>
+          </div>
+          <button id="adminActivateLicenceBtn" class="btn btn-primary btn-small">Activate / Renew Licence</button>
+        </section>
+
+        <section class="admin-card">
+          <h2>Invite user</h2>
+          <label for="adminInviteEmail">User email</label>
+          <input type="email" id="adminInviteEmail" autocomplete="off" placeholder="processor@example.com">
+          <label for="adminInviteRole">Role</label>
+          <select id="adminInviteRole">
+            <option value="processor">Processor</option>
+            <option value="organizationAdmin">Organization administrator</option>
+          </select>
+          <button id="adminInviteBtn" class="btn btn-primary btn-small">Generate Invitation</button>
+          <div id="adminInvitationResult" class="invitation-result" hidden>
+            <p><strong>Copy now:</strong> this one-time token is not stored in Claim Spark.</p>
+            <textarea id="adminInvitationMessage" rows="7" readonly></textarea>
+            <button id="adminCopyInvitationBtn" class="btn btn-secondary btn-small">Copy Invitation Message</button>
+          </div>
+        </section>
+
+        <section class="admin-card">
+          <h2>Activate user</h2>
+          <label for="adminActivateEmail">Invited user email</label>
+          <input type="email" id="adminActivateEmail" autocomplete="off" placeholder="processor@example.com">
+          <button id="adminActivateUserBtn" class="btn btn-primary btn-small">Activate User</button>
+        </section>
+
+        <p id="adminStatus" class="admin-status" role="status" aria-live="polite"></p>
+      </details>
+
       <div class="toggle-section">
         <label class="toggle-label" for="autoFillToggle">
           <span>Claim tools enabled</span>

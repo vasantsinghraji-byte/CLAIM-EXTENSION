@@ -93,6 +93,19 @@ test('background wires the full sign-up, verify-email, accept-invitation, and ac
   assert.match(background, /AuthCore\.accountInfo\(/);
   assert.match(background, /error\.status === 'PERMISSION_DENIED'/);
   assert.match(background, /name: 'acceptInvitation'/);
+  assert.match(background, /profile\?\.accountStatus === 'invited'/);
+  assert.match(background, /profile\?\.accountStatus !== 'active'/);
+  assert.match(background, /error\.status === 'NOT_FOUND'/);
+  assert.match(background, /requiresProfileRecovery/);
+  assert.match(background, /stage: 'awaiting-activation'/);
+});
+
+test('accepted invitations are retry-safe for the same authenticated user', () => {
+  const functions = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
+  assert.match(functions, /invitation\.status === 'accepted'/);
+  assert.match(functions, /invitation\.acceptedBy === auth\.uid/);
+  assert.match(functions, /alreadyAccepted/);
+  assert.match(functions, /recoveredAt/);
 });
 
 test('popup wires sign-up, verify-email, accept-invitation, and activation-check UI', () => {
@@ -104,6 +117,12 @@ test('popup wires sign-up, verify-email, accept-invitation, and activation-check
   assert.match(popup, /inviteErrorMessages/);
 });
 
+test('all popup authentication fields use the full-width accessible input style', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'popup.css'), 'utf8');
+  assert.match(css, /\.auth-section input\[type="text"\]/);
+  assert.match(css, /min-height:\s*40px/);
+});
+
 test('popup and floating widget explain every auth/licence block reason', () => {
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
   const widget = fs.readFileSync(path.join(__dirname, '..', 'floating-widget.js'), 'utf8');
@@ -111,6 +130,23 @@ test('popup and floating widget explain every auth/licence block reason', () => 
     assert.match(popup, new RegExp(`'${reason}':`));
     assert.match(widget, new RegExp(`'${reason}':`));
   }
+});
+
+test('platform administrators get licence, invitation, and user activation controls', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'popup.html'), 'utf8');
+  const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
+  const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  for (const id of ['adminPanel', 'adminActivateLicenceBtn', 'adminInviteBtn', 'adminActivateUserBtn']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(popup, /authSession\?\.role !== 'platformAdmin'/);
+  for (const action of ['adminActivateLicence', 'adminInviteUser', 'adminActivateUser']) {
+    assert.match(popup, new RegExp(`'${action}'`));
+    assert.match(background, new RegExp(`${action}:`));
+  }
+  assert.match(background, /authSession\.role !== 'platformAdmin'/);
+  assert.match(background, /name: functionName/);
+  assert.doesNotMatch(background, /invitationToken:\s*result/);
 });
 
 test('navigation clears stale badges and popup BOM is explicit', () => {

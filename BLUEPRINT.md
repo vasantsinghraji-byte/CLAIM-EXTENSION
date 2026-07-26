@@ -1,19 +1,35 @@
 # Claim Amount Auto-Fill B2B Architecture Blueprint
 
-Status: Phase 0 complete, including live-portal verification for both
-processSheetSearch and tpaOPD (see `docs/PHASE_0_BASELINE.md`); Phase 1
-Firebase foundation implemented, verified and deployed to development;
-Authentication, initial platform-admin bootstrap, Blaze, budget alerts, IAM
-review and Functions deployment complete (see
-`docs/PHASE_1_FIREBASE_FOUNDATION.md`); extension authentication released as
-1.7.0 and the authenticated development smoke passed (see
-`docs/PHASE_2_AUTH_SMOKE.md`)
+Status: Phase 0 baseline, Phase 1 Firebase development foundation, Phase 2
+authenticated extension integration, and the revised Phase 3 single-user
+development pilot are complete. Version 1.8.1 includes administrator controls,
+idempotent invitation recovery, and the completed Fire Milton onboarding.
+Phase 4 production hardening and controlled distribution is next. Production
+Firebase and Chrome Web Store publication remain explicitly release-gated.
+See `docs/PHASE_0_BASELINE.md`, `docs/PHASE_1_FIREBASE_FOUNDATION.md`,
+`docs/PHASE_2_AUTH_SMOKE.md`, and `docs/PHASE_3_SINGLE_USER_PILOT.md`.
 
 Target users: Approximately 50 authorized RGHS claim processors
 
-Baseline: Existing Manifest V3 extension version 1.6.0
+Current release: Manifest V3 extension version 1.8.1
 
 Recommended first milestone: Invite-only, non-AI MVP
+
+### Phase map
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Local RGHS safety baseline | Complete |
+| 1 | Firebase development foundation | Complete |
+| 2 | Extension authentication and licence integration | Complete |
+| 3 | Approved single-user development pilot | Complete |
+| 4 | Production hardening, privacy/operations gates, and controlled distribution | Next |
+| 5 | Separately approved user expansion and optional later capabilities | Deferred |
+
+The completed one-user Phase 3 gate validates the development workflow, not
+production scale. Phase 4 must still establish production isolation, backup and
+restore evidence, deletion/support operations, Web Store disclosure
+consistency, and a clean-profile release smoke.
 
 Phase 0 baseline evidence and decisions are recorded in
 [`docs/PHASE_0_BASELINE.md`](docs/PHASE_0_BASELINE.md).
@@ -68,7 +84,9 @@ The architecture uses:
 - Platform administrator user and licence management.
 - Privacy-safe usage counters and client-error metadata.
 - Public homepage, privacy policy, support, terms, and data-deletion pages.
-- Five-user beta followed by a controlled 15-user pilot.
+- One-user development pilot followed by Phase 4 production hardening and
+  controlled distribution. Additional users are deferred until explicitly
+  approved.
 
 ### MVP defers
 
@@ -98,7 +116,7 @@ flowchart TD
     I --> J[Write and test Security Rules]
     J --> K[Build protected Cloud Functions]
 
-    K --> L[Build minimal admin dashboard]
+    K --> L[Build minimal administrator controls]
     L --> M[Connect extension authentication]
     M --> N[Connect licence verification]
     N --> O[Preserve local RGHS workflows]
@@ -108,13 +126,13 @@ flowchart TD
     Q --> R{All non-AI gates pass?}
     R -->|No| S[Fix defects and repeat tests]
     S --> P
-    R -->|Yes| T[Private beta with 5 users]
+    R -->|Yes| T[Controlled beta with 1 authorized processor]
 
     T --> U[Review defects and feedback]
-    U --> V{Five-user exit criteria pass?}
+    U --> V{Single-user exit criteria pass?}
     V -->|No| S
-    V -->|Yes| W[Expand pilot to 15 users]
-    W --> X[Publish unlisted production version]
+    V -->|Yes| W[Begin Phase 4 production hardening]
+    W --> X[Publish unlisted production version when production gates pass]
     X --> Y[Onboard remaining processors]
 
     Y --> Z{AI business case approved?}
@@ -711,12 +729,12 @@ flowchart TD
     A[Gate 1: Requirements approved] --> B[Gate 2: Backend secure]
     B --> C[Gate 3: Extension ready]
     C --> D[Gate 4: Privacy ready]
-    D --> E[Five-user beta]
+    D --> E[Single-user development pilot]
     E --> F{Exit criteria pass?}
     F -->|No| G[Fix and repeat beta]
     G --> E
-    F -->|Yes| H[Fifteen-user pilot]
-    H --> I{Pilot stable?}
+    F -->|Yes| H[Phase 4 production hardening]
+    H --> I{Production gates pass?}
     I -->|No| G
     I -->|Yes| J[Gate 5: Production ready]
     J --> K[Unlisted production release]
@@ -760,7 +778,8 @@ flowchart TD
 
 ### Gate 5 — Production ready
 
-- Five-user beta and 15-user pilot completed.
+- Single-user development pilot completed.
+- Phase 4 production hardening and any separately approved expansion completed.
 - Critical defects resolved.
 - Production backups and restore test completed.
 - Billing and cost alerts enabled.
@@ -805,8 +824,8 @@ flowchart LR
 | 8 | Existing RGHS workflow integration | 100 regressions plus portal smoke |
 | 9 | Usage, errors, security hardening | No-sensitive-log evidence |
 | 10 | Privacy, terms and deletion | Gate 4 approved |
-| 11 | Five-user beta | Recorded exit findings |
-| 12 | Fixes and 15-user pilot decision | Production go/no-go |
+| 11 | Single-user development pilot | Recorded onboarding and live-workflow evidence |
+| 12 | Phase 4 hardening decision | Production go/no-go |
 
 AI and automated Razorpay subscriptions are not included in this twelve-week
 MVP commitment.
@@ -828,8 +847,8 @@ MVP commitment.
 13. Add privacy-safe usage and error metadata.
 14. Publish accurate privacy, terms, support, and deletion pages.
 15. Complete security and privacy gates.
-16. Pilot with five users.
-17. Expand to fifteen users.
+16. Complete the approved single-user development pilot.
+17. Enter Phase 4 production hardening; expand users only after a separate approval.
 18. Publish an unlisted production extension.
 19. Onboard remaining users gradually.
 20. Evaluate Gemini and Razorpay automation as separate later phases.
@@ -846,7 +865,7 @@ MVP commitment.
 | Seat enforcement | 50 named users maximum |
 | Grace period | 72 hours; Preview allowed and Apply disabled |
 | Data residency/legal review | Required organizational or legal constraints |
-| First beta users | Five authorized processors |
+| First beta users | One authorized processor (`firemilton@gmail.com`) |
 | AI | Disabled for the MVP |
 
 ## 26. Blueprint change control
