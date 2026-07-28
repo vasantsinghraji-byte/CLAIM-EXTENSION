@@ -1,8 +1,8 @@
 # Phase 4 Production Readiness
 
-Status: Production infrastructure and administrator activation complete;
-backup restore, privacy/legal, clean-profile extension and distribution gates
-remain open.
+Status: Production infrastructure, administrator activation, backup/restore
+and privacy/legal review complete; version 1.10.0 clean-profile verification,
+authorized RGHS field-changing smoke and distribution gates remain open.
 
 Date: 26 July 2026
 
@@ -114,13 +114,13 @@ recorded as passed.
 | Billing, budget and authorized administrator | Passed | Blaze enabled for `claimextension-prod`; INR 1,000 monthly budget with 10%, 50% and 100% alerts; operator confirmed 26 July 2026 |
 | Authentication and administrator bootstrap | Passed | Email/Password enabled; `nocturnaladmin@gmail.com` verified as active `platformAdmin`; hosted dashboard sign-in and organization/licence/audit visibility confirmed 26 July 2026 |
 | Firestore, Functions and Hosting deployment | Passed | Production rules/indexes, 20 active Gen2 Functions and Hosting deployed; `/admin` verified with no-store and security headers |
-| Daily backup and restore drill | In progress | Daily backup schedule enabled with 14-day retention; separate-database restore must wait for the first scheduled backup |
+| Daily backup and restore drill | Passed | Daily schedule with 14-day retention produced a READY backup; restored successfully into isolated database `phase4-restore-20260728` and verified 28 July 2026 |
 | Privacy/legal review | Passed (owner attestation) | Responsible business owner Vasant S Raji approved the six documented privacy/operational statements on 26 July 2026, including RGHS authorization, browser-only claim/patient content, privacy-safe Firebase metadata, stated retention, support/deletion handling and disabled AI. This is an internal operational approval, not independent legal advice or an RGHS-issued authorization |
-| Clean-profile extension smoke | Partially passed | Version 1.9.2 installation, production sign-in, active licence and off-domain Apply blocking confirmed 26 July 2026; the resulting stale-tab badge race was corrected in 1.9.3. Version 1.9.3 recheck and authorized synthetic RGHS test-claim Preview/Apply/Undo remain to be witnessed |
-| Private Chrome Web Store upload | Not started | Blocked by restore, privacy/legal and clean-profile smoke gates |
+| Clean-profile extension smoke | Partially passed | Version 1.9.3 installation, production sign-in, active licence, off-domain Apply blocking and stale-tab regression passed. Version 1.10.0 recheck and authorized synthetic RGHS test-claim Preview/Apply/Undo remain pending because no authorized test claim is available |
+| Private Chrome Web Store upload | Not started | Blocked by the outstanding version 1.10.0 clean-profile and authorized RGHS field-changing smoke |
 | Store review and explicit publication | Not started | Blocked by all preceding gates |
 
-The candidate production artifact is version 1.9.3. Its SHA-256 is recorded in
+The candidate production artifact is version 1.10.0. Its SHA-256 is recorded in
 `release-manifest.json`; operators must calculate the ZIP hash again immediately
 before upload and require an exact match.
 
@@ -140,4 +140,27 @@ Claim Spark, explicitly confirmed and approved:
 This attestation closes the project's internal privacy/operations gate. It is
 not independent legal advice and does not substitute for any separate approval
 that RGHS, an employer, a data controller or applicable law may require.
+
+### Backup restore drill record
+
+On 28 July 2026, the READY backup
+`d5668c53-ede5-4d3a-94d8-69f651de2da1`, captured at
+`2026-07-27T13:43:29.462712Z`, was restored into the isolated database
+`phase4-restore-20260728` in `asia-south1`.
+
+- Restore started: `2026-07-28T07:57:06.415205Z`
+- Restore completed: `2026-07-28T08:18:46.183149Z`
+- Recovery duration: 21 minutes 40 seconds
+- Snapshot age at restore start: approximately 18 hours 14 minutes
+- Operation state: `SUCCESSFUL`; no error
+- RPO result: passed against the 24-hour target
+- RTO result: passed against the eight-business-hour target
+- Restored evidence: active `platform` organization; active one-seat licence;
+  AI limit zero; production configuration with maintenance disabled; one active
+  platform administrator; privacy-safe `production.bootstrap` audit event
+- Production `(default)` database: not overwritten
+- Recovery database cleanup: deletion protection explicitly disabled and
+  database deleted at `2026-07-28T09:21:59.186068Z`; subsequent inventory
+  confirmed that only the delete-protected Production `(default)` database
+  remained
 

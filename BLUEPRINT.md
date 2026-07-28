@@ -14,7 +14,7 @@ See `docs/PHASE_0_BASELINE.md`, `docs/PHASE_1_FIREBASE_FOUNDATION.md`,
 
 Target users: Approximately 50 authorized RGHS claim processors
 
-Current release: Manifest V3 extension version 1.9.1
+Current release: Manifest V3 extension version 1.10.0
 
 Recommended first milestone: Invite-only, non-AI MVP
 
@@ -26,14 +26,15 @@ Recommended first milestone: Invite-only, non-AI MVP
 | 1 | Firebase development foundation | Complete |
 | 2 | Extension authentication and licence integration | Complete |
 | 3 | Approved single-user development pilot | Complete |
-| 4 | Production hardening, privacy/operations gates, and controlled distribution | Infrastructure/admin active; restore, legal, clean-profile and distribution gates remain |
+| 4 | Production hardening, privacy/operations gates, and controlled distribution | Infrastructure/admin, restore and owner privacy complete; 1.10.0 clean-profile/RGHS smoke and distribution remain |
 | 5 | Separately approved user expansion and optional later capabilities | Deferred |
 
 The completed one-user Phase 3 gate validates the development workflow, not
-production scale. Phase 4 source controls, infrastructure deployment and the
-production administrator activation are complete. Production release still
-requires backup/restore evidence, final legal approval, a clean-profile release
-smoke and controlled Chrome Web Store distribution.
+production scale. Phase 4 source controls, infrastructure deployment,
+production administrator activation, backup/restore drill and owner privacy
+approval are complete. Production release still requires the exact 1.10.0
+clean-profile and authorized RGHS field-changing smoke, followed by controlled
+Chrome Web Store distribution.
 
 Phase 0 baseline evidence and decisions are recorded in
 [`docs/PHASE_0_BASELINE.md`](docs/PHASE_0_BASELINE.md).
