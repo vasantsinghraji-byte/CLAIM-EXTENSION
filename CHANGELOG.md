@@ -159,3 +159,7 @@
 ## 1.9.3 - 2026-07-26
 
 - Handle tabs closed during asynchronous badge updates without service-worker errors.
+
+## 1.10.0 - 2026-07-27
+
+- Complete the production-readiness, recovery-drill and controlled-distribution documentation for the approved minimum-data release.
