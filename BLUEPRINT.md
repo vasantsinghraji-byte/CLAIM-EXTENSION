@@ -26,15 +26,15 @@ Recommended first milestone: Invite-only, non-AI MVP
 | 1 | Firebase development foundation | Complete |
 | 2 | Extension authentication and licence integration | Complete |
 | 3 | Approved single-user development pilot | Complete |
-| 4 | Production hardening, privacy/operations gates, and controlled distribution | Infrastructure/admin, restore and owner privacy complete; 1.10.0 clean-profile/RGHS smoke and distribution remain |
+| 4 | Production hardening, privacy/operations gates, and controlled distribution | All pre-distribution gates complete; private Store upload/review/publication remain |
 | 5 | Separately approved user expansion and optional later capabilities | Deferred |
 
 The completed one-user Phase 3 gate validates the development workflow, not
 production scale. Phase 4 source controls, infrastructure deployment,
-production administrator activation, backup/restore drill and owner privacy
-approval are complete. Production release still requires the exact 1.10.0
-clean-profile and authorized RGHS field-changing smoke, followed by controlled
-Chrome Web Store distribution.
+production administrator activation, backup/restore drill, owner privacy
+approval and the exact 1.10.0 clean-profile/RGHS smoke are complete. Production
+release now requires controlled Chrome Web Store upload, review and explicit
+publication.
 
 Phase 0 baseline evidence and decisions are recorded in
 [`docs/PHASE_0_BASELINE.md`](docs/PHASE_0_BASELINE.md).

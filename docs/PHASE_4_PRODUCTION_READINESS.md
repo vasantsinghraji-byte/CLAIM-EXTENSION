@@ -1,8 +1,7 @@
 # Phase 4 Production Readiness
 
-Status: Production infrastructure, administrator activation, backup/restore
-and privacy/legal review complete; version 1.10.0 clean-profile verification,
-authorized RGHS field-changing smoke and distribution gates remain open.
+Status: All pre-distribution production gates complete; private Chrome Web
+Store upload, review and explicit publication remain open.
 
 Date: 26 July 2026
 
@@ -116,13 +115,21 @@ recorded as passed.
 | Firestore, Functions and Hosting deployment | Passed | Production rules/indexes, 20 active Gen2 Functions and Hosting deployed; `/admin` verified with no-store and security headers |
 | Daily backup and restore drill | Passed | Daily schedule with 14-day retention produced a READY backup; restored successfully into isolated database `phase4-restore-20260728` and verified 28 July 2026 |
 | Privacy/legal review | Passed (owner attestation) | Responsible business owner Vasant S Raji approved the six documented privacy/operational statements on 26 July 2026, including RGHS authorization, browser-only claim/patient content, privacy-safe Firebase metadata, stated retention, support/deletion handling and disabled AI. This is an internal operational approval, not independent legal advice or an RGHS-issued authorization |
-| Clean-profile extension smoke | Partially passed | Version 1.9.3 installation, production sign-in, active licence, off-domain Apply blocking and stale-tab regression passed. Version 1.10.0 recheck and authorized synthetic RGHS test-claim Preview/Apply/Undo remain pending because no authorized test claim is available |
-| Private Chrome Web Store upload | Not started | Blocked by the outstanding version 1.10.0 clean-profile and authorized RGHS field-changing smoke |
+| Clean-profile extension smoke | Passed | Responsible owner confirmed version 1.10.0 Preview, Apply and exact Undo on an authorized RGHS test claim without submission on 28 July 2026; installation, production sign-in, active licence, off-domain Apply blocking and extension-error checks also passed |
+| Private Chrome Web Store upload | Ready | Sole approved Private tester: `firemilton@gmail.com`; upload must use the verified ZIP and deferred/manual publishing |
 | Store review and explicit publication | Not started | Blocked by all preceding gates |
 
 The candidate production artifact is version 1.10.0. Its SHA-256 is recorded in
 `release-manifest.json`; operators must calculate the ZIP hash again immediately
 before upload and require an exact match.
+
+### Controlled distribution approval record
+
+The initial Chrome Web Store release is restricted to **Private** visibility
+with only `firemilton@gmail.com` in the tester list. Automatic publishing is
+not approved. The operator must use deferred/manual publishing, review all
+permissions, privacy declarations, warnings and the final tester list, and
+obtain explicit publication approval before making the release available.
 
 ### Privacy and operational approval record
 
