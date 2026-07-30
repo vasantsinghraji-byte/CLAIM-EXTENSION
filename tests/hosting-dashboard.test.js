@@ -63,6 +63,7 @@ test('hosted dashboard keeps authentication session-only and renders untrusted d
   assert.doesNotMatch(client, /password.*setItem|setItem.*password/i);
   assert.doesNotMatch(dashboard, /\.innerHTML\s*=/);
   assert.match(dashboard, /node\.textContent = text/);
+  assert.match(dashboard, /finally\s*{[\s\S]*byId\('password'\)\.value = ''/);
   assert.match(dashboard, /control\.dataset\.armed !== 'true'/);
 });
 

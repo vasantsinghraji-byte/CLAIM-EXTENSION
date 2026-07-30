@@ -216,6 +216,7 @@
       byId('signInError').textContent = errorText(error);
       showSignedOut();
     } finally {
+      byId('password').value = '';
       buttonNode.disabled = false;
     }
   });
