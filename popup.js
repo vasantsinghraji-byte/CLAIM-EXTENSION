@@ -3,7 +3,7 @@
 const authSignedOut = document.getElementById('authSignedOut');
 const authSignUpPanel = document.getElementById('authSignUpPanel');
 const authVerifyEmail = document.getElementById('authVerifyEmail');
-const authAcceptInvitation = document.getElementById('authAcceptInvitation');
+const authCompleteOnboarding = document.getElementById('authCompleteOnboarding');
 const authAwaitingActivation = document.getElementById('authAwaitingActivation');
 const authSignedIn = document.getElementById('authSignedIn');
 const authEmailInput = document.getElementById('authEmail');
@@ -47,15 +47,13 @@ const signUpEmailInput = document.getElementById('signUpEmail');
 const signUpPasswordInput = document.getElementById('signUpPassword');
 const signUpConfirmPasswordInput = document.getElementById('signUpConfirmPassword');
 const signUpDisplayNameInput = document.getElementById('signUpDisplayName');
-const signUpInvitationTokenInput = document.getElementById('signUpInvitationToken');
 const signUpBtn = document.getElementById('signUpBtn');
 const verifyEmailLabel = document.getElementById('verifyEmailLabel');
 const resendVerificationBtn = document.getElementById('resendVerificationBtn');
 const checkVerifiedBtn = document.getElementById('checkVerifiedBtn');
-const acceptInvitationError = document.getElementById('acceptInvitationError');
-const acceptInvitationTokenInput = document.getElementById('acceptInvitationToken');
-const acceptInvitationNameInput = document.getElementById('acceptInvitationName');
-const acceptInvitationBtn = document.getElementById('acceptInvitationBtn');
+const completeOnboardingError = document.getElementById('completeOnboardingError');
+const completeOnboardingNameInput = document.getElementById('completeOnboardingName');
+const completeOnboardingBtn = document.getElementById('completeOnboardingBtn');
 const checkActivationBtn = document.getElementById('checkActivationBtn');
 const cancelSignUpLinks = [
   document.getElementById('cancelSignUpLink1'),
@@ -119,12 +117,12 @@ const authErrorMessages = {
   OPERATION_NOT_ALLOWED: 'Account creation is currently disabled. Contact your administrator.'
 };
 
-const inviteErrorMessages = {
-  NOT_FOUND: 'That invitation token is not valid. Double-check it with your administrator.',
-  FAILED_PRECONDITION: 'That invitation has already been used.',
-  DEADLINE_EXCEEDED: 'That invitation has expired. Ask your administrator to send a new one.',
-  PERMISSION_DENIED: 'That invitation was sent to a different email address.',
-  ALREADY_EXISTS: 'An account for this invitation already exists. Try signing in instead.'
+const onboardingErrorMessages = {
+  NOT_FOUND: 'No active invitation was found for this email. Ask your administrator to invite this exact address.',
+  FAILED_PRECONDITION: 'This invitation is no longer active. Ask your administrator to create a new invitation.',
+  DEADLINE_EXCEEDED: 'This invitation has expired. Ask your administrator to create a new invitation.',
+  PERMISSION_DENIED: 'The signed-in email does not match the invited email.',
+  DISPLAY_NAME_REQUIRED: 'Enter your name to finish setup.'
 };
 
 function describeLicenceStatus(state) {
@@ -136,16 +134,19 @@ function describeLicenceStatus(state) {
 }
 
 function renderAuthState(authSession, licenceState, pendingAuth) {
+  const pendingStage = pendingAuth?.stage === 'accept-invitation'
+    ? 'complete-onboarding'
+    : pendingAuth?.stage;
   const stage = authSession
     ? 'signed-in'
     : pendingAuth
-      ? pendingAuth.stage
+      ? pendingStage
       : showingSignUp ? 'sign-up' : 'signed-out';
 
   authSignedOut.hidden = stage !== 'signed-out';
   authSignUpPanel.hidden = stage !== 'sign-up';
   authVerifyEmail.hidden = stage !== 'verify-email';
-  authAcceptInvitation.hidden = stage !== 'accept-invitation';
+  authCompleteOnboarding.hidden = stage !== 'complete-onboarding';
   authAwaitingActivation.hidden = stage !== 'awaiting-activation';
   authSignedIn.hidden = stage !== 'signed-in';
   adminPanel.hidden = stage !== 'signed-in' || authSession?.role !== 'platformAdmin';
@@ -160,10 +161,11 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   if (stage === 'verify-email') {
     verifyEmailLabel.textContent = pendingAuth.email || '';
   }
-  if (stage === 'accept-invitation') {
-    acceptInvitationTokenInput.value = pendingAuth.invitationToken || '';
-    acceptInvitationNameInput.value = pendingAuth.displayName || '';
-    acceptInvitationError.textContent = pendingAuth.lastError ? (inviteErrorMessages[pendingAuth.lastError] || 'Unable to accept the invitation.') : '';
+  if (stage === 'complete-onboarding') {
+    completeOnboardingNameInput.value = pendingAuth.displayName || '';
+    completeOnboardingError.textContent = pendingAuth.lastError
+      ? (onboardingErrorMessages[pendingAuth.lastError] || 'Unable to finish setup. Contact your administrator.')
+      : '';
   }
 }
 
@@ -208,9 +210,8 @@ signUpBtn.addEventListener('click', () => {
   const password = signUpPasswordInput.value;
   const confirmPassword = signUpConfirmPasswordInput.value;
   const displayName = signUpDisplayNameInput.value.trim();
-  const invitationToken = signUpInvitationTokenInput.value.trim();
-  if (!email || !password || !displayName || !invitationToken) {
-    showStatus('Fill in every field, including your invitation token', 'warning');
+  if (!email || !password || !displayName) {
+    showStatus('Enter your invited email, name, and password', 'warning');
     return;
   }
   if (password !== confirmPassword) {
@@ -219,7 +220,7 @@ signUpBtn.addEventListener('click', () => {
   }
   signUpBtn.disabled = true;
   signUpBtn.textContent = 'Creating account...';
-  chrome.runtime.sendMessage({ action: 'authSignUp', email, password, displayName, invitationToken }, response => {
+  chrome.runtime.sendMessage({ action: 'authSignUp', email, password, displayName }, response => {
     signUpBtn.disabled = false;
     signUpBtn.textContent = 'Create Account';
     if (!response?.success) {
@@ -255,26 +256,31 @@ checkVerifiedBtn.addEventListener('click', () => {
       showStatus('Not verified yet. Check your inbox (and spam) for the link.', 'warning');
       return;
     }
-    showStatus(response.error ? 'Email verified. Confirm your invitation details below.' : 'Email verified. Invitation accepted.', response.error ? 'warning' : 'success');
+    showStatus(
+      response.error ? 'Email verified, but setup needs attention.' : 'Email verified and invitation matched automatically.',
+      response.error ? 'warning' : 'success'
+    );
     loadAuthState();
   });
 });
 
-acceptInvitationBtn.addEventListener('click', () => {
-  const invitationToken = acceptInvitationTokenInput.value.trim();
-  const displayName = acceptInvitationNameInput.value.trim();
-  if (!invitationToken || !displayName) {
-    showStatus('Enter both your name and invitation token', 'warning');
+completeOnboardingBtn.addEventListener('click', () => {
+  const displayName = completeOnboardingNameInput.value.trim();
+  if (!displayName) {
+    showStatus('Enter your name to finish setup', 'warning');
     return;
   }
-  acceptInvitationBtn.disabled = true;
-  chrome.runtime.sendMessage({ action: 'authAcceptInvitation', invitationToken, displayName }, response => {
-    acceptInvitationBtn.disabled = false;
+  completeOnboardingBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authCompleteOnboarding', displayName }, response => {
+    completeOnboardingBtn.disabled = false;
     if (!response?.success) {
-      showStatus('Unable to accept the invitation right now', 'error');
+      showStatus('Unable to finish setup right now', 'error');
       return;
     }
-    showStatus(response.stage === 'awaiting-activation' ? 'Invitation accepted' : 'Unable to accept the invitation', response.stage === 'awaiting-activation' ? 'success' : 'error');
+    showStatus(
+      response.stage === 'awaiting-activation' ? 'Setup complete. Waiting for administrator activation.' : 'Unable to finish setup',
+      response.stage === 'awaiting-activation' ? 'success' : 'error'
+    );
     loadAuthState();
   });
 });
@@ -315,7 +321,7 @@ authSignInBtn.addEventListener('click', () => {
       response.requiresEmailVerification
         ? 'Signed in. Verify your email to continue.'
         : response.requiresProfileRecovery
-          ? 'Account verified. Enter your original invitation token once to repair onboarding.'
+          ? 'Account verified. Confirm your name once to finish setup.'
           : response.awaitingActivation
             ? 'Invitation already accepted. Waiting for administrator activation.'
             : 'Signed in',
@@ -586,20 +592,17 @@ adminInvitationsList.addEventListener('click', async event => {
     return;
   }
   if (action === 'replace-invitation') {
-    const token = response.result.token;
     adminInvitationMessage.value = [
       'Your Claim Spark invitation has been replaced.',
       '',
       `Use this email: ${button.dataset.email}`,
-      'Use this new one-time invitation token:',
       '',
-      token,
-      '',
-      'The previous token no longer works.'
+      'Open Claim Spark, create an account with this exact email, and verify it once.',
+      'Claim Spark will match the replacement invitation automatically; no code is required.'
     ].join('\n');
     adminInvitationResult.hidden = false;
   }
-  setAdminStatus(action === 'revoke-invitation' ? 'Invitation revoked.' : 'Invitation replaced. Copy the new token now.', 'success');
+  setAdminStatus(action === 'revoke-invitation' ? 'Invitation revoked.' : 'Invitation replaced. Send the updated instructions.', 'success');
   loadAdminInvitations();
   loadAdminAudit();
 });
@@ -681,9 +684,8 @@ adminInviteBtn.addEventListener('click', async () => {
     adminInviteBtn,
     'Generating...'
   );
-  const token = response?.result?.token;
-  if (!response.success || !token) {
-    setAdminStatus(`Invitation failed: ${response?.error || 'No token returned'}`, 'error');
+  if (!response.success) {
+    setAdminStatus(`Invitation failed: ${response?.error || 'Unable to create invitation'}`, 'error');
     return;
   }
   const validHours = Math.round(Number(response.result.expiresInSeconds || 0) / 3600);
@@ -692,15 +694,12 @@ adminInviteBtn.addEventListener('click', async () => {
     '',
     `Use this email: ${email}`,
     'Open Claim Spark and choose "New processor? Create an account".',
-    'Enter the one-time invitation token below:',
-    '',
-    token,
     '',
     validHours ? `This invitation expires in ${validHours} hours.` : 'This invitation expires automatically.',
-    'Do not share this token with anyone else.'
+    'Verify this email once. Claim Spark will match the invitation automatically; no invitation code is required.'
   ].join('\n');
   adminInvitationResult.hidden = false;
-  setAdminStatus('Invitation generated. Copy it now; Claim Spark does not save the token.', 'success');
+  setAdminStatus('Email invitation created. Send the instructions to the user.', 'success');
   loadAdminInvitations();
   loadAdminAudit();
 });

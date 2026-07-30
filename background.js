@@ -224,7 +224,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     const localSession = {
       uid: session.uid,
       email: session.email,
-      displayName: profile?.displayName || '',
+      displayName: profile?.displayName || session.displayName || '',
       organizationId: profile?.organizationId || null,
       role: profile?.role || null,
       idToken: session.idToken,
@@ -247,24 +247,27 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return { success: true, requiresEmailVerification: true };
     }
     if (requiresProfileRecovery) {
-      await storageWriter.setPendingAuth({
+      const pending = {
         ...localSession,
-        displayName: '',
-        invitationToken: '',
-        stage: 'accept-invitation',
+        stage: 'complete-onboarding',
         lastError: null
-      });
+      };
+      const afterCompletion = pending.displayName
+        ? await attemptCompleteOnboarding(pending)
+        : pending;
+      await storageWriter.setPendingAuth(afterCompletion);
       await Promise.all([
         storageWriter.clearAuthSession(),
         storageWriter.setLicenceState(null)
       ]);
-      return { success: true, requiresProfileRecovery: true };
+      return afterCompletion.stage === 'awaiting-activation'
+        ? { success: true, awaitingActivation: true }
+        : { success: true, requiresProfileRecovery: true, error: afterCompletion.lastError };
     }
     if (profile?.accountStatus === 'invited') {
       await storageWriter.setPendingAuth({
         ...localSession,
         displayName: profile.displayName || '',
-        invitationToken: '',
         stage: 'awaiting-activation',
         lastError: null
       });
@@ -300,31 +303,37 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return next;
   }
 
-  // Tries acceptInvitation with whatever invitation token/display name are on
-  // the pending record. Never throws: a failed attempt (bad/expired/already-
-  // used token) just stays at the 'accept-invitation' stage with lastError
-  // set, so the popup can show it and let the user correct the token.
-  async function attemptAcceptInvitation(pending) {
+  // Completes onboarding by matching the authenticated, verified email to an
+  // administrator-created invitation. No invitation secret is kept in browser
+  // storage or requested a second time.
+  async function attemptCompleteOnboarding(pending) {
     try {
       await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
-        name: 'acceptInvitation',
+        name: 'completeInvitationOnboarding',
         idToken: pending.idToken,
-        data: { token: pending.invitationToken, displayName: pending.displayName },
+        data: { displayName: pending.displayName },
         fetchImpl: fetch
       });
       const next = { ...pending, stage: 'awaiting-activation', lastError: null };
       await storageWriter.setPendingAuth(next);
       return next;
     } catch (error) {
-      const next = { ...pending, stage: 'accept-invitation', lastError: String(error.status || error.message || error) };
+      const next = { ...pending, stage: 'complete-onboarding', lastError: String(error.status || error.message || error) };
       await storageWriter.setPendingAuth(next);
       return next;
     }
   }
 
-  async function handleAuthSignUp(email, password, displayName, invitationTokenValue) {
+  async function handleAuthSignUp(email, password, displayName) {
     const session = await AuthCore.signUp({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
+    const normalizedDisplayName = String(displayName || '').trim();
+    await AuthCore.updateProfile({
+      apiKey: FIREBASE_WEB_API_KEY,
+      idToken: session.idToken,
+      displayName: normalizedDisplayName,
+      fetchImpl: fetch
+    });
     await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: session.idToken, fetchImpl: fetch });
     await storageWriter.setPendingAuth({
       uid: session.uid,
@@ -332,8 +341,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       idToken: session.idToken,
       refreshToken: session.refreshToken,
       expiresAt: session.expiresAt,
-      displayName: String(displayName || '').trim(),
-      invitationToken: String(invitationTokenValue || '').trim(),
+      displayName: normalizedDisplayName,
       stage: 'verify-email',
       lastError: null
     });
@@ -348,31 +356,53 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  // On success, immediately attempts acceptInvitation with the token/name
-  // collected at sign-up - no separate manual step for the common case where
-  // the invitation is still valid.
+  // On success, automatically claims the active invitation for the verified
+  // email. The user never handles an invitation token.
   async function handleCheckEmailVerified() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    let pending = await refreshPendingIfStale(pendingAuth);
     const info = await AuthCore.accountInfo({ apiKey: FIREBASE_WEB_API_KEY, idToken: pending.idToken, fetchImpl: fetch });
     if (!info.emailVerified) {
       await storageWriter.setPendingAuth(pending);
       return { success: true, emailVerified: false };
     }
-    const afterAccept = await attemptAcceptInvitation({ ...pending, stage: 'accept-invitation' });
-    return { success: true, emailVerified: true, stage: afterAccept.stage, error: afterAccept.lastError };
+    // Email verification happens outside the extension. Even a non-expired ID
+    // token still contains the old email_verified=false claim, so force a token
+    // refresh before calling a server endpoint that requires verified email.
+    const refreshed = await AuthCore.refreshIdToken({
+      apiKey: FIREBASE_WEB_API_KEY,
+      refreshToken: pending.refreshToken,
+      fetchImpl: fetch
+    });
+    pending = {
+      ...pending,
+      idToken: refreshed.idToken,
+      refreshToken: refreshed.refreshToken,
+      expiresAt: refreshed.expiresAt
+    };
+    await storageWriter.setPendingAuth(pending);
+    const displayName = pending.displayName || info.displayName || '';
+    const afterCompletion = displayName
+      ? await attemptCompleteOnboarding({ ...pending, displayName, stage: 'complete-onboarding' })
+      : { ...pending, stage: 'complete-onboarding', lastError: 'DISPLAY_NAME_REQUIRED' };
+    await storageWriter.setPendingAuth(afterCompletion);
+    return {
+      success: true,
+      emailVerified: true,
+      stage: afterCompletion.stage,
+      error: afterCompletion.lastError
+    };
   }
 
-  // Manual retry, used when the auto-attempt above failed (e.g. the token was
-  // mistyped, expired, or already used) and the user corrects it.
-  async function handleAcceptInvitation(invitationTokenValue, displayName) {
+  // Manual retry is only needed for legacy accounts that lost their local
+  // display name or when an administrator has just created/replaced an invite.
+  async function handleCompleteOnboarding(displayName) {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
     const pending = await refreshPendingIfStale(pendingAuth);
-    const result = await attemptAcceptInvitation({
+    const result = await attemptCompleteOnboarding({
       ...pending,
-      invitationToken: String(invitationTokenValue || '').trim(),
       displayName: String(displayName || '').trim()
     });
     return { success: !result.lastError, stage: result.stage, error: result.lastError };
@@ -553,7 +583,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignUp') {
-      handleAuthSignUp(request.email, request.password, request.displayName, request.invitationToken)
+      handleAuthSignUp(request.email, request.password, request.displayName)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;
@@ -570,8 +600,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;
     }
-    if (request?.action === 'authAcceptInvitation') {
-      handleAcceptInvitation(request.invitationToken, request.displayName)
+    if (request?.action === 'authCompleteOnboarding' || request?.action === 'authAcceptInvitation') {
+      handleCompleteOnboarding(request.displayName)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;

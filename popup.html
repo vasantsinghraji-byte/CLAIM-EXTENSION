@@ -25,7 +25,7 @@
         <input type="password" id="signUpPassword" name="signUpPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
         <input type="password" id="signUpConfirmPassword" name="signUpConfirmPassword" placeholder="Confirm password" autocomplete="new-password">
         <input type="text" id="signUpDisplayName" name="signUpDisplayName" placeholder="Your name">
-        <input type="text" id="signUpInvitationToken" name="signUpInvitationToken" placeholder="Invitation token (from your administrator)">
+        <p class="auth-help">Use the same email address your administrator invited. You will verify that email once; no invitation code is required.</p>
         <button id="signUpBtn" class="btn btn-primary">Create Account</button>
         <p class="auth-link"><a href="#" id="showSignInLink">Already have an account? Sign in</a></p>
       </div>
@@ -38,11 +38,11 @@
         </div>
         <p class="auth-link"><a href="#" id="cancelSignUpLink1">Start over</a></p>
       </div>
-      <div id="authAcceptInvitation" class="auth-section" hidden>
-        <p id="acceptInvitationError" class="auth-error"></p>
-        <input type="text" id="acceptInvitationToken" name="acceptInvitationToken" placeholder="Invitation token">
-        <input type="text" id="acceptInvitationName" name="acceptInvitationName" placeholder="Your name">
-        <button id="acceptInvitationBtn" class="btn btn-primary">Accept Invitation</button>
+      <div id="authCompleteOnboarding" class="auth-section" hidden>
+        <p>Your email is verified. Confirm your name to finish setup.</p>
+        <p id="completeOnboardingError" class="auth-error"></p>
+        <input type="text" id="completeOnboardingName" name="completeOnboardingName" placeholder="Your name">
+        <button id="completeOnboardingBtn" class="btn btn-primary">Finish Setup</button>
         <p class="auth-link"><a href="#" id="cancelSignUpLink2">Start over</a></p>
       </div>
       <div id="authAwaitingActivation" class="auth-section" hidden>
@@ -124,7 +124,7 @@
           </select>
           <button id="adminInviteBtn" class="btn btn-primary btn-small">Generate Invitation</button>
           <div id="adminInvitationResult" class="invitation-result" hidden>
-            <p><strong>Copy now:</strong> this one-time token is not stored in Claim Spark.</p>
+            <p><strong>Send to the user:</strong> signup uses the invited email and one email-verification step.</p>
             <textarea id="adminInvitationMessage" rows="7" readonly></textarea>
             <button id="adminCopyInvitationBtn" class="btn btn-secondary btn-small">Copy Invitation Message</button>
           </div>

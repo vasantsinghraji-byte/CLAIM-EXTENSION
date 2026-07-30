@@ -12,21 +12,23 @@ routine production interface.
 1. Select or enter the organization ID.
 2. Enter the user's email and role.
 3. Generate the invitation.
-4. Copy the message immediately. Only the token hash is retained by the
-   service.
-5. Send the message through an approved communication channel.
+4. Send the generated signup instructions through an approved communication
+   channel. The user must create the account with that exact email.
+5. The user verifies the email once. Claim Spark matches the active invitation
+   automatically; the user never handles an invitation token.
 
 ### Replace or revoke
 
 - **Revoke** immediately invalidates a pending invitation.
-- **Replace** invalidates the pending invitation and displays a new token once.
+- **Replace** invalidates the pending invitation and creates a new email-based
+  invitation.
 - Accepted invitations cannot be revoked or replaced. Suspend or delete the
   resulting user instead.
 
 ### Activate, suspend or reactivate
 
-- Activate only after the user has verified their email and accepted the
-  invitation.
+- Activate only after the user has verified their email and Claim Spark has
+  matched the invitation.
 - Suspension disables Firebase Authentication and revokes refresh tokens.
 - Reactivation requires an active organization, active licence and available
   seat.

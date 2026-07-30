@@ -20,6 +20,7 @@ test('successful sign-in parses tokens and computes an expiry from expiresIn', a
   assert.equal(result.refreshToken, 'refresh-token');
   assert.equal(result.uid, 'uid-1');
   assert.equal(result.email, 'user@example.com');
+  assert.equal(result.displayName, '');
   assert.ok(result.expiresAt >= before + 3600 * 1000 && result.expiresAt <= Date.now() + 3600 * 1000 + 1000);
 });
 
@@ -101,6 +102,24 @@ test('sendEmailVerification returns the target email on success', async () => {
   assert.equal(result.email, 'new-processor@example.com');
 });
 
+test('updateProfile persists the signup display name without rotating tokens', async () => {
+  const result = await AuthCore.updateProfile({
+    apiKey: 'test-key',
+    idToken: 'id-token',
+    displayName: 'New Processor',
+    fetchImpl: async (url, init) => {
+      assert.match(url, /accounts:update/);
+      assert.deepEqual(JSON.parse(init.body), {
+        idToken: 'id-token',
+        displayName: 'New Processor',
+        returnSecureToken: false
+      });
+      return jsonResponse(true, { displayName: 'New Processor' });
+    }
+  });
+  assert.equal(result.displayName, 'New Processor');
+});
+
 test('accountInfo reports emailVerified from the live lookup, not the cached token', async () => {
   const verified = await AuthCore.accountInfo({
     apiKey: 'test-key',
@@ -115,6 +134,17 @@ test('accountInfo reports emailVerified from the live lookup, not the cached tok
     fetchImpl: async () => jsonResponse(true, { users: [{ email: 'a@b.com' }] })
   });
   assert.equal(unverified.emailVerified, false);
+});
+
+test('accountInfo returns the server-side display name for lost local onboarding state', async () => {
+  const result = await AuthCore.accountInfo({
+    apiKey: 'test-key',
+    idToken: 'id-token',
+    fetchImpl: async () => jsonResponse(true, {
+      users: [{ email: 'a@b.com', emailVerified: true, displayName: 'Processor Name' }]
+    })
+  });
+  assert.deepEqual(result, { emailVerified: true, displayName: 'Processor Name' });
 });
 
 test('refreshIdToken parses the Secure Token API snake_case response', async () => {

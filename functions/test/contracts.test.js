@@ -10,6 +10,7 @@ const {
   normalizedEmail,
   resolveActivationTarget,
   safeDocumentId,
+  selectEmailInvitation,
   tokenHash
 } = require('../lib/contracts');
 
@@ -49,6 +50,25 @@ test('activateUser accepts exactly one of uid or email, never both or neither', 
   assert.deepEqual(resolveActivationTarget({ email: ' Processor@Example.COM ' }), { by: 'email', value: 'processor@example.com' });
   assert.throws(() => resolveActivationTarget({}), /exactly one/);
   assert.throws(() => resolveActivationTarget({ uid: 'u1', email: 'a@b.com' }), /exactly one/);
+});
+
+test('verified-email onboarding prefers caller-owned recovery then newest live invitation', () => {
+  const now = 1000;
+  const records = [
+    { id: 'expired', status: 'pending', expiresAtMs: 999, createdAtMs: 900 },
+    { id: 'new-live', status: 'pending', expiresAtMs: 2000, createdAtMs: 800 },
+    { id: 'old-live', status: 'pending', expiresAtMs: 2000, createdAtMs: 700 }
+  ];
+  assert.equal(selectEmailInvitation(records, 'uid-1', now).id, 'new-live');
+  assert.equal(selectEmailInvitation([
+    ...records,
+    { id: 'accepted-other', status: 'accepted', acceptedBy: 'uid-2', createdAtMs: 950 },
+    { id: 'accepted-self', status: 'accepted', acceptedBy: 'uid-1', createdAtMs: 600 }
+  ], 'uid-1', now).id, 'accepted-self');
+  assert.equal(selectEmailInvitation([
+    { id: 'expired', status: 'pending', expiresAtMs: 999, createdAtMs: 900 },
+    { id: 'revoked', status: 'revoked', expiresAtMs: 2000, createdAtMs: 950 }
+  ], 'uid-1', now), null);
 });
 
 test('licence decisions preserve apply safety during grace and suspension', () => {

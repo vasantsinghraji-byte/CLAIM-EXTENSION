@@ -111,6 +111,16 @@ function resolveActivationTarget(data) {
     : { by: 'email', value: normalizedEmail(data.email) };
 }
 
+function selectEmailInvitation(records, uid, now = Date.now()) {
+  const candidates = records
+    .filter(record => (record.status === 'accepted' && record.acceptedBy === uid)
+      || (record.status === 'pending' && Number.isFinite(record.expiresAtMs) && record.expiresAtMs >= now))
+    .sort((left, right) => (right.createdAtMs || 0) - (left.createdAtMs || 0));
+  return candidates.find(record => record.status === 'accepted' && record.acceptedBy === uid)
+    || candidates.find(record => record.status === 'pending')
+    || null;
+}
+
 function licenceAccessDecision({ status, expiryMs, now, gracePeriodMs }) {
   if (status === 'suspended') {
     return { status: 'suspended', previewAllowed: false, applyAllowed: false };
@@ -142,5 +152,6 @@ module.exports = {
   requiredString,
   resolveActivationTarget,
   safeDocumentId,
+  selectEmailInvitation,
   tokenHash
 };
