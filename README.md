@@ -4,7 +4,7 @@ An invite-only Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Current release: **1.9.1**. Phase 4 adds production-isolated packaging and a
+Current release: **1.10.1**. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
 organizations, account deletion and audit-event viewing. The Firebase-hosted
 dashboard is the primary production interface; the popup panel is retained as
@@ -23,12 +23,13 @@ activation gates.
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
-- **Invite-only Access**: Firebase email/password authentication, verified
-  email, administrator activation, and organization licence checks
+- **Invite-only Access**: The administrator authorizes an email; the user
+  verifies that email once; Claim Spark matches the invitation automatically;
+  administrator activation and organization licence checks remain required
 - **Administrator Controls**: Development licence renewal, invitation
   generation, and user activation without service-worker console commands
-- **Onboarding Recovery**: Idempotent invitation handling safely repairs a
-  missing profile only for the matching authenticated UID and email
+- **Onboarding Recovery**: Idempotent verified-email matching safely repairs a
+  missing profile without asking the user to re-enter an invitation code
 - **Smart Matching**: Uses multiple strategies to find field pairs:
   - Name/ID attribute matching
   - Table structure analysis
@@ -36,8 +37,9 @@ activation gates.
 
 ## Installation
 
-### Method 1: Install from Chrome Web Store (Coming Soon)
-Once published, you'll be able to install directly from the Chrome Web Store.
+### Method 1: Install from Chrome Web Store
+The extension is privately published to approved trusted testers. Open the
+direct listing while signed into an approved tester account.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 

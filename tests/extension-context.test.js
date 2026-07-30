@@ -84,21 +84,35 @@ test('background wires auth-core, the three auth message actions, and the licenc
   assert.match(background, /alarm\.name === LICENCE_RECHECK_ALARM/);
 });
 
-test('background wires the full sign-up, verify-email, accept-invitation, and activation-check chain', () => {
+test('background wires verified-email invitation matching and the activation-check chain', () => {
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
-  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authAcceptInvitation', 'authCheckActivation', 'authCancelSignUp']) {
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCompleteOnboarding', 'authCheckActivation', 'authCancelSignUp']) {
     assert.match(background, new RegExp(`request\\?\\.action === '${action}'`));
   }
   assert.match(background, /AuthCore\.signUp\(/);
+  assert.match(background, /AuthCore\.updateProfile\(/);
   assert.match(background, /AuthCore\.sendEmailVerification\(/);
   assert.match(background, /AuthCore\.accountInfo\(/);
   assert.match(background, /error\.status === 'PERMISSION_DENIED'/);
-  assert.match(background, /name: 'acceptInvitation'/);
+  assert.match(background, /name: 'completeInvitationOnboarding'/);
   assert.match(background, /profile\?\.accountStatus === 'invited'/);
   assert.match(background, /profile\?\.accountStatus !== 'active'/);
   assert.match(background, /error\.status === 'NOT_FOUND'/);
   assert.match(background, /requiresProfileRecovery/);
   assert.match(background, /stage: 'awaiting-activation'/);
+  assert.doesNotMatch(background, /invitationToken:\s*String/);
+});
+
+test('email verification refreshes the ID token before verified-only onboarding', () => {
+  const background = read('background.js');
+  const start = background.indexOf('async function handleCheckEmailVerified');
+  const end = background.indexOf('async function handleCompleteOnboarding', start);
+  const flow = background.slice(start, end);
+  const lookup = flow.indexOf('AuthCore.accountInfo');
+  const refresh = flow.indexOf('AuthCore.refreshIdToken');
+  const completion = flow.indexOf('attemptCompleteOnboarding');
+  assert.ok(lookup >= 0 && refresh > lookup && completion > refresh);
+  assert.match(flow, /refreshToken: pending\.refreshToken/);
 });
 
 test('accepted invitations are retry-safe for the same authenticated user', () => {
@@ -109,13 +123,26 @@ test('accepted invitations are retry-safe for the same authenticated user', () =
   assert.match(functions, /recoveredAt/);
 });
 
-test('popup wires sign-up, verify-email, accept-invitation, and activation-check UI', () => {
+test('popup uses email-based signup without an invitation-token field', () => {
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
-  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authAcceptInvitation', 'authCheckActivation', 'authCancelSignUp']) {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'popup.html'), 'utf8');
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCompleteOnboarding', 'authCheckActivation', 'authCancelSignUp']) {
     assert.match(popup, new RegExp(`action: '${action}'`));
   }
   assert.match(popup, /password !== confirmPassword/);
-  assert.match(popup, /inviteErrorMessages/);
+  assert.match(popup, /onboardingErrorMessages/);
+  assert.doesNotMatch(html, /signUpInvitationToken/);
+  assert.doesNotMatch(html, /acceptInvitationToken/);
+  assert.match(html, /no invitation code is required/i);
+});
+
+test('server matches invitations by verified email while retaining legacy token compatibility', () => {
+  const functions = read('functions/index.js');
+  assert.match(functions, /exports\.completeInvitationOnboarding = onCall/);
+  assert.match(functions, /\.where\('email', '==', authenticatedEmail\)/);
+  assert.match(functions, /requireVerifiedEmail\(request\)/);
+  assert.match(functions, /No active invitation exists for this verified email/);
+  assert.match(functions, /exports\.acceptInvitation = onCall/);
 });
 
 test('all popup authentication fields use the full-width accessible input style', () => {

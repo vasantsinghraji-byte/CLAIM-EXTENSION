@@ -191,16 +191,14 @@
     if (!records.length) empty(container, 'No audit events found.');
   }
 
-  function displayInvitation(email, token, replacement = false) {
+  function displayInvitation(email, replacement = false) {
     byId('invitationMessage').value = [
       replacement ? 'Your Claim Spark invitation has been replaced.' : 'You have been invited to Claim Spark.',
       '',
       `Use this email: ${email}`,
-      'Use this one-time invitation token:',
       '',
-      token,
-      '',
-      replacement ? 'The previous token no longer works.' : 'Do not share this token.'
+      'Open Claim Spark and choose "New processor? Create an account".',
+      'Verify this email once. Claim Spark will match the invitation automatically; no invitation code is required.'
     ].join('\n');
     byId('invitationSecret').hidden = false;
   }
@@ -247,9 +245,9 @@
       email,
       organizationId: String(form.get('organizationId')).trim(),
       role: String(form.get('role'))
-    }, 'Invitation created. Copy it now.');
-    if (result?.token) {
-      displayInvitation(email, result.token);
+    }, 'Invitation created. Send the instructions to the user.');
+    if (result) {
+      displayInvitation(email);
       loadInvitations();
       loadAudit();
     }
@@ -347,9 +345,9 @@
     } else if (control.dataset.action === 'replace') {
       const result = await action('replaceInvitation', {
         invitationId: control.dataset.invitationId
-      }, 'Invitation replaced. Copy the new token now.');
-      if (result?.token) {
-        displayInvitation(control.dataset.email, result.token, true);
+      }, 'Invitation replaced. Send the updated instructions.');
+      if (result) {
+        displayInvitation(control.dataset.email, true);
         loadInvitations();
         loadAudit();
       }

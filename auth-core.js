@@ -53,7 +53,8 @@
       refreshToken: payload.refreshToken,
       expiresAt: computeExpiresAt(payload.expiresIn),
       uid: payload.localId,
-      email: payload.email
+      email: payload.email,
+      displayName: payload.displayName || ''
     };
   }
 
@@ -78,8 +79,28 @@
       refreshToken: payload.refreshToken,
       expiresAt: computeExpiresAt(payload.expiresIn),
       uid: payload.localId,
-      email: payload.email
+      email: payload.email,
+      displayName: payload.displayName || ''
     };
+  }
+
+  async function updateProfile({ apiKey, idToken, displayName, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, displayName, returnSecureToken: false })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json();
+    if (!response.ok) throw normalizeRestError(payload);
+    return { displayName: payload.displayName || displayName };
   }
 
   async function sendEmailVerification({ apiKey, idToken, fetchImpl }) {
@@ -121,7 +142,10 @@
     const payload = await response.json();
     if (!response.ok) throw normalizeRestError(payload);
     const user = (payload.users || [])[0] || {};
-    return { emailVerified: user.emailVerified === true };
+    return {
+      emailVerified: user.emailVerified === true,
+      displayName: user.displayName || ''
+    };
   }
 
   async function refreshIdToken({ apiKey, refreshToken, fetchImpl }) {
@@ -178,6 +202,7 @@
   return {
     signInWithPassword,
     signUp,
+    updateProfile,
     sendEmailVerification,
     accountInfo,
     refreshIdToken,

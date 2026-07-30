@@ -124,12 +124,12 @@ test('pending sign-up state is written and cleared independently of a full auth 
   const writer = createSerializedStorageWriter(storage);
   const pending = {
     uid: 'uid-2', email: 'new@example.com', idToken: 'a', refreshToken: 'b', expiresAt: Date.now() + 3600000,
-    displayName: 'New Processor', invitationToken: 'tok', stage: 'verify-email', lastError: null
+    displayName: 'New Processor', stage: 'verify-email', lastError: null
   };
   assert.deepEqual(await writer.setPendingAuth(pending), pending);
   assert.deepEqual(storage.data.pendingAuth, pending);
 
-  const advanced = { ...pending, stage: 'accept-invitation' };
+  const advanced = { ...pending, stage: 'complete-onboarding' };
   assert.deepEqual(await writer.setPendingAuth(advanced), advanced);
   assert.deepEqual(storage.data.pendingAuth, advanced);
 

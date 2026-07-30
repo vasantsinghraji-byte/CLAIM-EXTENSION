@@ -23,6 +23,7 @@ const {
   requiredString,
   resolveActivationTarget,
   safeDocumentId,
+  selectEmailInvitation,
   tokenHash
 } = require('./lib/contracts');
 
@@ -383,6 +384,101 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
       accountStatus: acceptedAccountStatus
     });
     return { status: 'accepted', activationRequired: true, alreadyAccepted };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+// New onboarding model: the administrator authorizes an email address and the
+// verified owner of that address claims the invitation. The secret-token
+// endpoint above remains available during the 1.10.0 compatibility window,
+// but new clients never ask a user to enter or re-enter a token.
+exports.completeInvitationOnboarding = onCall(callableOptions, async request => {
+  try {
+    const auth = requireVerifiedEmail(request);
+    await enforceRateLimit(auth.uid, 'completeInvitationOnboarding', 10, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['displayName'], ['displayName']);
+    const displayName = requiredString(data.displayName, 'displayName', 120);
+    const authenticatedEmail = normalizedEmail(auth.token.email);
+    const invitationsSnapshot = await db.collection('invitations')
+      .where('email', '==', authenticatedEmail)
+      .limit(ADMIN_LIST_LIMIT)
+      .get();
+    const selectedInvitation = selectEmailInvitation(
+      invitationsSnapshot.docs.map(snapshot => ({
+        snapshot,
+        status: snapshot.data().status,
+        acceptedBy: snapshot.data().acceptedBy || null,
+        expiresAtMs: timestampMillis(snapshot.data().expiresAt),
+        createdAtMs: timestampMillis(snapshot.data().createdAt)
+      })),
+      auth.uid
+    );
+    const invitationSnapshot = selectedInvitation?.snapshot || null;
+    const userReference = db.doc(`users/${auth.uid}`);
+    const invitationReference = invitationSnapshot?.ref || null;
+    let onboarding;
+    let accountStatus = 'invited';
+    let alreadyAccepted = false;
+
+    await db.runTransaction(async transaction => {
+      const userSnapshot = await transaction.get(userReference);
+      if (userSnapshot.exists) {
+        const user = userSnapshot.data();
+        if (user.email !== authenticatedEmail) {
+          fail('failed-precondition', 'Existing user profile does not match authenticated email');
+        }
+        onboarding = user;
+        accountStatus = user.accountStatus;
+        alreadyAccepted = true;
+        return;
+      }
+      if (!invitationReference) {
+        fail('not-found', 'No active invitation exists for this verified email');
+      }
+      const currentInvitationSnapshot = await transaction.get(invitationReference);
+      if (!currentInvitationSnapshot.exists) fail('not-found', 'Invitation not found');
+      const invitation = currentInvitationSnapshot.data();
+      const acceptedForSameCaller = invitation.status === 'accepted'
+        && invitation.acceptedBy === auth.uid
+        && invitation.email === authenticatedEmail;
+      if (!acceptedForSameCaller) {
+        if (invitation.status !== 'pending') fail('failed-precondition', 'Invitation is no longer active');
+        if (timestampMillis(invitation.expiresAt) < Date.now()) fail('deadline-exceeded', 'Invitation expired');
+        if (invitation.email !== authenticatedEmail) fail('permission-denied', 'Invitation email does not match');
+      } else {
+        alreadyAccepted = true;
+      }
+      onboarding = invitation;
+      transaction.create(userReference, {
+        email: authenticatedEmail,
+        displayName,
+        organizationId: invitation.organizationId,
+        role: invitation.role,
+        accountStatus: 'invited',
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(acceptedForSameCaller ? { recoveredAt: FieldValue.serverTimestamp() } : {})
+      });
+      if (!acceptedForSameCaller) {
+        transaction.update(invitationReference, {
+          status: 'accepted',
+          acceptedAt: FieldValue.serverTimestamp(),
+          acceptedBy: auth.uid
+        });
+      }
+    });
+    await getAuth().setCustomUserClaims(auth.uid, {
+      organizationId: onboarding.organizationId,
+      role: onboarding.role,
+      accountStatus
+    });
+    return {
+      status: accountStatus === 'active' ? 'active' : 'accepted',
+      activationRequired: accountStatus !== 'active',
+      alreadyAccepted
+    };
   } catch (error) {
     translateValidation(error);
   }

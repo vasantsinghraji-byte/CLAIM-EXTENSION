@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.1 - 2026-07-29
+
+- Replace user-entered invitation tokens with automatic verified-email
+  invitation matching while retaining administrator activation and legacy
+  token compatibility during rollout.
+- Force-refresh the Firebase ID token after email verification so verified-only
+  onboarding never runs with a stale `email_verified=false` claim.
+- Persist the signup display name in Firebase Authentication and recover
+  browser-local onboarding state without requesting the invitation again.
+
 ## 1.8.1 - 2026-07-26
 
 - Add an in-extension platform-administrator panel for development licence activation, invitation generation, and user activation.
