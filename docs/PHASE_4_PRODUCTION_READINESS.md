@@ -116,12 +116,12 @@ recorded as passed.
 | Daily backup and restore drill | Passed | Daily schedule with 14-day retention produced a READY backup; restored successfully into isolated database `phase4-restore-20260728` and verified 28 July 2026 |
 | Privacy/legal review | Passed (owner attestation) | Responsible business owner Vasant S Raji approved the six documented privacy/operational statements on 26 July 2026, including RGHS authorization, browser-only claim/patient content, privacy-safe Firebase metadata, stated retention, support/deletion handling and disabled AI. This is an internal operational approval, not independent legal advice or an RGHS-issued authorization |
 | Clean-profile extension smoke | Passed | Responsible owner confirmed version 1.10.0 Preview, Apply and exact Undo on an authorized RGHS test claim without submission on 28 July 2026; installation, production sign-in, active licence, off-domain Apply blocking and extension-error checks also passed |
-| Private Chrome Web Store upload | Ready | Sole approved Private tester: `firemilton@gmail.com`; upload must use the verified ZIP and deferred/manual publishing |
-| Store review and explicit publication | Not started | Blocked by all preceding gates |
+| Private Chrome Web Store upload | Passed | Version 1.11.0 uploaded through the Developer Dashboard on 5 August 2026 using the verified ZIP; the existing tester-only distribution channel was preserved |
+| Store review and explicit publication | Pending review | Version 1.11.0 submitted for review on 5 August 2026 with automatic publishing disabled; manual publication remains required after approval |
 
-The candidate production artifact is version 1.10.0. Its SHA-256 is recorded in
-`release-manifest.json`; operators must calculate the ZIP hash again immediately
-before upload and require an exact match.
+The candidate production artifact is version 1.11.0. Its verified SHA-256 is
+`08DBC5B133601990EA5364330EC00609E4342C367472612D36614C711E0EE636`, matching
+`release-manifest.json` at upload time.
 
 ### Controlled distribution approval record
 
