@@ -10,8 +10,6 @@ let licenceState = null; // null = never checked yet (fresh install or signed ou
 let undoBatch = [];
 let lastPreview = null;
 let previewRowElements = new Map();
-let lastAppliedSummary = null;
-let submitArmedUntil = 0;
 const Core = globalThis.ClaimAutoFillCore;
 const Audit = globalThis.RGHSAuditCore;
 const AuditRules = globalThis.RGHSAuditRules;
@@ -19,9 +17,16 @@ const Review = globalThis.ClaimReviewCore;
 const ruleSetValidation = Audit && AuditRules && Audit.validateRuleSet
   ? Audit.validateRuleSet(AuditRules)
   : { ok: false, errors: ['Audit rule engine is unavailable'] };
-const APPLIED_SESSION_KEY = 'claimExtensionAppliedSummary';
 const DEBUG = globalThis.CLAIM_EXTENSION_DEBUG === true;
 let lastAuditBadgeCount = null;
+let invoicePatientValidation = { key: '', names: [], loading: false };
+const APPROVED_CONTROL_SELECTOR = [
+  '[name="packageFinalAmounts"]',
+  '[id^="packageFinalAmount_"]',
+  '[name="tpaapprovedAmount"]',
+  '[id^="tpaapprovedAmount_"]'
+].join(', ');
+const REMARKS_CONTROL_SELECTOR = '[id^="packageremarks_"], [id^="itemremarks_"]';
 
 function debugLog(...args) {
   if (DEBUG) console.log(...args);
@@ -242,6 +247,9 @@ function inspectPortalLayout() {
       const candidate = {
         particular: labels.findIndex(text => text === 'particular' || text === 'particulars'),
         claim: labels.findIndex(text => text.includes('claim') && (text.includes('amount') || text.includes('amt'))),
+        claimTotal: labels.findIndex(text => text.includes('claim') && text.includes('total')),
+        quantity: labels.findIndex(text => text === 'quantity' || text.startsWith('quantity ')),
+        p25: labels.findIndex(text => /\bp\s*25\b/i.test(text)),
         approved: labels.findIndex(text => (text.includes('approved') || text.includes('sanctioned')) && (text.includes('amount') || text.includes('amt'))),
         remarks: labels.findIndex(text => text === 'remarks' || text === 'remark')
       };
@@ -252,7 +260,7 @@ function inspectPortalLayout() {
       }
     }
 
-    const controls = [...table.querySelectorAll('[name="packageFinalAmounts"], [id^="packageFinalAmount_"]')];
+    const controls = [...table.querySelectorAll(APPROVED_CONTROL_SELECTOR)];
     let mappedApprovedControls = 0;
     let invalidMappings = 0;
     if (header && indices) {
@@ -261,11 +269,14 @@ function inspectPortalLayout() {
         const row = control.closest('tr');
         const cells = row ? [...row.querySelectorAll('td, th')] : [];
         const approvedControlIdx = cells.findIndex(cell => cell.contains(control));
+        const mappedClaimIdx = location.pathname.startsWith('/RGHS/tpaPharmacy')
+          ? indices.claimTotal
+          : indices.claim;
         const resolved = Core.resolveRowColumnIndices({
           cellCount: cells.length,
           headerCellCount,
           particularIdx: indices.particular,
-          claimIdx: indices.claim,
+          claimIdx: mappedClaimIdx,
           approvedIdx: indices.approved,
           remarksIdx: indices.remarks,
           approvedControlIdx
@@ -277,6 +288,7 @@ function inspectPortalLayout() {
 
     return {
       hasRequiredHeaders: Boolean(header && indices && indices.particular >= 0 && indices.claim >= 0 && indices.approved >= 0 && indices.remarks >= 0),
+      hasPharmacyHeaders: Boolean(header && indices && indices.claimTotal >= 0 && indices.quantity >= 0 && indices.p25 >= 0),
       dataRows: controls.length,
       approvedControls: controls.length,
       mappedApprovedControls,
@@ -326,10 +338,13 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   const licenceGate = evaluateLicenceGate(licenceState, apply);
   if (licenceGate.blocked) return blockedFillResult(licenceGate.reason);
 
-  if (location.pathname.startsWith('/RGHS/processSheetSearch/')) {
+  const isPharmacyPage = location.pathname.startsWith('/RGHS/tpaPharmacy');
+  if (location.pathname.startsWith('/RGHS/processSheetSearch/') || isPharmacyPage) {
     const layout = inspectPortalLayout();
     if (!layout.ok) return blockedFillResult('unsupported-layout', [layout.reason]);
-    if (!ruleSetValidation.ok) return blockedFillResult('invalid-rule-set', ruleSetValidation.errors);
+    if (!isPharmacyPage && !ruleSetValidation.ok) {
+      return blockedFillResult('invalid-rule-set', ruleSetValidation.errors);
+    }
   }
 
   debugLog('[Claim Auto-Fill] Starting auto-fill process...');
@@ -353,8 +368,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     let packageIdx = -1;
     let rateIdx = -1;
     let unitIdx = -1;
+    let quantityIdx = -1;
     let dateIdx = -1;
     let claimIdx = -1;
+    let claimTotalIdx = -1;
+    let p25Idx = -1;
     let approvedIdx = -1;
     let remarksIdx = -1;
 
@@ -376,6 +394,9 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (text.includes('unit') || text.includes('hours') || text.includes('days')) {
           unitIdx = i;
         }
+        if (text === 'quantity' || text.startsWith('quantity ')) {
+          quantityIdx = i;
+        }
         if (text.includes('date') && !text.includes('update')) {
           dateIdx = i;
         }
@@ -383,6 +404,12 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             text.match(/claim.*amt/i) ||
             (text.includes('payable') && text.includes('amount'))) {
           claimIdx = i;
+        }
+        if (text.includes('claim') && text.includes('total')) {
+          claimTotalIdx = i;
+        }
+        if (/\bp\s*25\b/i.test(text)) {
+          p25Idx = i;
         }
         if ((text.includes('approved') && text.includes('amount')) ||
             text.match(/approved.*amt/i) ||
@@ -404,8 +431,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         packageIdx = -1;
         rateIdx = -1;
         unitIdx = -1;
+        quantityIdx = -1;
         dateIdx = -1;
         claimIdx = -1;
+        claimTotalIdx = -1;
+        p25Idx = -1;
         approvedIdx = -1;
         remarksIdx = -1;
       }
@@ -427,15 +457,16 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       const cells = getDirectRowCells(row);
       dataRowNum++;
 
-      const approvedControl = row.querySelector('[name="packageFinalAmounts"], [id^="packageFinalAmount_"]');
-      const remarksControl = row.querySelector('[id^="packageremarks_"]');
+      const approvedControl = row.querySelector(APPROVED_CONTROL_SELECTOR);
+      const remarksControl = row.querySelector(REMARKS_CONTROL_SELECTOR);
       const approvedControlIdx = approvedControl ? [...cells].findIndex(cell => cell.contains(approvedControl)) : -1;
       const remarksControlIdx = remarksControl ? [...cells].findIndex(cell => cell.contains(remarksControl)) : -1;
+      const mappedClaimIdx = isPharmacyPage ? claimTotalIdx : claimIdx;
       const resolved = Core.resolveRowColumnIndices({
         cellCount: cells.length,
         headerCellCount,
         particularIdx,
-        claimIdx,
+        claimIdx: mappedClaimIdx,
         approvedIdx,
         remarksIdx,
         approvedControlIdx,
@@ -445,11 +476,13 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       const adjApprovedIdx = resolved.approvedIdx;
       const adjParticularIdx = resolved.particularIdx;
       const adjRemarksIdx = resolved.remarksIdx;
-      const offset = adjClaimIdx - claimIdx;
+      const offset = adjClaimIdx - mappedClaimIdx;
       const adjPackageIdx = packageIdx !== -1 ? packageIdx + offset : -1;
       const adjRateIdx = rateIdx !== -1 ? rateIdx + offset : -1;
       const adjUnitIdx = unitIdx !== -1 ? unitIdx + offset : -1;
+      const adjQuantityIdx = quantityIdx !== -1 ? quantityIdx + offset : -1;
       const adjDateIdx = dateIdx !== -1 ? dateIdx + offset : -1;
+      const adjP25Idx = p25Idx !== -1 ? p25Idx + offset : -1;
 
       if (cells.length <= Math.max(adjClaimIdx, adjApprovedIdx)) continue;
 
@@ -465,7 +498,9 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         : '';
       const rateValue = adjRateIdx !== -1 && adjRateIdx < cells.length ? getCellValue(cells[adjRateIdx]) : '';
       const unitValue = adjUnitIdx !== -1 && adjUnitIdx < cells.length ? getCellValue(cells[adjUnitIdx]) : '';
+      const quantityValue = adjQuantityIdx !== -1 && adjQuantityIdx < cells.length ? getCellValue(cells[adjQuantityIdx]) : '';
       const dateValue = adjDateIdx !== -1 && adjDateIdx < cells.length ? getCellValue(cells[adjDateIdx]) : '';
+      const p25Value = adjP25Idx !== -1 && adjP25Idx < cells.length ? getCellValue(cells[adjP25Idx]) : '';
       const remarksCell = adjRemarksIdx !== -1 && adjRemarksIdx < cells.length ? cells[adjRemarksIdx] : null;
 
       records.push({
@@ -480,14 +515,17 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         packageText,
         rateValue,
         unitValue,
+        quantityValue,
         dateValue,
+        p25Value,
         remarksValue: remarksCell ? getCellValue(remarksCell) : ''
       });
     }
 
     // Second pass: audit for unbundling/duplicates before any auto-fill
     const auditedRows = new Set();
-    if (Audit && AuditRules && auditMode !== 'off' && records.length > 0) {
+    const supportsPackageAudit = !isPharmacyPage;
+    if (supportsPackageAudit && Audit && AuditRules && auditMode !== 'off' && records.length > 0) {
       const lines = records.map(record => ({
         index: record.index,
         particularText: record.particularText,
@@ -636,14 +674,22 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     for (const record of records) {
       if (auditedRows.has(record.index)) continue;
 
-      const plan = Core.planRowUpdate({
-        claimValue: record.claimValue,
-        approvedValue: record.approvedValue,
-        particularText: record.particularText,
-        remarksValue: record.remarksValue
-      });
+      const plan = isPharmacyPage
+        ? Core.planPharmacyRowUpdate({
+            claimTotalValue: record.claimValue,
+            p25Value: record.p25Value,
+            quantityValue: record.quantityValue,
+            approvedValue: record.approvedValue,
+            remarksValue: record.remarksValue
+          })
+        : Core.planRowUpdate({
+            claimValue: record.claimValue,
+            approvedValue: record.approvedValue,
+            particularText: record.particularText,
+            remarksValue: record.remarksValue
+          });
 
-      if (plan.reason === 'invalid-or-zero-claim') continue;
+      if (plan.reason === 'invalid-or-zero-claim' || plan.reason === 'invalid-pharmacy-values') continue;
 
       if (plan.approvedValue !== null || plan.remarksValue !== null) {
         const key = `table-${tableIndex}-row-${record.index}`;
@@ -660,24 +706,29 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           proposedApproved,
           beforeRemarks: record.remarksValue,
           proposedRemarks: plan.remarksValue,
-          risk: plan.reason === 'medicine' ? 'medium' : 'low',
+          risk: plan.reason === 'medicine' || plan.reason === 'pharmacy-market-cap' ? 'medium' : 'low',
           reason: plan.reason === 'medicine'
             ? `${Core.DEDUCTION_PERCENT}% RGHS medicine deduction; rounded to nearest whole rupee`
-            : 'Copy eligible claim amount into the empty approved amount',
+            : plan.reason === 'pharmacy-market-cap'
+              ? 'Limit the approved amount to P25 multiplied by quantity'
+              : plan.reason === 'pharmacy-claim-below-market'
+                ? 'Approve the lower Claim Total at the prevailing market price'
+                : 'Copy eligible claim amount into the empty approved amount',
           ruleIds: plan.reason === 'medicine' ? ['RGHS-MEDICINE-12'] : []
         });
         rowElements.set(key, record.rowEl);
         if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
       }
 
-      // Only fill if approved is empty or "0"
+      // Apply the row plan. Hospital plans preserve existing nonzero approvals;
+      // Pharmacy plans intentionally replace the portal's prefilled claim total.
       if (plan.approvedValue !== null) {
         if (apply) setCellValue(record.approvedCell, plan.approvedValue, batch);
         approvedCount++;
         debugLog(`[Claim Auto-Fill] Row ${record.index}: Planned approved amount "${plan.approvedValue}"`);
       }
 
-      // Fill remarks for medicine rows
+      // Apply any rule-specific remark without touching rows that need none.
       if (record.remarksCell && plan.remarksValue !== null) {
         if (apply) setCellValue(record.remarksCell, plan.remarksValue, batch);
         remarksCount++;
@@ -858,18 +909,6 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
     return { ...result, rowElements: undefined, proposals: undefined };
   }
   const ruleIds = [...new Set(selected.flatMap(proposal => proposal.ruleIds || []))];
-  lastAppliedSummary = {
-    createdAt: Date.now(),
-    path: location.pathname,
-    tid: findTid(),
-    selectedRows: selected.length,
-    changedFields: result.changedFieldCount,
-    highRiskCount: validation.totals.highRiskCount,
-    proposedApprovedTotal: validation.totals.proposedApprovedTotal,
-    deductionTotal: validation.totals.deductionTotal,
-    ruleIds
-  };
-  sessionStorage.setItem(APPLIED_SESSION_KEY, JSON.stringify(lastAppliedSummary));
   appendClaimActivity('apply', { rowCount: selected.length, fieldCount: result.changedFieldCount, totals: validation.totals, ruleIds });
   lastPreview = null;
   previewRowElements = new Map();
@@ -920,8 +959,172 @@ function highlightDecisionRows(approvedByKey = {}) {
   }
 }
 
+function ensurePharmacyValidationStyles() {
+  if (document.getElementById('claim-extension-pharmacy-validation-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'claim-extension-pharmacy-validation-styles';
+  style.textContent = [
+    '.claim-extension-tablet-highlight { background:#dc2626 !important; color:#fff !important; font-weight:800 !important; border-radius:3px; padding:1px 3px; box-shadow:0 0 0 1px #991b1b; }',
+    '.claim-extension-name-mismatch { background:#fecaca !important; color:#991b1b !important; font-weight:800 !important; border-radius:3px; padding:1px 2px; }',
+    '.claim-extension-invoice-mismatch { background:#fee2e2 !important; color:#991b1b !important; outline:2px solid #dc2626 !important; outline-offset:2px; }'
+  ].join('\n');
+  (document.head || document.documentElement).appendChild(style);
+}
+
+function removeTextHighlights(root, className) {
+  if (!root?.querySelectorAll) return;
+  for (const span of root.querySelectorAll(`span.${className}`)) {
+    const parent = span.parentNode;
+    span.replaceWith(document.createTextNode(span.textContent));
+    parent?.normalize?.();
+  }
+}
+
+function highlightPlainText(element, text, className, title) {
+  if (!element || element.childElementCount > 0 || element.querySelector(`span.${className}`)) return false;
+  const source = element.textContent;
+  const index = source.indexOf(text);
+  if (index < 0 || !text) return false;
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  span.title = title;
+  element.replaceChildren(
+    document.createTextNode(source.slice(0, index)),
+    span,
+    document.createTextNode(source.slice(index + text.length))
+  );
+  return true;
+}
+
+function findCurrentPatientNameCell() {
+  const table = document.getElementById('patiendetailtable');
+  if (!table) return null;
+  const header = [...table.querySelectorAll('tr')].find(row =>
+    [...row.querySelectorAll('th, td')].some(cell => cell.textContent.trim().toLowerCase() === 'patient name'));
+  if (!header) return null;
+  const labels = [...header.querySelectorAll('th, td')].map(cell => cell.textContent.trim().toLowerCase());
+  const nameIndex = labels.indexOf('patient name');
+  const transactionIndex = labels.findIndex(label => label === 'transaction id');
+  const activeTransaction = String(document.getElementById('transid')?.value || '').replace(/\W/g, '');
+  const rows = [...table.querySelectorAll('tbody tr')].filter(row => row !== header);
+  const row = rows.find(candidate => {
+    if (!activeTransaction || transactionIndex < 0) return false;
+    const cells = [...candidate.querySelectorAll(':scope > td, :scope > th')];
+    return String(cells[transactionIndex]?.textContent || '').replace(/\W/g, '') === activeTransaction;
+  }) || (rows.length === 1 ? rows[0] : null);
+  const cells = row ? [...row.querySelectorAll(':scope > td, :scope > th')] : [];
+  const cell = cells[nameIndex];
+  const value = cell?.textContent?.trim() || '';
+  return cell && value ? { cell, value } : null;
+}
+
+function findInvoiceValidationDescriptor() {
+  const links = [...document.querySelectorAll('a[onclick*="openInvoicePopUp"]')];
+  const link = links.find(element => element.getClientRects().length > 0) || links[0];
+  const match = link?.getAttribute('onclick')?.match(/openInvoicePopUp\(\s*['"]?(\d+)/i);
+  return match ? { key: match[1], link } : null;
+}
+
+function extractInvoicePatientEntries(root) {
+  if (!root?.querySelectorAll) return [];
+  return [...root.querySelectorAll('td.header-col-3-left')].flatMap(cell => {
+    const match = cell.textContent.match(/^\s*patient\s*:\s*(.+?)\s*$/i);
+    return match?.[1]?.trim() ? [{ cell, value: match[1].trim() }] : [];
+  });
+}
+
+function clearPatientMismatchHighlights() {
+  removeTextHighlights(document, 'claim-extension-name-mismatch');
+  for (const link of document.querySelectorAll('.claim-extension-invoice-mismatch')) {
+    link.classList.remove('claim-extension-invoice-mismatch');
+    link.removeAttribute('data-claim-extension-name-mismatch');
+    if (link.title === 'Patient name differs from Patient Data') link.removeAttribute('title');
+  }
+}
+
+function applyPatientNameValidation(descriptor) {
+  const patient = findCurrentPatientNameCell();
+  if (!patient || !descriptor || invoicePatientValidation.key !== descriptor.key
+      || invoicePatientValidation.names.length === 0) return;
+
+  const mismatch = invoicePatientValidation.names.some(name => !Core.patientNamesMatch(patient.value, name));
+  if (!mismatch) {
+    clearPatientMismatchHighlights();
+    return;
+  }
+
+  ensurePharmacyValidationStyles();
+  highlightPlainText(patient.cell, patient.value, 'claim-extension-name-mismatch',
+    'Patient name differs from the invoice');
+  descriptor.link.classList.add('claim-extension-invoice-mismatch');
+  descriptor.link.dataset.claimExtensionNameMismatch = 'true';
+  descriptor.link.title = 'Patient name differs from Patient Data';
+
+  for (const entry of extractInvoicePatientEntries(document.getElementById('invoicedtls'))) {
+    if (Core.patientNamesMatch(patient.value, entry.value)) continue;
+    highlightPlainText(entry.cell, entry.value, 'claim-extension-name-mismatch',
+      'Invoice patient name differs from Patient Data');
+  }
+}
+
+function requestInvoicePatientValidation(descriptor) {
+  if (!descriptor) return;
+  if (invoicePatientValidation.key !== descriptor.key) {
+    clearPatientMismatchHighlights();
+    invoicePatientValidation = { key: descriptor.key, names: [], loading: false };
+  }
+  if (invoicePatientValidation.loading || invoicePatientValidation.names.length > 0) {
+    applyPatientNameValidation(descriptor);
+    return;
+  }
+
+  invoicePatientValidation.loading = true;
+  const requestKey = descriptor.key;
+  const url = new URL('/RGHS/simsinvoiceDoc', location.origin);
+  url.searchParams.set('id', requestKey);
+  fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(response => response.ok ? response.text() : Promise.reject(new Error('invoice-request-failed')))
+    .then(html => {
+      if (html.length > 2 * 1024 * 1024) throw new Error('invoice-response-too-large');
+      const parsed = new globalThis.DOMParser().parseFromString(html, 'text/html');
+      const names = extractInvoicePatientEntries(parsed).map(entry => entry.value);
+      if (invoicePatientValidation.key !== requestKey) return;
+      invoicePatientValidation = { key: requestKey, names, loading: false };
+      applyPatientNameValidation(findInvoiceValidationDescriptor());
+    })
+    .catch(() => {
+      if (invoicePatientValidation.key === requestKey) {
+        invoicePatientValidation = { key: requestKey, names: [], loading: false };
+      }
+    });
+}
+
+function refreshPharmacyValidations() {
+  if (!location.pathname.startsWith('/RGHS/tpaPharmacy')) return;
+  if (!isAutoFillEnabled) {
+    removeTextHighlights(document, 'claim-extension-tablet-highlight');
+    clearPatientMismatchHighlights();
+    return;
+  }
+
+  ensurePharmacyValidationStyles();
+  for (const cell of document.querySelectorAll('#processSheetTable [id^="particular_"]')) {
+    const drugName = Core.getTabletOneByOneDrugName(cell.textContent);
+    if (drugName) {
+      highlightPlainText(cell, drugName, 'claim-extension-tablet-highlight',
+        'Review tablet packaging for Tab 1×1 dosage');
+    } else {
+      removeTextHighlights(cell, 'claim-extension-tablet-highlight');
+    }
+  }
+
+  requestInvoicePatientValidation(findInvoiceValidationDescriptor());
+}
+
 function refreshPassiveAuditHighlights() {
   if (!Core.isSupportedClaimPage(location.pathname)) return;
+  refreshPharmacyValidations();
   for (const row of document.querySelectorAll('tr.rghs-audit-passive')) {
     row.classList.remove('rghs-audit-passive');
   }
@@ -952,6 +1155,11 @@ function installPassiveAuditObserver() {
 
 let cachedTid;
 function findTid() {
+  // Pharmacy claims share one route and replace the selected transaction in
+  // place. Read its live hidden identifier on every call so recovery data from
+  // a previously opened claim cannot be reused for the next one.
+  const pharmacyTid = document.getElementById?.('transid')?.value?.trim();
+  if (pharmacyTid) return pharmacyTid;
   if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
   // Process sheets label the claim "TID: <code>"; tpaOPD labels it
@@ -1011,132 +1219,6 @@ function appendClaimActivity(event, details = {}) {
     ruleIds: [...new Set((details.ruleIds || []).map(String))]
   };
   appendStorageEntries('claimActivityLog', [entry]);
-}
-
-function clearAppliedSummary() {
-  lastAppliedSummary = null;
-  sessionStorage.removeItem(APPLIED_SESSION_KEY);
-}
-
-function normalizeNonnegativeNumber(value, integer = false) {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) return 0;
-  return integer ? Math.floor(number) : number;
-}
-
-function normalizeAppliedSummary(saved) {
-  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null;
-  return {
-    createdAt: normalizeNonnegativeNumber(saved.createdAt, true),
-    path: String(saved.path || ''),
-    tid: String(saved.tid || ''),
-    selectedRows: normalizeNonnegativeNumber(saved.selectedRows, true),
-    changedFields: normalizeNonnegativeNumber(saved.changedFields, true),
-    highRiskCount: normalizeNonnegativeNumber(saved.highRiskCount, true),
-    proposedApprovedTotal: normalizeNonnegativeNumber(saved.proposedApprovedTotal),
-    deductionTotal: normalizeNonnegativeNumber(saved.deductionTotal),
-    ruleIds: Array.isArray(saved.ruleIds) ? saved.ruleIds.map(String).slice(0, 100) : []
-  };
-}
-
-function restoreAppliedSummary() {
-  try {
-    const saved = normalizeAppliedSummary(JSON.parse(sessionStorage.getItem(APPLIED_SESSION_KEY) || 'null'));
-    const age = saved ? Date.now() - saved.createdAt : -1;
-    // Path alone identifies the claim on process sheets (one path per claim) but
-    // not on tpaOPD, where every claim shares the same path - the TID is the only
-    // thing that tells two different claims apart there, so require it to agree
-    // whenever both sides actually have one.
-    const currentTid = findTid();
-    const tidCompatible = saved && (!saved.tid || !currentTid || saved.tid === currentTid);
-    if (saved && saved.path === location.pathname && tidCompatible && age >= 0 && age < 24 * 60 * 60 * 1000) {
-      lastAppliedSummary = saved;
-    } else {
-      sessionStorage.removeItem(APPLIED_SESSION_KEY);
-    }
-  } catch (_) {
-    sessionStorage.removeItem(APPLIED_SESSION_KEY);
-  }
-}
-
-function isPortalSubmitControl(target) {
-  const control = target?.closest?.('button, input[type="submit"], input[type="button"]');
-  if (!control) return false;
-  const label = String(control.textContent || control.value || '').replace(/\s+/g, ' ').trim();
-  if (/\bsubmit\b/i.test(label)) return true;
-
-  // Do not trust control.type: HTML gives <button> without a type attribute the
-  // computed type "submit", which would intercept unrelated portal buttons.
-  const isExplicitSubmit = control.matches?.('input[type="submit"], button[type="submit"]') === true;
-  const form = control.form;
-  if (!isExplicitSubmit || !form) return false;
-  const formIdentity = `${form.id || ''} ${form.name || ''} ${form.getAttribute?.('action') || ''}`;
-  const containsClaimAmounts = Boolean(form.querySelector?.(
-    '[name="packageFinalAmounts"], [id^="packageFinalAmount_"]'
-  ));
-  return containsClaimAmounts || /\b(?:claim|process.?sheet)\b/i.test(formIdentity);
-}
-
-function showSubmissionInterlock() {
-  let host = document.getElementById('claim-extension-submit-guard');
-  if (host) return;
-  const summary = lastAppliedSummary;
-  host = document.createElement('div');
-  host.id = 'claim-extension-submit-guard';
-  host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:rgba(15,23,42,.55);';
-  const shadow = host.attachShadow({ mode: 'closed' });
-  shadow.innerHTML = `
-    <style>
-      *{box-sizing:border-box}.card{width:min(480px,calc(100vw - 32px));padding:20px;border-radius:16px;background:#fff;color:#172554;box-shadow:0 20px 60px rgba(0,0,0,.35);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.title{font-size:18px;font-weight:800;color:#991b1b}.summary{margin:12px 0;padding:12px;border-radius:10px;background:#fff7ed}.ack{display:flex;gap:9px;align-items:flex-start;margin:14px 0;font-weight:650}.actions{display:flex;gap:9px;justify-content:flex-end}button{border:0;border-radius:9px;padding:10px 13px;cursor:pointer;font-weight:750}.cancel{background:#e2e8f0;color:#334155}.continue{background:#b91c1c;color:#fff}.continue:disabled{opacity:.45;cursor:not-allowed}
-    </style>
-    <section class="card" role="alertdialog" aria-modal="true" aria-labelledby="guard-title">
-      <div class="title" id="guard-title">Final claim review required</div>
-      <p>Claim Extension changed fields on this process sheet. Submission remains blocked until you acknowledge the final review.</p>
-      <div class="summary">Selected rows: <strong data-summary="selectedRows"></strong><br>Changed fields: <strong data-summary="changedFields"></strong><br>Proposed approved total: <strong data-summary="proposedApprovedTotal"></strong><br>Claim-proposed difference: <strong data-summary="deductionTotal"></strong><br>High-risk rows: <strong data-summary="highRiskCount"></strong></div>
-      <label class="ack"><input type="checkbox">I reviewed the approved amounts, deductions, remarks, and high-risk findings.</label>
-      <div class="actions"><button class="cancel" type="button">Return to claim</button><button class="continue" type="button" disabled>Allow next Submit click</button></div>
-    </section>`;
-  const summaryValues = {
-    selectedRows: summary.selectedRows,
-    changedFields: summary.changedFields,
-    proposedApprovedTotal: summary.proposedApprovedTotal,
-    deductionTotal: summary.deductionTotal,
-    highRiskCount: summary.highRiskCount
-  };
-  for (const [key, value] of Object.entries(summaryValues)) {
-    const prefix = key === 'proposedApprovedTotal' || key === 'deductionTotal' ? 'Rs. ' : '';
-    shadow.querySelector(`[data-summary="${key}"]`).textContent = prefix + String(value);
-  }
-  const checkbox = shadow.querySelector('input');
-  const continueButton = shadow.querySelector('.continue');
-  checkbox.addEventListener('change', () => { continueButton.disabled = !checkbox.checked; });
-  shadow.querySelector('.cancel').addEventListener('click', () => host.remove());
-  continueButton.addEventListener('click', () => {
-    submitArmedUntil = Date.now() + 2 * 60 * 1000;
-    appendClaimActivity('submit-acknowledged', { rowCount: summary.selectedRows, fieldCount: summary.changedFields, ruleIds: summary.ruleIds });
-    host.remove();
-  });
-  document.documentElement.appendChild(host);
-  checkbox.focus();
-}
-
-function installSubmissionInterlock() {
-  if (!Core.isSupportedClaimPage(location.pathname)) return;
-  restoreAppliedSummary();
-  document.addEventListener('click', event => {
-    if (!lastAppliedSummary || !isPortalSubmitControl(event.target) || Date.now() < submitArmedUntil) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    appendClaimActivity('submit-blocked', { rowCount: lastAppliedSummary.selectedRows, fieldCount: lastAppliedSummary.changedFields, ruleIds: lastAppliedSummary.ruleIds });
-    showSubmissionInterlock();
-  }, true);
-  document.addEventListener('submit', event => {
-    if (!lastAppliedSummary || Date.now() < submitArmedUntil) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    appendClaimActivity('submit-blocked', { rowCount: lastAppliedSummary.selectedRows, fieldCount: lastAppliedSummary.changedFields, ruleIds: lastAppliedSummary.ruleIds });
-    showSubmissionInterlock();
-  }, true);
 }
 
 // Auditor feedback buttons: confirm keeps the flag, dismiss records a false
@@ -1241,7 +1323,6 @@ function restorePersistentSnapshot() {
       const fullyRestored = count === snapshot.entries.length;
       if (fullyRestored) {
         queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
-        clearAppliedSummary();
       }
       appendClaimActivity('restore', { fieldCount: count });
       resolve({ count, hasRecovery: !fullyRestored });
@@ -1264,7 +1345,6 @@ function undoLastFill() {
     count++;
   }
   if (count > 0) {
-    clearAppliedSummary();
     appendClaimActivity('undo', { fieldCount: count });
     if (count === batch.length) {
       getMatchingRecoverySnapshot(snapshot => {
@@ -1309,5 +1389,4 @@ globalThis.ClaimAutoFillActions = {
   }
 };
 
-installSubmissionInterlock();
 installPassiveAuditObserver();

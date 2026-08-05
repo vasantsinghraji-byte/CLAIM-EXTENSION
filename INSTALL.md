@@ -1,6 +1,6 @@
 # Install Claim Amount Auto-Fill
 
-Current release: **1.9.1**
+Current release: **1.11.0**
 
 Before building from source, create the ignored
 `.firebase-build-config.json` described in `DEVELOPMENT.md`. Never commit that

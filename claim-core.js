@@ -13,12 +13,17 @@
   ];
   const DEDUCTION_REMARK = '12% DEDUCTED AS PER RGHS GUIDELINES';
   const DEDUCTION_PERCENT = 12;
+  const PHARMACY_MARKET_PRICE_REMARK = 'Approved As per prevailing market price.';
 
   // RGHS claim workflows this extension actively assists with. Passive
-  // features (floating widget, passive audit highlights, submit interlock)
+  // features (floating widget and passive audit highlights)
   // only arm on these pages; strict process-sheet layout validation stays
   // scoped separately since it relies on that page's specific DOM quirks.
-  const SUPPORTED_CLAIM_PATH_PREFIXES = ['/RGHS/processSheetSearch/', '/RGHS/tpaOPD'];
+  const SUPPORTED_CLAIM_PATH_PREFIXES = [
+    '/RGHS/processSheetSearch/',
+    '/RGHS/tpaOPD',
+    '/RGHS/tpaPharmacy'
+  ];
 
   function isSupportedClaimPage(pathname) {
     const path = String(pathname || '');
@@ -70,6 +75,67 @@
     return { approvedValue: approved, remarksValue: remarks, reason: medicine ? 'medicine' : 'standard' };
   }
 
+  function planPharmacyRowUpdate({ claimTotalValue, p25Value, quantityValue, approvedValue, remarksValue }) {
+    const claimTotal = parseAmount(claimTotalValue);
+    const p25 = parseAmount(p25Value);
+    const quantity = parseAmount(quantityValue);
+    if (claimTotal === null || claimTotal === 0 || p25 === null || p25 === 0
+        || quantity === null || quantity === 0) {
+      return { approvedValue: null, remarksValue: null, reason: 'invalid-pharmacy-values' };
+    }
+
+    const marketPrice = Math.round(p25 * quantity * 100) / 100;
+    const approvedAmount = Math.min(claimTotal, marketPrice);
+    const currentApproved = parseAmount(approvedValue);
+    const approved = currentApproved === approvedAmount ? null : String(approvedAmount);
+    const marketPriceCapApplied = marketPrice < claimTotal;
+    const existingRemarks = String(remarksValue ?? '').trim();
+    const remarks = marketPriceCapApplied
+      && !existingRemarks.toLowerCase().includes(PHARMACY_MARKET_PRICE_REMARK.toLowerCase())
+      ? `${existingRemarks}${existingRemarks ? '; ' : ''}${PHARMACY_MARKET_PRICE_REMARK}`
+      : null;
+
+    return {
+      approvedValue: approved,
+      remarksValue: remarks,
+      reason: marketPriceCapApplied ? 'pharmacy-market-cap' : 'pharmacy-claim-below-market'
+    };
+  }
+
+  function getTabletOneByOneDrugName(value) {
+    const text = String(value ?? '');
+    const instruction = /\btab(?:let)?\s*1\s*[*x×]\s*1\b/i.exec(text);
+    if (!instruction) return null;
+
+    const prefix = text.slice(0, instruction.index);
+    if (/\b(?:syp|syrup|inj|injection|cap|capsule|susp|suspension|cream|ointment|gel|drops?|lotion|powder)\b/i.test(prefix)) {
+      return null;
+    }
+
+    const tabletForm = /\btab(?:let)?\b/i.exec(prefix);
+    const end = tabletForm
+      ? tabletForm.index + tabletForm[0].length
+      : instruction.index + instruction[0].match(/^tab(?:let)?/i)[0].length;
+    const drugName = text.slice(0, end).trim();
+    return drugName || null;
+  }
+
+  function normalizePatientName(value) {
+    return String(value ?? '')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  function patientNamesMatch(first, second) {
+    const normalizedFirst = normalizePatientName(first);
+    const normalizedSecond = normalizePatientName(second);
+    return Boolean(normalizedFirst && normalizedSecond && normalizedFirst === normalizedSecond);
+  }
+
   function resolveRowColumnIndices({
     cellCount,
     headerCellCount,
@@ -110,11 +176,16 @@
   }
 
   function validatePortalLayoutDescriptor(descriptor = {}) {
-    if (!String(descriptor.pathname || '').startsWith('/RGHS/processSheetSearch/')) {
+    const pathname = String(descriptor.pathname || '');
+    const pharmacy = pathname.startsWith('/RGHS/tpaPharmacy');
+    const requiresStrictMapping = pathname.startsWith('/RGHS/processSheetSearch/') || pharmacy;
+    if (!requiresStrictMapping) {
       return { ok: true, reason: null };
     }
     const tables = Array.isArray(descriptor.tables) ? descriptor.tables : [];
-    const compatible = tables.filter(table => table.hasRequiredHeaders === true && table.approvedControls > 0);
+    const compatible = tables.filter(table => table.hasRequiredHeaders === true
+      && (!pharmacy || table.hasPharmacyHeaders === true)
+      && table.approvedControls > 0);
     if (compatible.length !== 1) return { ok: false, reason: 'expected-one-claim-table' };
     const table = compatible[0];
     if (table.dataRows < 1) return { ok: false, reason: 'missing-claim-rows' };
@@ -127,12 +198,17 @@
   return {
     DEDUCTION_PERCENT,
     DEDUCTION_REMARK,
+    PHARMACY_MARKET_PRICE_REMARK,
     MEDICINE_KEYWORDS,
     parseAmount,
     calculateMedicineApprovedAmount,
     isMedicineRow,
     isEmptyApprovedValue,
     planRowUpdate,
+    planPharmacyRowUpdate,
+    getTabletOneByOneDrugName,
+    normalizePatientName,
+    patientNamesMatch,
     resolveRowColumnIndices,
     createDebouncedProcessor,
     validatePortalLayoutDescriptor,
