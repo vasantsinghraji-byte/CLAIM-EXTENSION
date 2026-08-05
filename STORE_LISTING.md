@@ -1,6 +1,6 @@
 # Chrome Web Store listing pack
 
-Prepared from the controlled Manifest V3 release candidate for version 1.9.1.
+Prepared from the controlled Manifest V3 release candidate for version 1.11.0.
 The package targets the isolated production Firebase project; Web Store upload
 remains blocked until the Phase 4 human-controlled activation gates pass.
 

@@ -14,7 +14,7 @@ See `docs/PHASE_0_BASELINE.md`, `docs/PHASE_1_FIREBASE_FOUNDATION.md`,
 
 Target users: Approximately 50 authorized RGHS claim processors
 
-Current release: Manifest V3 extension version 1.10.0
+Current release: Manifest V3 extension version 1.11.0
 
 Recommended first milestone: Invite-only, non-AI MVP
 

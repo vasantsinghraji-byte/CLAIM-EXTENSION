@@ -4,7 +4,7 @@ An invite-only Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Current release: **1.10.1**. Phase 4 adds production-isolated packaging and a
+Current release: **1.11.0**. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
 organizations, account deletion and audit-event viewing. The Firebase-hosted
 dashboard is the primary production interface; the popup panel is retained as
@@ -239,11 +239,10 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 ### Safety and release controls
 
 - Real RGHS process sheets must match the supported header and input mapping before Preview or Apply is allowed.
-- If Claim Extension is turned off after Preview, Apply returns an explicit `autofill-disabled` block; it records no applied summary and cannot arm the submission interlock with empty or undefined counts.
+- If Claim Extension is turned off after Preview, Apply returns an explicit `autofill-disabled` block and performs no portal writes.
 - On compatible non-table layouts, claim/approved name and ID matching emits ordinary low-risk review proposals with stable keys; it never bypasses Preview, selection, Apply, Undo, or recovery.
 - Table scanning assigns nested markup to one owning table and enumerates only direct rows and cells, preventing duplicate proposals or writes against the same nested DOM controls.
 - Approved money fields receive normalized numeric text from the validated amount (`1,23,450.00` becomes `123450`), avoiding grouped-digit ambiguity in portal validation and server parsing.
-- The submission interlock guards labelled submit controls and explicit submitters attached to the claim form. Native programmatic `form.submit()` does not emit a submit event and cannot be intercepted by a content-script event listener; this remains a documented portal-integration limitation.
 - Activity, audit, feedback, and recovery appends are serialized by the background service worker with a queue per storage key, preventing concurrent RGHS tabs from overwriting one another's entries.
 - Saved recovery snapshots are removed only after every saved control is restored. Zero-field and partial restores retain the snapshot so an SPA can finish rendering before another recovery attempt.
 - TID detection retries after early SPA misses and caches only a successfully detected identifier, preserving TID-based audit and recovery matching when claim details render late.
@@ -254,8 +253,7 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 - Fixed unbundling findings reserve both the main package and every separately billed component from ordinary autofill; only the configured target can receive a deduction after explicit high-risk review.
 - `tools/matrix-coverage.json` maps every one of the 47 workbook Risk Matrix rows to executable rules. The build fails if a workbook row, title, or rule mapping drifts.
 - Documentation-dependent upcoding risks (fracture extent, radical hysterectomy, fusion/fixation, burns severity, radiotherapy fractions, multi-trauma extent, cataract/SFIOL technique, and pacemaker/CRT configuration) create review-only proposals even when no second billed component is present.
-- After extension-applied changes, Submit is intercepted until the reviewer acknowledges a final totals summary. The extension never clicks or submits the portal form.
-- Restored submission summaries are type-normalized from page-origin session storage, checked for valid age/path, and rendered into the safety dialog only with `textContent`; stored markup cannot alter the trusted review UI.
+- Portal Submit controls are left untouched after extension-applied changes, so IPD, OPD, and Pharmacy claims retain their normal one-click submission behavior.
 - The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
 - Use `npm run release -- patch`, `minor`, or `major` to align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256.
 

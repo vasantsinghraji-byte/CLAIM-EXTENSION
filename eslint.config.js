@@ -51,6 +51,7 @@ module.exports = [
       'dist/**',
       'hosting-build/**',
       'node_modules/**',
+      '.tools/**',
       'privacy-site/**',
       'functions/node_modules/**'
     ]

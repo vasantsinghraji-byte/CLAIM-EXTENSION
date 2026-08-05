@@ -102,7 +102,7 @@ test('fallback preview counts only emitted proposals and never performs a write'
   assert.doesNotMatch(fallback, /: claimVal;/);
 });
 
-test('disabled apply returns a complete blocked result and cannot record an applied summary', () => {
+test('disabled apply returns a complete blocked result and cannot record an apply event', () => {
   const blockedResult = source.slice(
     source.indexOf('function blockedFillResult'),
     source.indexOf('// Fill all approved amounts')
@@ -115,8 +115,8 @@ test('disabled apply returns a complete blocked result and cannot record an appl
     source.indexOf('function clearDecisionHighlights')
   );
   assert.ok(
-    reviewedApply.indexOf('if (result.blocked)') < reviewedApply.indexOf('lastAppliedSummary ='),
-    'a disabled apply must return before persisting an applied summary'
+    reviewedApply.indexOf('if (result.blocked)') < reviewedApply.indexOf("appendClaimActivity('apply'"),
+    'a disabled apply must return before recording a successful apply event'
   );
 });
 

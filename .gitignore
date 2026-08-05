@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 tools/vendor/
+.tools/
 
 # Build output
 dist/

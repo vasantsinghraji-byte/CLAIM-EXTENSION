@@ -25,11 +25,11 @@ Editable extension files live at the repository root. Generated files live in `d
 - `popup.html`, `popup.css`, `popup.js`: preview/apply/undo interface
 - `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from RGHS styles
 
-Claim Spark supports the verified `/RGHS/processSheetSearch/` and
-`/RGHS/tpaOPD*` workflows. It starts hidden until the stored claim-tools
+Claim Spark supports the verified `/RGHS/processSheetSearch/`,
+`/RGHS/tpaOPD*`, and `/RGHS/tpaPharmacy*` workflows. It starts hidden until the stored claim-tools
 setting is read, then follows enabled-state events from the content script.
 
-Production process-sheet routes fail closed when the expected claim table headers or stable approved controls cannot be mapped. Audit rule data is schema-validated before claim processing. Submission acknowledgement only arms the next user-initiated portal Submit; extension code never submits the form.
+Production process-sheet routes fail closed when the expected claim table headers or stable approved controls cannot be mapped. Audit rule data is schema-validated before claim processing. Portal submission controls are not intercepted or modified by the extension.
 Its drag position is clamped to the viewport and stored in `chrome.storage.local` as `claimSparkPosition`. The action panel flips below or right when the mascot is near an edge.
 
 ## Manual-commit safety contract
@@ -67,7 +67,11 @@ The build fails when a required production file is missing. It produces a determ
 
 `npm test` covers normal claims, medicine deduction and whole-rupee rounding, existing approvals, existing remarks, malformed amounts, Indian currency formatting, and debounced dynamic-row processing.
 
-The RGHS process sheet has hidden leading and trailing data cells that do not align one-for-one with its visible headers. Row mapping therefore anchors to `name="packageFinalAmounts"` / `id="packageFinalAmount_*"` and `id="packageremarks_*"`, with generic header mapping retained for other supported tables.
+RGHS process sheets have hidden leading and trailing data cells that do not align one-for-one with their visible headers. Hospital row mapping therefore anchors to `name="packageFinalAmounts"` / `id="packageFinalAmount_*"` and `id="packageremarks_*"`. Pharmacy row mapping anchors to `name="tpaapprovedAmount"` / `id="tpaapprovedAmount_*"` and `id="itemremarks_*"`. Generic header mapping remains available for other supported tables.
+
+Pharmacy approvals use the lower of Claim Total and P25 multiplied by Quantity. When the P25 multiplied by Quantity cap is lower, the item remark records `Approved As per prevailing market price.` A lower Claim Total is approved without that market-price remark. Existing Pharmacy approvals are recalculated because the portal initially pre-populates them from the claim total; hospital approvals retain their existing preserve-nonzero behavior.
+
+Pharmacy validation highlights only the drug-name prefix through `TAB` when a `Tab 1×1` instruction is present; non-tablet dosage forms are excluded. Patient names are compared locally between the active Patient Data row and the same-origin invoice HTML. Case, punctuation, accents, and repeated whitespace are normalized. Mismatches highlight both name locations and the invoice View link; patient names are never persisted or logged.
 
 For a release, also verify in a clean RGHS session that controlled inputs accept the `input` and `change` events, preview counts match visible fields, undo restores them, and dynamically inserted rows are filled once.
 

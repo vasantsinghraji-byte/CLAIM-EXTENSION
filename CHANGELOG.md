@@ -173,3 +173,7 @@
 ## 1.10.0 - 2026-07-27
 
 - Complete the production-readiness, recovery-drill and controlled-distribution documentation for the approved minimum-data release.
+
+## 1.11.0 - 2026-08-05
+
+- Add Pharmacy autofill using the P25-by-quantity cap, tablet and patient-name discrepancy highlighting, and restore native one-click claim submission across IPD, OPD, and Pharmacy.
