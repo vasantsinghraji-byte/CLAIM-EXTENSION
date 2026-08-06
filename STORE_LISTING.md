@@ -202,7 +202,7 @@ Store User Data Policy, including the Limited Use requirements.
 
 ## Distribution
 
-- Visibility: **Unlisted** for the controlled initial release.
+- Visibility: **Public**.
 - Regions: **India** only, unless the publisher has a documented need for other
   regions.
 - Pricing: **Free**.
@@ -259,8 +259,7 @@ patient or claim data.
 
 ### Distribution and submission
 
-- [ ] Select **Unlisted**, **India**, and **Free** for the controlled initial
-      release.
+- [x] Select **Public**, **India**, and **Free** for version 1.11.0.
 - [ ] Keep automatic publishing off for the first review.
 - [ ] Confirm the publisher contact email is verified and monitored.
 - [ ] Confirm all dashboard tabs show no blocking errors.
