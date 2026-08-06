@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 
 const ROLES = Object.freeze(['processor', 'organizationAdmin', 'platformAdmin']);
 const INVITABLE_ROLES = Object.freeze(['processor', 'organizationAdmin']);
-const ACCOUNT_STATUSES = Object.freeze(['invited', 'active', 'suspended', 'deleted']);
+const ACCOUNT_STATUSES = Object.freeze(['invited', 'active', 'rejected', 'suspended', 'deleted']);
 const LICENCE_STATUSES = Object.freeze(['active', 'suspended', 'expired']);
 const ORGANIZATION_STATUSES = Object.freeze(['active', 'suspended']);
 const EVENT_ACTIONS = Object.freeze([

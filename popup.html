@@ -25,7 +25,7 @@
         <input type="password" id="signUpPassword" name="signUpPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
         <input type="password" id="signUpConfirmPassword" name="signUpConfirmPassword" placeholder="Confirm password" autocomplete="new-password">
         <input type="text" id="signUpDisplayName" name="signUpDisplayName" placeholder="Your name">
-        <p class="auth-help">Use the same email address your administrator invited. You will verify that email once; no invitation code is required.</p>
+        <p class="auth-help">Create your processor account and verify the email once. No invitation code is required. Your administrator will approve the verified account from the dashboard.</p>
         <button id="signUpBtn" class="btn btn-primary">Create Account</button>
         <p class="auth-link"><a href="#" id="showSignInLink">Already have an account? Sign in</a></p>
       </div>
@@ -46,7 +46,7 @@
         <p class="auth-link"><a href="#" id="cancelSignUpLink2">Start over</a></p>
       </div>
       <div id="authAwaitingActivation" class="auth-section" hidden>
-        <p>Invitation accepted. Waiting for your administrator to activate your account.</p>
+        <p>Email verified. Waiting for your administrator to approve your account.</p>
         <button id="checkActivationBtn" class="btn btn-secondary btn-small">Check Status</button>
         <p class="auth-link"><a href="#" id="cancelSignUpLink3">Start over</a></p>
       </div>
@@ -62,6 +62,7 @@
       <details id="adminPanel" class="admin-panel" hidden>
         <summary>Administrator</summary>
         <p class="admin-help">Production administration. Every change is authorized and recorded server-side.</p>
+        <button id="adminOpenDashboardBtn" class="btn btn-primary btn-small">Open Admin Dashboard</button>
 
         <section class="admin-card">
           <div class="admin-card-heading">

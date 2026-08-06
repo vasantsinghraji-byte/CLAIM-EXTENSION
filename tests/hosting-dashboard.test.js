@@ -34,6 +34,7 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
     'getCurrentUserProfile',
     'listUsers',
     'activateUser',
+    'rejectUserRegistration',
     'suspendUser',
     'changeUserRole',
     'deleteUserAccount',
@@ -52,6 +53,10 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
   }
   assert.match(source, /result\.role !== 'platformAdmin'/);
   assert.match(source, /result\.accountStatus !== 'active'/);
+  assert.match(html, /id="pendingUsersList"/);
+  assert.match(html, /id="pendingCount"/);
+  assert.match(source, /Registration approved\./);
+  assert.match(source, /Registration rejected\./);
 });
 
 test('hosted dashboard keeps authentication session-only and renders untrusted data without HTML injection', () => {

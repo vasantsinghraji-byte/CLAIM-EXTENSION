@@ -1,6 +1,6 @@
 # Claim Amount Auto-Fill Chrome Extension
 
-An invite-only Chrome extension that locally previews RGHS approved-amount
+An authenticated Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
@@ -11,6 +11,9 @@ dashboard is the primary production interface; the popup panel is retained as
 a constrained fallback. See
 `docs/PHASE_4_PRODUCTION_READINESS.md` for the human-controlled production
 activation gates.
+
+On Windows, run `launch-admin-dashboard.bat` to open the production dashboard
+directly in the default browser.
 
 ## Features
 
@@ -23,13 +26,17 @@ activation gates.
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
-- **Invite-only Access**: The administrator authorizes an email; the user
-  verifies that email once; Claim Spark matches the invitation automatically;
-  administrator activation and organization licence checks remain required
+- **Controlled Processor Signup**: A processor creates an account and verifies
+  the email once; a platform administrator approves the pending account from
+  the dashboard before licensed access is granted
+- **Explicit Invitations**: Invitations remain available for non-default
+  organization or elevated-role assignments
 - **Administrator Controls**: Development licence renewal, invitation
   generation, and user activation without service-worker console commands
-- **Onboarding Recovery**: Idempotent verified-email matching safely repairs a
-  missing profile without asking the user to re-enter an invitation code
+- **Pending Approvals**: The hosted dashboard separates pending registrations,
+  shows their count, and provides audited Approve and Reject actions
+- **Onboarding Recovery**: Idempotent verified-email onboarding safely repairs
+  a missing profile without asking the user to re-enter an invitation code
 - **Smart Matching**: Uses multiple strategies to find field pairs:
   - Name/ID attribute matching
   - Table structure analysis

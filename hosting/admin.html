@@ -46,9 +46,14 @@
 
       <section id="usersPanel" class="panel" data-panel="users">
         <div class="panel-heading">
-          <h2>Users</h2>
+          <h2>Users <span id="pendingCount" class="count-badge">0 pending</span></h2>
           <button id="refreshUsers" class="button secondary" type="button">Refresh</button>
         </div>
+        <section class="pending-approvals" aria-labelledby="pendingUsersHeading">
+          <h3 id="pendingUsersHeading">Pending approvals</h3>
+          <div id="pendingUsersList" class="record-list"></div>
+        </section>
+        <h3>Approved and inactive users</h3>
         <div id="usersList" class="record-list"></div>
       </section>
 

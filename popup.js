@@ -14,6 +14,7 @@ const licenceStatusLabel = document.getElementById('licenceStatusLabel');
 const authRecheckBtn = document.getElementById('authRecheckBtn');
 const authSignOutBtn = document.getElementById('authSignOutBtn');
 const adminPanel = document.getElementById('adminPanel');
+const adminOpenDashboardBtn = document.getElementById('adminOpenDashboardBtn');
 const adminLicenceOrganization = document.getElementById('adminLicenceOrganization');
 const adminMaximumUsers = document.getElementById('adminMaximumUsers');
 const adminTermDays = document.getElementById('adminTermDays');
@@ -257,7 +258,9 @@ checkVerifiedBtn.addEventListener('click', () => {
       return;
     }
     showStatus(
-      response.error ? 'Email verified, but setup needs attention.' : 'Email verified and invitation matched automatically.',
+      response.error
+        ? 'Email verified, but setup needs attention.'
+        : (response.stage === 'active' ? 'Email verified. Account ready.' : 'Email verified. Waiting for administrator approval.'),
       response.error ? 'warning' : 'success'
     );
     loadAuthState();
@@ -278,8 +281,10 @@ completeOnboardingBtn.addEventListener('click', () => {
       return;
     }
     showStatus(
-      response.stage === 'awaiting-activation' ? 'Setup complete. Waiting for administrator activation.' : 'Unable to finish setup',
-      response.stage === 'awaiting-activation' ? 'success' : 'error'
+      response.stage === 'active'
+        ? 'Setup complete. Signed in.'
+        : (response.stage === 'awaiting-activation' ? 'Setup complete. Waiting for administrator approval.' : 'Unable to finish setup'),
+      ['active', 'awaiting-activation'].includes(response.stage) ? 'success' : 'error'
     );
     loadAuthState();
   });
@@ -295,7 +300,12 @@ checkActivationBtn.addEventListener('click', () => {
       showStatus('Unable to check activation status right now', 'error');
       return;
     }
-    showStatus(response.active ? 'Account activated. Signed in.' : 'Still waiting for your administrator to activate your account.', response.active ? 'success' : 'info');
+    showStatus(
+      response.active
+        ? 'Account approved. Signed in.'
+        : (response.rejected ? 'Registration rejected. Contact your administrator.' : 'Still waiting for your administrator to approve your account.'),
+      response.active ? 'success' : (response.rejected ? 'error' : 'info')
+    );
     loadAuthState();
   });
 });
@@ -323,7 +333,7 @@ authSignInBtn.addEventListener('click', () => {
         : response.requiresProfileRecovery
           ? 'Account verified. Confirm your name once to finish setup.'
           : response.awaitingActivation
-            ? 'Invitation already accepted. Waiting for administrator activation.'
+            ? 'Email verified. Waiting for administrator approval.'
             : 'Signed in',
       response.requiresEmailVerification || response.requiresProfileRecovery || response.awaitingActivation ? 'warning' : 'success'
     );
@@ -473,9 +483,13 @@ async function loadAdminUsers() {
       const changeRole = adminButton('Save role', 'change-role');
       changeRole.dataset.uid = user.uid;
       actions.append(changeRole);
-      const statusAction = user.accountStatus === 'suspended' ? 'reactivate-user' : 'suspend-user';
+      const statusAction = user.accountStatus === 'active'
+        ? 'suspend-user'
+        : (user.accountStatus === 'suspended' ? 'reactivate-user' : 'activate-user');
       const statusButton = adminButton(
-        user.accountStatus === 'suspended' ? 'Reactivate' : 'Suspend',
+        user.accountStatus === 'active'
+          ? 'Suspend'
+          : (user.accountStatus === 'suspended' ? 'Reactivate' : 'Activate'),
         statusAction,
         'btn btn-secondary btn-small'
       );
@@ -525,6 +539,10 @@ async function refreshAdminData() {
 
 adminPanel.addEventListener('toggle', () => {
   if (adminPanel.open) refreshAdminData();
+});
+
+adminOpenDashboardBtn.addEventListener('click', () => {
+  chrome.tabs.create({ url: 'https://claimextension-prod.web.app/admin' });
 });
 
 adminRefreshOrganizationsBtn.addEventListener('click', loadAdminOrganizations);
@@ -624,6 +642,8 @@ adminUsersList.addEventListener('click', async event => {
     adminAction = 'adminSuspendUser';
   } else if (action === 'reactivate-user') {
     adminAction = 'adminReactivateUser';
+  } else if (action === 'activate-user') {
+    adminAction = 'adminActivateUser';
   } else if (action === 'delete-user') {
     if (button.dataset.armed !== 'true') {
       button.dataset.armed = 'true';

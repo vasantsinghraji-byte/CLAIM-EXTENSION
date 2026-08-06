@@ -105,6 +105,24 @@ input, select, textarea {
   border-radius: 12px;
   background: #fff;
 }
+.pending-approvals {
+  margin: 18px 0 26px;
+  padding: 18px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+.pending-approvals h3 { margin-top: 0; }
+.count-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+  vertical-align: middle;
+}
 .inline-form {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin: 18px 0 24px;

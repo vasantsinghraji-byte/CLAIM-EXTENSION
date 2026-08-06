@@ -177,3 +177,7 @@
 ## 1.11.0 - 2026-08-05
 
 - Add Pharmacy autofill using the P25-by-quantity cap, tablet and patient-name discrepancy highlighting, and restore native one-click claim submission across IPD, OPD, and Pharmacy.
+
+## 1.11.1 - 2026-08-06
+
+- Add invitation-free verified processor registration with mandatory dashboard approval, pending counts, approve/reject controls, lifecycle audit events, and direct dashboard launchers.
