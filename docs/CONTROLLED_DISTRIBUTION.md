@@ -22,13 +22,11 @@ Use a new Chrome profile containing no real RGHS data:
 
 1. Upload the verified ZIP in the Chrome Developer Dashboard.
 2. Complete Store Listing, Privacy, Distribution and Test Instructions.
-3. Choose **Private** visibility for the initial single-user controlled
-   release. Private visibility limits installation to named trusted testers;
-   unlisted visibility does not.
-4. Add only the approved tester account.
+3. Choose **Public** visibility with distribution restricted to **India**.
+4. Confirm pricing remains Free and the public listing disclosures are current.
 5. Submit for review with deferred publishing.
 6. After approval, recheck the package version, permissions, privacy
-   declarations and tester list.
+   declarations, visibility and regions.
 7. Publish manually.
 
 Do not email or host the ZIP for normal production installation. Chrome Web

@@ -38,8 +38,9 @@ activation gates.
 ## Installation
 
 ### Method 1: Install from Chrome Web Store
-The extension is privately published to approved trusted testers. Open the
-direct listing while signed into an approved tester account.
+Version 1.11.0 is under review for public availability in India. Until Google
+approves and the publisher manually publishes it, the existing tester release
+remains the active Chrome Web Store version.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
