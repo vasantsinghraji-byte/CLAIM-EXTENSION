@@ -38,9 +38,7 @@ activation gates.
 ## Installation
 
 ### Method 1: Install from Chrome Web Store
-Version 1.11.0 is under review for public availability in India. Until Google
-approves and the publisher manually publishes it, the existing tester release
-remains the active Chrome Web Store version.
+Version 1.11.0 is publicly published in India through the Chrome Web Store.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
