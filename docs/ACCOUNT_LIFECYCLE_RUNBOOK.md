@@ -7,7 +7,22 @@ sign in as a platform administrator. Use **Refresh** in the relevant section.
 The extension popup panel is a constrained break-glass fallback, not the
 routine production interface.
 
-### Invite
+### Ordinary processor signup
+
+1. The processor creates an account in Claim Spark.
+2. The processor verifies the email once.
+3. Claim Spark creates a pending processor profile in the platform organization.
+4. Open the administrator dashboard, refresh **Users**, and approve the account.
+5. The processor clicks **Check Status** and is signed in after licence and
+   capacity checks succeed.
+
+Use **Reject** when the registration is not authorized. Rejection requires a
+second confirmation, disables the Firebase identity, revokes its sessions and
+records the administrator decision in the audit log.
+
+### Explicit invitation
+
+Use an invitation only for a non-default organization or elevated role.
 
 1. Select or enter the organization ID.
 2. Enter the user's email and role.
@@ -27,8 +42,9 @@ routine production interface.
 
 ### Activate, suspend or reactivate
 
-- Activate only after the user has verified their email and Claim Spark has
-  matched the invitation.
+- Activate only after the user has verified their email. Ordinary processors
+  register without an invitation; explicit invitations remain available for
+  special organization or role assignments.
 - Suspension disables Firebase Authentication and revokes refresh tokens.
 - Reactivation requires an active organization, active licence and available
   seat.

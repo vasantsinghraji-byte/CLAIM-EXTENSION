@@ -255,6 +255,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       const afterCompletion = pending.displayName
         ? await attemptCompleteOnboarding(pending)
         : pending;
+      if (afterCompletion.stage === 'active') return { success: true };
       await storageWriter.setPendingAuth(afterCompletion);
       await Promise.all([
         storageWriter.clearAuthSession(),
@@ -303,12 +304,35 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return next;
   }
 
-  // Completes onboarding by matching the authenticated, verified email to an
-  // administrator-created invitation. No invitation secret is kept in browser
-  // storage or requested a second time.
+  async function establishActiveSession(session, profile) {
+    await storageWriter.setAuthSession({
+      uid: session.uid,
+      email: session.email,
+      displayName: profile?.displayName || session.displayName || '',
+      organizationId: profile?.organizationId || null,
+      role: profile?.role || null,
+      idToken: session.idToken,
+      refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt,
+      signedInAt: Date.now()
+    });
+    const licence = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'verifyLicence',
+      idToken: session.idToken,
+      data: { extensionVersion: chrome.runtime.getManifest().version },
+      fetchImpl: fetch
+    });
+    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    await storageWriter.clearPendingAuth();
+    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+  }
+
+  // Registers a verified processor for administrator approval. An explicit
+  // invitation remains authoritative when one assigns another role or tenant.
   async function attemptCompleteOnboarding(pending) {
     try {
-      await AuthCore.callFunction({
+      const onboarding = await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
         name: 'completeInvitationOnboarding',
         idToken: pending.idToken,
@@ -317,6 +341,17 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       });
       const next = { ...pending, stage: 'awaiting-activation', lastError: null };
       await storageWriter.setPendingAuth(next);
+      if (!onboarding.activationRequired) {
+        const profile = await AuthCore.callFunction({
+          functionsBaseUrl: FUNCTIONS_BASE_URL,
+          name: 'getCurrentUserProfile',
+          idToken: pending.idToken,
+          data: {},
+          fetchImpl: fetch
+        });
+        await establishActiveSession(pending, profile);
+        return { ...pending, stage: 'active', lastError: null };
+      }
       return next;
     } catch (error) {
       const next = { ...pending, stage: 'complete-onboarding', lastError: String(error.status || error.message || error) };
@@ -356,8 +391,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  // On success, automatically claims the active invitation for the verified
-  // email. The user never handles an invitation token.
+  // On success, registers an ordinary processor for approval or claims an
+  // explicit invitation when one exists.
   async function handleCheckEmailVerified() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -386,7 +421,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     const afterCompletion = displayName
       ? await attemptCompleteOnboarding({ ...pending, displayName, stage: 'complete-onboarding' })
       : { ...pending, stage: 'complete-onboarding', lastError: 'DISPLAY_NAME_REQUIRED' };
-    await storageWriter.setPendingAuth(afterCompletion);
+    if (afterCompletion.stage !== 'active') await storageWriter.setPendingAuth(afterCompletion);
     return {
       success: true,
       emailVerified: true,
@@ -396,7 +431,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   }
 
   // Manual retry is only needed for legacy accounts that lost their local
-  // display name or when an administrator has just created/replaced an invite.
+  // display name or a temporary licence/organization failure.
   async function handleCompleteOnboarding(displayName) {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -408,10 +443,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: !result.lastError, stage: result.stage, error: result.lastError };
   }
 
-  // acceptInvitation leaves accountStatus 'invited', not 'active' - a platform
-  // admin still has to call activateUser. Until they do, getCurrentUserProfile
-  // (and everything else gated by activeUser()) fails PERMISSION_DENIED, which
-  // just means "keep waiting", not an error to surface.
+  // Both ordinary registrations and explicit invitations require administrator
+  // approval before the user becomes active.
   async function handleCheckActivation() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -430,29 +463,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       throw error;
     }
     if (profile?.accountStatus !== 'active') {
-      return { success: true, active: false };
+      return { success: true, active: false, rejected: profile?.accountStatus === 'rejected' };
     }
-    await storageWriter.setAuthSession({
-      uid: pending.uid,
-      email: pending.email,
-      displayName: profile?.displayName || pending.displayName || '',
-      organizationId: profile?.organizationId || null,
-      role: profile?.role || null,
-      idToken: pending.idToken,
-      refreshToken: pending.refreshToken,
-      expiresAt: pending.expiresAt,
-      signedInAt: Date.now()
-    });
-    const licence = await AuthCore.callFunction({
-      functionsBaseUrl: FUNCTIONS_BASE_URL,
-      name: 'verifyLicence',
-      idToken: pending.idToken,
-      data: { extensionVersion: chrome.runtime.getManifest().version },
-      fetchImpl: fetch
-    });
-    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
-    await storageWriter.clearPendingAuth();
-    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    await establishActiveSession(pending, profile);
     return { success: true, active: true };
   }
 
@@ -510,6 +523,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     adminRevokeInvitation: 'revokeInvitation',
     adminReplaceInvitation: 'replaceInvitation',
     adminSuspendUser: 'suspendUser',
+    adminRejectUserRegistration: 'rejectUserRegistration',
     adminReactivateUser: 'activateUser',
     adminChangeUserRole: 'changeUserRole',
     adminDeleteUserAccount: 'deleteUserAccount',

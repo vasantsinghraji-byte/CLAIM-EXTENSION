@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+  ACCOUNT_STATUSES,
   assertKeys,
   assertNoClaimContent,
   boundedInteger,
@@ -13,6 +14,12 @@ const {
   selectEmailInvitation,
   tokenHash
 } = require('../lib/contracts');
+
+test('rejected is a distinct non-active account status', () => {
+  assert.ok(ACCOUNT_STATUSES.includes('rejected'));
+  assert.ok(ACCOUNT_STATUSES.includes('invited'));
+  assert.ok(ACCOUNT_STATUSES.includes('active'));
+});
 
 test('strict request contracts reject unknown and missing fields', () => {
   assert.doesNotThrow(() => assertKeys({ uid: 'u1' }, ['uid'], ['uid']));

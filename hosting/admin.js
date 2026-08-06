@@ -86,18 +86,35 @@
   }
 
   async function loadUsers() {
-    const container = byId('usersList');
-    empty(container, 'Loading users...');
+    const pendingContainer = byId('pendingUsersList');
+    const usersContainer = byId('usersList');
+    empty(pendingContainer, 'Loading pending approvals...');
+    empty(usersContainer, 'Loading users...');
     const result = await action('listUsers', {});
-    if (!result) return empty(container, 'Unable to load users.');
-    const records = (result.users || []).map(user => {
+    if (!result) {
+      empty(pendingContainer, 'Unable to load pending approvals.');
+      return empty(usersContainer, 'Unable to load users.');
+    }
+
+    function userRecord(user, pending = false) {
       const record = element('article', 'record');
       record.append(
         element('h3', '', `${user.displayName || 'Unnamed user'} · ${user.email}`),
-        element('p', 'meta', `${user.accountStatus} · ${user.role} · ${user.organizationId}`)
+        element('p', 'meta', `${pending ? 'pending approval' : user.accountStatus} · ${user.role} · ${user.organizationId}`),
+        element('p', 'meta', `Registered ${formatDate(user.createdAt)} · ${user.onboardingSource}`)
       );
       if (user.accountStatus !== 'deleted' && user.uid !== profile.uid) {
         const controls = element('div', 'record-actions');
+        if (pending) {
+          const approve = button('Approve', 'approve', { uid: user.uid });
+          approve.className = 'button primary';
+          controls.append(
+            approve,
+            button('Reject', 'reject', { uid: user.uid, email: user.email }, true)
+          );
+          record.append(controls);
+          return record;
+        }
         const role = element('select');
         role.setAttribute('aria-label', `Role for ${user.email}`);
         role.dataset.uid = user.uid;
@@ -107,8 +124,7 @@
           option.selected = value === user.role;
           role.append(option);
         }
-        const statusLabel = user.accountStatus === 'active' ? 'Suspend'
-          : (user.accountStatus === 'suspended' ? 'Reactivate' : 'Activate');
+        const statusLabel = user.accountStatus === 'active' ? 'Suspend' : 'Reactivate';
         const statusAction = user.accountStatus === 'active' ? 'suspend' : 'reactivate';
         controls.append(
           role,
@@ -119,9 +135,16 @@
         record.append(controls);
       }
       return record;
-    });
-    container.replaceChildren(...records);
-    if (!records.length) empty(container, 'No users found.');
+    }
+
+    const users = result.users || [];
+    const pendingUsers = users.filter(user => user.pendingApproval);
+    const otherUsers = users.filter(user => !user.pendingApproval);
+    byId('pendingCount').textContent = `${result.pendingCount ?? pendingUsers.length} pending`;
+    pendingContainer.replaceChildren(...pendingUsers.map(user => userRecord(user, true)));
+    usersContainer.replaceChildren(...otherUsers.map(user => userRecord(user)));
+    if (!pendingUsers.length) empty(pendingContainer, 'No registrations are waiting for approval.');
+    if (!otherUsers.length) empty(usersContainer, 'No approved or inactive users found.');
   }
 
   async function loadInvitations() {
@@ -302,12 +325,21 @@
     if (result) loadAudit();
   });
 
-  byId('usersList').addEventListener('click', async event => {
+  byId('usersPanel').addEventListener('click', async event => {
     const control = event.target.closest('[data-action]');
     if (!control) return;
     const uid = control.dataset.uid;
     let result = null;
-    if (control.dataset.action === 'role') {
+    if (control.dataset.action === 'approve') {
+      result = await action('activateUser', { uid }, 'Registration approved.');
+    } else if (control.dataset.action === 'reject') {
+      if (control.dataset.armed !== 'true') {
+        control.dataset.armed = 'true';
+        control.textContent = 'Confirm reject';
+        return message(`Rejecting disables ${control.dataset.email}. Click again to confirm.`, 'error');
+      }
+      result = await action('rejectUserRegistration', { uid }, 'Registration rejected.');
+    } else if (control.dataset.action === 'role') {
       const role = [...byId('usersList').querySelectorAll('select[data-uid]')]
         .find(node => node.dataset.uid === uid);
       result = await action('changeUserRole', { uid, role: role.value }, 'User role changed.');

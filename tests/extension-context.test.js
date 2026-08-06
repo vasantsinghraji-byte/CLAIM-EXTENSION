@@ -136,13 +136,26 @@ test('popup uses email-based signup without an invitation-token field', () => {
   assert.match(html, /no invitation code is required/i);
 });
 
-test('server matches invitations by verified email while retaining legacy token compatibility', () => {
+test('server registers verified processors for manual approval while retaining invitation compatibility', () => {
   const functions = read('functions/index.js');
   assert.match(functions, /exports\.completeInvitationOnboarding = onCall/);
   assert.match(functions, /\.where\('email', '==', authenticatedEmail\)/);
   assert.match(functions, /requireVerifiedEmail\(request\)/);
-  assert.match(functions, /No active invitation exists for this verified email/);
+  assert.match(functions, /SELF_SERVICE_ORGANIZATION_ID = 'platform'/);
+  assert.match(functions, /SELF_SERVICE_ROLE = 'processor'/);
+  assert.match(functions, /accountStatus: 'invited'/);
+  assert.match(functions, /onboardingSource: 'self-registration'/);
   assert.match(functions, /exports\.acceptInvitation = onCall/);
+});
+
+test('active onboarding responses can establish the signed-in session immediately', () => {
+  const background = read('background.js');
+  const popup = read('popup.js');
+  assert.match(background, /if \(!onboarding\.activationRequired\)/);
+  assert.match(background, /stage: 'active'/);
+  assert.match(background, /establishActiveSession\(pending, profile\)/);
+  assert.match(popup, /Email verified\. Account ready\./);
+  assert.match(popup, /Setup complete\. Signed in\./);
 });
 
 test('all popup authentication fields use the full-width accessible input style', () => {
@@ -172,6 +185,11 @@ test('platform administrators get licence, invitation, and user activation contr
     assert.match(popup, new RegExp(`'${action}'`));
     assert.match(background, new RegExp(`${action}:`));
   }
+  assert.match(html, /id="adminOpenDashboardBtn"/);
+  assert.match(popup, /chrome\.tabs\.create\(\{ url: 'https:\/\/claimextension-prod\.web\.app\/admin' \}\)/);
+  assert.match(background, /adminRejectUserRegistration: 'rejectUserRegistration'/);
+  assert.match(popup, /user\.accountStatus === 'active'[\s\S]*'suspend-user'[\s\S]*'activate-user'/);
+  assert.match(popup, /user\.accountStatus === 'active'[\s\S]*'Suspend'[\s\S]*'Activate'/);
   assert.match(background, /authSession\.role !== 'platformAdmin'/);
   assert.match(background, /name: functionName/);
   assert.doesNotMatch(background, /invitationToken:\s*result/);
@@ -216,6 +234,7 @@ test('Phase 4 administrator lifecycle controls are server-routed and rendered sa
     'replaceInvitation',
     'changeUserRole',
     'deleteUserAccount',
+    'rejectUserRegistration',
     'updateOrganization',
     'listOrganizations',
     'listAuditEvents'

@@ -31,6 +31,7 @@ ui-debug.log*
 # Temporary files
 *.tmp
 *.bak
+.chromium-*/
 
 # Build artifact (reproducible via npm run build)
 claim-autofill-extension.zip

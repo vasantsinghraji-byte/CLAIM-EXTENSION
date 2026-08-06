@@ -41,6 +41,8 @@ const callableOptions = Object.freeze({
   memory: '256MiB'
 });
 const ADMIN_LIST_LIMIT = 100;
+const SELF_SERVICE_ORGANIZATION_ID = 'platform';
+const SELF_SERVICE_ROLE = 'processor';
 
 function fail(code, message) {
   throw new HttpsError(code, message);
@@ -113,6 +115,8 @@ function serializeUser(snapshot) {
     organizationId: user.organizationId,
     role: user.role,
     accountStatus: user.accountStatus,
+    onboardingSource: user.onboardingSource || 'invitation',
+    pendingApproval: user.accountStatus === 'invited',
     createdAt: timestampIso(user.createdAt),
     updatedAt: timestampIso(user.updatedAt)
   };
@@ -389,10 +393,9 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
   }
 });
 
-// New onboarding model: the administrator authorizes an email address and the
-// verified owner of that address claims the invitation. The secret-token
-// endpoint above remains available during the 1.10.0 compatibility window,
-// but new clients never ask a user to enter or re-enter a token.
+// Verified processors can register without an invitation, but remain pending
+// until a platform administrator approves them. Invitations remain
+// authoritative for users assigned a different organization or elevated role.
 exports.completeInvitationOnboarding = onCall(callableOptions, async request => {
   try {
     const auth = requireVerifiedEmail(request);
@@ -418,9 +421,22 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
     const invitationSnapshot = selectedInvitation?.snapshot || null;
     const userReference = db.doc(`users/${auth.uid}`);
     const invitationReference = invitationSnapshot?.ref || null;
+    const registrationAuditReference = db.collection('auditLogs').doc();
     let onboarding;
     let accountStatus = 'invited';
     let alreadyAccepted = false;
+
+    function createRegistrationAudit(transaction, organizationId, onboardingSource) {
+      transaction.create(registrationAuditReference, {
+        actorId: auth.uid,
+        actorRole: 'processor',
+        action: 'user.registration_requested',
+        targetType: 'user',
+        targetId: auth.uid,
+        details: { organizationId, onboardingSource },
+        timestamp: FieldValue.serverTimestamp()
+      });
+    }
 
     await db.runTransaction(async transaction => {
       const userSnapshot = await transaction.get(userReference);
@@ -435,7 +451,27 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
         return;
       }
       if (!invitationReference) {
-        fail('not-found', 'No active invitation exists for this verified email');
+        const organizationReference = db.doc(`organizations/${SELF_SERVICE_ORGANIZATION_ID}`);
+        const organizationSnapshot = await transaction.get(organizationReference);
+        if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+          fail('failed-precondition', 'Registration organization is not active');
+        }
+        onboarding = {
+          organizationId: SELF_SERVICE_ORGANIZATION_ID,
+          role: SELF_SERVICE_ROLE
+        };
+        transaction.create(userReference, {
+          email: authenticatedEmail,
+          displayName,
+          organizationId: SELF_SERVICE_ORGANIZATION_ID,
+          role: SELF_SERVICE_ROLE,
+          accountStatus: 'invited',
+          onboardingSource: 'self-registration',
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
+        });
+        createRegistrationAudit(transaction, SELF_SERVICE_ORGANIZATION_ID, 'self-registration');
+        return;
       }
       const currentInvitationSnapshot = await transaction.get(invitationReference);
       if (!currentInvitationSnapshot.exists) fail('not-found', 'Invitation not found');
@@ -461,6 +497,7 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
         updatedAt: FieldValue.serverTimestamp(),
         ...(acceptedForSameCaller ? { recoveredAt: FieldValue.serverTimestamp() } : {})
       });
+      createRegistrationAudit(transaction, invitation.organizationId, 'invitation');
       if (!acceptedForSameCaller) {
         transaction.update(invitationReference, {
           status: 'accepted',
@@ -504,6 +541,7 @@ exports.activateUser = onCall(callableOptions, async request => {
     const snapshot = await reference.get();
     if (!snapshot.exists) fail('not-found', 'User not found');
     const user = snapshot.data();
+    if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot be activated');
     const [organizationSnapshot, licenceSnapshot, organizationUsers] = await Promise.all([
       db.doc(`organizations/${user.organizationId}`).get(),
       db.doc(`licences/${user.organizationId}`).get(),
@@ -527,11 +565,53 @@ exports.activateUser = onCall(callableOptions, async request => {
       accountStatus: 'active'
     });
     await getAuth().updateUser(uid, { disabled: false });
-    await recordAdminEvent(auth, 'user.activated', 'user', uid, {
+    const auditAction = user.accountStatus === 'invited'
+      ? 'user.registration_approved'
+      : 'user.reactivated';
+    await recordAdminEvent(auth, auditAction, 'user', uid, {
+      email: user.email,
+      organizationId: user.organizationId,
+      previousStatus: user.accountStatus
+    });
+    return { uid, accountStatus: 'active' };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.rejectUserRegistration = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'rejectUserRegistration', 60, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['uid'], ['uid']);
+    const uid = safeDocumentId(data.uid, 'uid');
+    if (uid === auth.uid) fail('failed-precondition', 'You cannot reject your own administrator account');
+    const reference = db.doc(`users/${uid}`);
+    const snapshot = await reference.get();
+    if (!snapshot.exists) fail('not-found', 'User not found');
+    const user = snapshot.data();
+    if (user.accountStatus !== 'invited') {
+      fail('failed-precondition', 'Only pending registrations can be rejected');
+    }
+    await getAuth().setCustomUserClaims(uid, {
+      organizationId: user.organizationId,
+      role: user.role,
+      accountStatus: 'rejected'
+    });
+    await getAuth().revokeRefreshTokens(uid);
+    await getAuth().updateUser(uid, { disabled: true });
+    await reference.update({
+      accountStatus: 'rejected',
+      rejectedAt: FieldValue.serverTimestamp(),
+      rejectedBy: auth.uid,
+      updatedAt: FieldValue.serverTimestamp()
+    });
+    await recordAdminEvent(auth, 'user.registration_rejected', 'user', uid, {
       email: user.email,
       organizationId: user.organizationId
     });
-    return { uid, accountStatus: 'active' };
+    return { uid, accountStatus: 'rejected' };
   } catch (error) {
     translateValidation(error);
   }
@@ -630,7 +710,12 @@ exports.listUsers = onCall(callableOptions, async request => {
       .map(serializeUser)
       .filter(user => !organizationId || user.organizationId === organizationId)
       .sort((left, right) => left.email.localeCompare(right.email));
-    return { users, limit: ADMIN_LIST_LIMIT, truncated: snapshot.size === ADMIN_LIST_LIMIT };
+    return {
+      users,
+      pendingCount: users.filter(user => user.pendingApproval).length,
+      limit: ADMIN_LIST_LIMIT,
+      truncated: snapshot.size === ADMIN_LIST_LIMIT
+    };
   } catch (error) {
     translateValidation(error);
   }
