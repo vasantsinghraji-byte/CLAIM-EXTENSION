@@ -1,7 +1,7 @@
 # Phase 4 Production Readiness
 
-Status: All pre-distribution production gates complete; version 1.11.0 is
-pending public Chrome Web Store review for India and explicit publication.
+Status: Version 1.11.0 is publicly published in India through the Chrome Web
+Store; post-publication installation verification remains operational follow-up.
 
 Date: 26 July 2026
 
@@ -116,7 +116,7 @@ recorded as passed.
 | Privacy/legal review | Passed (owner attestation) | Responsible business owner Vasant S Raji approved the six documented privacy/operational statements on 26 July 2026, including RGHS authorization, browser-only claim/patient content, privacy-safe Firebase metadata, stated retention, support/deletion handling and disabled AI. This is an internal operational approval, not independent legal advice or an RGHS-issued authorization |
 | Clean-profile extension smoke | Passed | Responsible owner confirmed version 1.10.0 Preview, Apply and exact Undo on an authorized RGHS test claim without submission on 28 July 2026; installation, production sign-in, active licence, off-domain Apply blocking and extension-error checks also passed |
 | Chrome Web Store upload | Passed | Version 1.11.0 uploaded through the Developer Dashboard on 5 August 2026 using the verified ZIP |
-| Store review and explicit publication | Pending review | The owner changed version 1.11.0 to Public visibility for India and resubmitted it on 5 August 2026 with automatic publishing disabled; manual publication remains required after approval |
+| Store review and explicit publication | Passed | Chrome Web Store approved version 1.11.0 and the owner published it with Public visibility restricted to India; the Developer Dashboard was verified as `Published - public` on 5 August 2026 |
 
 The candidate production artifact is version 1.11.0. Its verified SHA-256 is
 `08DBC5B133601990EA5364330EC00609E4342C367472612D36614C711E0EE636`, matching

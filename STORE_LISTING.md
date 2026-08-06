@@ -263,7 +263,7 @@ patient or claim data.
 - [ ] Keep automatic publishing off for the first review.
 - [ ] Confirm the publisher contact email is verified and monitored.
 - [ ] Confirm all dashboard tabs show no blocking errors.
-- [ ] Submit for review.
+- [x] Submit for review and publish version 1.11.0 publicly in India.
 - [ ] After approval, perform one clean-profile installation and an RGHS
       process-sheet smoke test with synthetic or authorized test data.
 - [ ] Verify Preview is read-only, Apply requires explicit review, Undo/recovery
