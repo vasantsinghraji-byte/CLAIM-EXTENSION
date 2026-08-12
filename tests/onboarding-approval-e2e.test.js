@@ -151,11 +151,14 @@ test('pending count and dashboard launchers use their explicit environment targe
   const dashboardHtml = read('hosting/admin.html');
   const popup = read('popup.js');
   const launcher = read('launch-admin-dashboard.bat');
+  const productionLauncher = read('launch-production-admin-dashboard.bat');
 
   assert.match(functions, /pendingCount: users\.filter\(user => user\.pendingApproval\)\.length/);
   assert.match(dashboardHtml, /id="pendingCount"/);
   assert.match(dashboardHtml, /id="pendingUsersList"/);
   assert.match(popup, /adminOpenDashboardBtn/);
   assert.match(popup, /ClaimSparkRuntimeConfig\?\.adminDashboardUrl/);
-  assert.match(launcher, /start "" "https:\/\/claimextension-prod\.web\.app\/admin"/);
+  assert.match(launcher, /start "" "https:\/\/claimextension\.web\.app\/admin"/);
+  assert.doesNotMatch(launcher, /claimextension-prod/);
+  assert.match(productionLauncher, /start "" "https:\/\/claimextension-prod\.web\.app\/admin"/);
 });

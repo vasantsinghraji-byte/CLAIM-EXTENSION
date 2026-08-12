@@ -1,2 +1,2 @@
 @echo off
-start "" "https://claimextension-prod.web.app/admin"
+start "" "https://claimextension.web.app/admin"
