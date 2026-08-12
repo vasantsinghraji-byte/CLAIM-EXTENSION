@@ -180,7 +180,10 @@ The extension locally reads RGHS process-sheet website content, which may
 contain claim identifiers, medical/package information, and monetary claim and
 approved amounts. It records the current RGHS URL, rule results, and reviewer
 actions locally to support audit history, feedback, recovery, and safety
-controls. It does not send this data to the developer or third parties.
+controls. It does not send claim content to the developer or third parties.
+For individual paid access, the Firebase service stores the UPI transaction ID
+(UTR) submitted by the user and its verification metadata. The extension never
+requests or stores UPI PINs, OTPs, card numbers or bank-account credentials.
 
 ### Data usage certifications
 
@@ -205,7 +208,13 @@ Store User Data Policy, including the Limited Use requirements.
 - Visibility: **Public**.
 - Regions: **India** only, unless the publisher has a documented need for other
   regions.
-- Pricing: **Free**.
+- Download pricing: **Free**. The service includes paid individual licences and
+  organisation-sponsored access. Mark the listing as containing paid features
+  or in-app purchases in the Chrome Web Store dashboard before publishing this
+  workflow.
+- Individual plan prices: ₹99 for 1 week, ₹198 for 2 weeks, ₹300 for 4 weeks,
+  and ₹500 for 12 weeks. The official UPI QR is supplied separately by an
+  administrator and is not bundled with the extension.
 - Publish automatically after approval: **Off** for the first release, so the
   approved listing can receive a final manual check before publication.
 

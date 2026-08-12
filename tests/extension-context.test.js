@@ -10,7 +10,7 @@ test('stale floating widget guards Chrome API calls after extension reload', () 
   assert.match(source, /function hasValidExtensionContext\(\)/);
   assert.match(source, /Refresh this process-sheet page to reconnect Claim Spark Review/);
   assert.match(source, /withValidExtensionContext\(\(\) => chrome\.storage\.local\.set/);
-  assert.match(source, /withValidExtensionContext\(\(\) => renderPreview\(actions\.preview\(\)\)\)/);
+  assert.match(source, /if \(!hasValidExtensionContext\(\)\) return invalidateStaleWidget\(\);[\s\S]*?actions\.previewFresh/);
   assert.match(source, /withValidExtensionContext\(\(\) => \{ result = actions\.undo\(\); \}\)/);
   assert.match(source, /if \(!hasValidExtensionContext\(\)\) \{[\s\S]*?invalidateStaleWidget\(\);[\s\S]*?setOpen\(panel\.hidden\)/);
   assert.match(source, /withValidExtensionContext\(\(\) => chrome\.storage\.local\.get/);
@@ -61,27 +61,31 @@ test('popup status messages own one resettable hide timer', () => {
   assert.equal(statusMessage.style.display, 'none');
 });
 
-test('options updates are serialized and refresh from storage changes', () => {
+test('processor options are read-only for centrally governed rule behavior', () => {
   const options = fs.readFileSync(path.join(__dirname, '..', 'options.js'), 'utf8');
-  assert.match(options, /action: 'setRuleOverride'/);
+  const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'options.html'), 'utf8');
+  assert.doesNotMatch(options, /action: 'setRuleOverride'/);
+  assert.doesNotMatch(background, /request\?\.action === 'setRuleOverride'/);
+  assert.doesNotMatch(background, /request\?\.action === 'setCustomRuleConfig'/);
   assert.match(options, /chrome\.storage\.onChanged\.addListener/);
   assert.match(options, /areaName !== 'local'/);
-  assert.match(options, /ruleOverrides = normalizeRuleOverrides\(changes\.ruleOverrides\.newValue\)/);
-  assert.doesNotMatch(options, /chrome\.storage\.sync\.set\(\{ ruleOverrides \}/);
-  assert.match(options, /ensureRuleOverridesMigration/);
-  assert.match(options, /Edit remarks/);
-  assert.match(options, /builtInRemarkOverrides/);
-  assert.match(options, /openBuiltInRemarkEditor/);
+  assert.match(options, /Managed centrally by an authorized administrator/);
+  assert.match(options, /processingRuleSet/);
+  assert.match(html, /processors cannot change deductions, remarks, rule priority, or rule activation/i);
+  assert.doesNotMatch(options, /setCustomRuleConfig|setRuleOverride|resetRuleOverrides/);
 });
 
 test('background wires auth-core, the three auth message actions, and the licence-recheck alarm', () => {
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
-  assert.match(background, /importScripts\('runtime-config\.js', 'auth-core\.js'\)/);
+  assert.match(background, /importScripts\('runtime-config\.js', 'auth-core\.js', 'processing-rules\.js'\)/);
   assert.match(background, /request\?\.action === 'authSignIn'/);
   assert.match(background, /request\?\.action === 'authSignOut'/);
   assert.match(background, /request\?\.action === 'authRefreshLicence'/);
   assert.match(background, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(background, /alarm\.name === LICENCE_RECHECK_ALARM/);
+  assert.match(background, /transportFailure = error\?\.code === 'NETWORK_ERROR'/);
+  assert.match(background, /cached\.checksum !== response\.checksum/);
 });
 
 test('background wires verified-email invitation matching and the activation-check chain', () => {
@@ -103,16 +107,48 @@ test('background wires verified-email invitation matching and the activation-che
   assert.doesNotMatch(background, /invitationToken:\s*String/);
 });
 
-test('email verification refreshes the ID token before verified-only onboarding', () => {
+test('email verification refreshes the ID token before the access-path choice', () => {
   const background = read('background.js');
   const start = background.indexOf('async function handleCheckEmailVerified');
   const end = background.indexOf('async function handleCompleteOnboarding', start);
   const flow = background.slice(start, end);
   const lookup = flow.indexOf('AuthCore.accountInfo');
   const refresh = flow.indexOf('AuthCore.refreshIdToken');
-  const completion = flow.indexOf('attemptCompleteOnboarding');
-  assert.ok(lookup >= 0 && refresh > lookup && completion > refresh);
+  const choice = flow.indexOf("stage: 'choose-access-path'");
+  assert.ok(lookup >= 0 && refresh > lookup && choice > refresh);
   assert.match(flow, /refreshToken: pending\.refreshToken/);
+});
+
+test('sponsored onboarding uses roster credentials while retaining the default path', () => {
+  const background = read('background.js');
+  const popup = read('popup.html');
+  const popupSource = read('popup.js');
+  assert.match(background, /name: 'completeOrganizationSponsoredOnboarding'/);
+  assert.match(background, /request\?\.action === 'authOrganizationSponsoredOnboarding'/);
+  assert.match(popup, /id="authChoosePath"/);
+  assert.match(popup, /id="sponsoredOrganizationId"/);
+  assert.match(popup, /id="sponsoredEmployeeCode"/);
+  assert.match(popup, /id="individualPaymentReference"/);
+  assert.match(popup, /official UPI QR code supplied by your administrator/);
+  assert.match(popupSource, /action: 'authCompleteOnboarding'/);
+});
+
+test('individual paid onboarding submits only a bounded payment reference', () => {
+  const background = read('background.js');
+  const popup = read('popup.html');
+  const popupSource = read('popup.js');
+  assert.match(background, /name: 'submitPaymentProof'/);
+  assert.match(background, /request\?\.action === 'authIndividualPaidOnboarding'/);
+  assert.match(popupSource, /action: 'authIndividualPaidOnboarding'/);
+  assert.match(popup, /maxlength="160"/);
+  assert.match(popup, /YUVAN ENTERPRISES/);
+  assert.match(popup, /yuvanent@ybl/);
+  assert.match(popup, /payment QR is supplied separately by the administrator/i);
+  assert.doesNotMatch(popup, /<img[^>]+payment-qr/i);
+  for (const plan of ['1 week — ₹99', '2 weeks — ₹198', '4 weeks — ₹300', '12 weeks — ₹500']) {
+    assert.match(popup, new RegExp(plan));
+  }
+  assert.match(popup, /Never enter a UPI PIN, OTP, card number, password, or bank-account credentials/);
 });
 
 test('accepted invitations are retry-safe for the same authenticated user', () => {
@@ -142,6 +178,7 @@ test('server registers verified processors for manual approval while retaining i
   assert.match(functions, /\.where\('email', '==', authenticatedEmail\)/);
   assert.match(functions, /requireVerifiedEmail\(request\)/);
   assert.match(functions, /SELF_SERVICE_ORGANIZATION_ID = 'platform'/);
+  assert.match(functions, /license: \{ \.\.\.DEFAULT_LICENSE \}/);
   assert.match(functions, /SELF_SERVICE_ROLE = 'processor'/);
   assert.match(functions, /accountStatus: 'invited'/);
   assert.match(functions, /onboardingSource: 'self-registration'/);
@@ -193,6 +230,14 @@ test('platform administrators get licence, invitation, and user activation contr
   assert.match(background, /authSession\.role !== 'platformAdmin'/);
   assert.match(background, /name: functionName/);
   assert.doesNotMatch(background, /invitationToken:\s*result/);
+});
+
+test('per-user license controls are server-enforced independently from account approval', () => {
+  const functions = read('functions/index.js');
+  assert.match(functions, /exports\.setUserLicense = onCall/);
+  assert.match(functions, /user\.license_updated/);
+  assert.match(functions, /license\.type === 'organisation'/);
+  assert.match(functions, /license\.status === 'inactive'/);
 });
 
 test('Phase 4 administrator lifecycle controls are server-routed and rendered safely', () => {

@@ -11,7 +11,12 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "firebase-admin": "^13.5.0",
-    "firebase-functions": "^6.4.0"
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "overrides": {
+    "gaxios": "^7.3.0",
+    "retry-request": "^9.0.1",
+    "uuid": "^11.1.1"
   }
 }

@@ -6,6 +6,7 @@ let isAutoFillEnabled = true;
 let auditMode = 'flag';
 let ruleOverrides = {};
 let customRuleConfig = null;
+let processingRuleSet = null;
 let licenceState = null; // null = never checked yet (fresh install or signed out)
 let undoBatch = [];
 let lastPreview = null;
@@ -14,6 +15,7 @@ const Core = globalThis.ClaimAutoFillCore;
 const Audit = globalThis.RGHSAuditCore;
 const AuditRules = globalThis.RGHSAuditRules;
 const Review = globalThis.ClaimReviewCore;
+const ProcessingRules = globalThis.ClaimProcessingRules;
 const ruleSetValidation = Audit && AuditRules && Audit.validateRuleSet
   ? Audit.validateRuleSet(AuditRules)
   : { ok: false, errors: ['Audit rule engine is unavailable'] };
@@ -27,6 +29,21 @@ const APPROVED_CONTROL_SELECTOR = [
   '[id^="tpaapprovedAmount_"]'
 ].join(', ');
 const REMARKS_CONTROL_SELECTOR = '[id^="packageremarks_"], [id^="itemremarks_"]';
+
+function processingAreaForPage() {
+  if (location.pathname.startsWith('/RGHS/tpaPharmacy')) return 'PHARMACY';
+  if (/\/RGHS\/tpaOPD/i.test(location.pathname)) return 'OPD';
+  return 'IPD';
+}
+
+function configuredColumnKey(headerText) {
+  const text = String(headerText || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (text.includes('deduction') && text.includes('remark')) return 'deductionRemarks';
+  if (text.includes('pharmacy') && text.includes('remark')) return 'pharmacyRemarks';
+  if (text.includes('validation') && text.includes('remark')) return 'validationRemarks';
+  if (text === 'remark' || text === 'remarks') return 'remarks';
+  return null;
+}
 
 function debugLog(...args) {
   if (DEBUG) console.log(...args);
@@ -44,11 +61,12 @@ chrome.storage.sync.get(['autoFillEnabled', 'auditMode'], (result) => {
 
 chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
   void chrome.runtime.lastError;
-  chrome.storage.local.get(['ruleOverrides', 'customRuleConfig', 'licenceState'], result => {
+  chrome.storage.local.get(['ruleOverrides', 'customRuleConfig', 'processingRuleSet', 'licenceState'], result => {
     ruleOverrides = result.ruleOverrides && typeof result.ruleOverrides === 'object' && !Array.isArray(result.ruleOverrides)
       ? result.ruleOverrides
       : {};
     customRuleConfig = result.customRuleConfig || null;
+    processingRuleSet = result.processingRuleSet || null;
     licenceState = result.licenceState || null;
     schedulePassiveAudit([document]);
   });
@@ -57,6 +75,12 @@ chrome.runtime.sendMessage({ action: 'ensureRuleOverridesMigration' }, () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.customRuleConfig) {
     customRuleConfig = changes.customRuleConfig.newValue || null;
+    schedulePassiveAudit([document]);
+  }
+  if (area === 'local' && changes.processingRuleSet) {
+    const nextRuleSet = changes.processingRuleSet.newValue || null;
+    if ((processingRuleSet?.versionId || '') !== (nextRuleSet?.versionId || '')) lastPreview = null;
+    processingRuleSet = nextRuleSet;
     schedulePassiveAudit([document]);
   }
   if (area === 'local' && changes.ruleOverrides) {
@@ -89,6 +113,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  const respond = promise => Promise.resolve(promise)
+    .then(result => sendResponse({ success: true, ...result }))
+    .catch(error => sendResponse({ success: false, error: String(error?.message || error) }));
   if (request.action === 'toggleAutoFill') {
     isAutoFillEnabled = request.enabled;
     window.dispatchEvent(new CustomEvent('claim-autofill:enabled-change', {
@@ -97,17 +124,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     schedulePassiveAudit([document]);
     sendResponse({ success: true });
   } else if (request.action === 'fillNow') {
-    const result = applyReviewedPreview(request);
-    sendResponse({ success: true, ...result });
+    respond(applyFreshPreview(request));
   } else if (request.action === 'preview') {
-    const result = createReviewedPreview();
-    sendResponse({ success: true, ...result, hasUndo: undoBatch.length > 0 });
+    respond(createFreshPreview().then(result => ({ ...result, hasUndo: undoBatch.length > 0 })));
   } else if (request.action === 'undo') {
     const count = undoLastFill();
     if (count > 0) {
       sendResponse({ success: true, count });
     } else {
-      restorePersistentSnapshot().then(result => sendResponse({ success: true, ...result }));
+      respond(restorePersistentSnapshot());
     }
   } else if (request.action === 'getStatus') {
     hasPersistentRecovery(hasRecovery => {
@@ -116,6 +141,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   return true;
 });
+
+function refreshProcessingRules() {
+  return new Promise(resolve => {
+    try {
+      chrome.runtime.sendMessage({ action: 'refreshProcessingRules' }, response => {
+        if (chrome.runtime.lastError || !response?.success) {
+          resolve({ ok: processingRuleSet?.mode !== 'remote-required', error: response?.error || 'network' });
+          return;
+        }
+        const normalized = ProcessingRules?.normalizeRuleSet(response.ruleSet);
+        if (!normalized || normalized.errors.length) {
+          resolve({ ok: false, error: 'invalid-processing-rule-set' });
+          return;
+        }
+        processingRuleSet = { ...response.ruleSet, rules: normalized.rules };
+        resolve({ ok: true });
+      });
+    } catch {
+      resolve({ ok: processingRuleSet?.mode !== 'remote-required', error: 'network' });
+    }
+  });
+}
+
+async function createFreshPreview() {
+  const refresh = await refreshProcessingRules();
+  if (!refresh.ok) return formatPreview(blockedFillResult('processing-rules-unavailable', [refresh.error]));
+  return createReviewedPreview();
+}
+
+async function applyFreshPreview(options) {
+  const previewVersion = lastPreview?.ruleSetVersion || '';
+  const refresh = await refreshProcessingRules();
+  if (!refresh.ok) return blockedFillResult('processing-rules-unavailable', [refresh.error]);
+  if (previewVersion !== (processingRuleSet?.versionId || '')) return blockedFillResult('processing-rules-changed');
+  return finalizeRecovery(await applyReviewedPreview(options));
+}
 
 // Helper to find any editable element inside a cell
 function findEditableElement(cell) {
@@ -185,10 +246,11 @@ function setElementValue(el, value) {
 function setCellValue(cell, value, batch) {
   const editableEl = findEditableElement(cell);
   if (editableEl) {
-    batch.push({ element: editableEl, value: getElementValue(editableEl) });
+    const entry = { element: editableEl, value: getElementValue(editableEl), after: String(value) };
+    batch.push(entry);
     setElementValue(editableEl, value);
   } else {
-    batch.push({ element: cell, value: cell.textContent });
+    batch.push({ element: cell, value: cell.textContent, after: String(value) });
     cell.textContent = value;
     cell.dispatchEvent(new Event('input', { bubbles: true }));
     cell.dispatchEvent(new Event('change', { bubbles: true }));
@@ -304,6 +366,8 @@ function inspectPortalLayout() {
 // for hard-blocked states (expired/suspended/unlicensed).
 function evaluateLicenceGate(state, apply) {
   if (!state) return apply ? { blocked: true, reason: 'signed-out' } : { blocked: false };
+  if (state.status === 'update-required') return { blocked: true, reason: 'update-required' };
+  if (state.status === 'maintenance') return { blocked: true, reason: 'maintenance' };
   if (apply && state.applyAllowed !== true) {
     return { blocked: true, reason: state.status === 'unverified' ? 'licence-unverified' : 'licence-apply-blocked' };
   }
@@ -339,6 +403,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   if (licenceGate.blocked) return blockedFillResult(licenceGate.reason);
 
   const isPharmacyPage = location.pathname.startsWith('/RGHS/tpaPharmacy');
+  const bundledFallbackEnabled = processingRuleSet?.mode !== 'remote-required'
+    || processingRuleSet.bundledFallbackEnabled !== false;
   if (location.pathname.startsWith('/RGHS/processSheetSearch/') || isPharmacyPage) {
     const layout = inspectPortalLayout();
     if (!layout.ok) return blockedFillResult('unsupported-layout', [layout.reason]);
@@ -357,6 +423,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   const batch = [];
   const proposals = [];
   const rowElements = new Map();
+  let processingBlock = null;
+  const processingWarnings = [];
   const tables = collectTables(roots);
   debugLog(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
 
@@ -375,6 +443,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     let p25Idx = -1;
     let approvedIdx = -1;
     let remarksIdx = -1;
+    let configuredColumnIndices = {};
 
     // Find header row
     for (const row of allRows) {
@@ -419,6 +488,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         if (text === 'remarks' || text === 'remark') {
           remarksIdx = i;
         }
+        const columnKey = configuredColumnKey(text);
+        if (columnKey) configuredColumnIndices[columnKey] = i;
       }
 
       if (claimIdx !== -1 && approvedIdx !== -1) {
@@ -438,6 +509,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         p25Idx = -1;
         approvedIdx = -1;
         remarksIdx = -1;
+        configuredColumnIndices = {};
       }
     }
 
@@ -483,6 +555,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       const adjQuantityIdx = quantityIdx !== -1 ? quantityIdx + offset : -1;
       const adjDateIdx = dateIdx !== -1 ? dateIdx + offset : -1;
       const adjP25Idx = p25Idx !== -1 ? p25Idx + offset : -1;
+      const targetCells = {};
+      for (const [columnKey, columnIndex] of Object.entries(configuredColumnIndices)) {
+        const adjustedIndex = columnIndex + offset;
+        if (adjustedIndex >= 0 && adjustedIndex < cells.length) targetCells[columnKey] = cells[adjustedIndex];
+      }
 
       if (cells.length <= Math.max(adjClaimIdx, adjApprovedIdx)) continue;
 
@@ -502,6 +579,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       const dateValue = adjDateIdx !== -1 && adjDateIdx < cells.length ? getCellValue(cells[adjDateIdx]) : '';
       const p25Value = adjP25Idx !== -1 && adjP25Idx < cells.length ? getCellValue(cells[adjP25Idx]) : '';
       const remarksCell = adjRemarksIdx !== -1 && adjRemarksIdx < cells.length ? cells[adjRemarksIdx] : null;
+      if (remarksCell) targetCells.remarks = remarksCell;
 
       records.push({
         rowEl: row,
@@ -509,6 +587,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         claimCell,
         approvedCell,
         remarksCell,
+        targetCells,
         claimValue: getCellValue(claimCell),
         approvedValue: getCellValue(approvedCell),
         particularText,
@@ -524,7 +603,81 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
     // Second pass: audit for unbundling/duplicates before any auto-fill
     const auditedRows = new Set();
-    const supportsPackageAudit = !isPharmacyPage;
+    if (processingRuleSet?.mode === 'remote-required' && ProcessingRules && records.length > 0) {
+      const evaluation = ProcessingRules.evaluate(processingRuleSet, records.map(record => ({
+        index: record.index,
+        particularText: record.particularText,
+        packageText: record.packageText,
+        claimValue: record.claimValue,
+        approvedValue: record.approvedValue
+      })), processingAreaForPage());
+      if (!evaluation.ok) {
+        processingBlock = { reason: 'invalid-processing-rule-set', details: evaluation.errors };
+        return;
+      }
+      if (evaluation.blocked) {
+        processingBlock = {
+          reason: evaluation.validations.length ? 'processing-validation-required' : 'processing-rule-blocked',
+          details: [...evaluation.blockMessages, ...evaluation.validations].map(item => `${item.ruleId}: ${item.message}`)
+        };
+        return;
+      }
+      processingWarnings.push(...evaluation.warnings);
+      for (const action of evaluation.rowActions) {
+        const record = records.find(item => item.index === action.rowIndex);
+        if (!record) continue;
+        const missingColumn = Object.keys(action.remarks).find(columnKey => !record.targetCells[columnKey]);
+        if (missingColumn) {
+          processingBlock = {
+            reason: 'processing-rule-target-missing',
+            details: [`${action.ruleIds.join(', ')}: ${missingColumn}`]
+          };
+          return;
+        }
+        auditedRows.add(record.index);
+        const key = `table-${tableIndex}-row-${record.index}`;
+        const beforeApproved = Core.parseAmount(record.approvedValue) || 0;
+        const generatedRemarks = Object.values(action.remarks).filter(Boolean);
+        const existingRemark = record.remarksValue ? `${record.remarksValue}; ` : '';
+        proposals.push({
+          key,
+          tableIndex,
+          rowIndex: record.index,
+          label: record.particularText.trim() || record.packageText.trim() || `Row ${record.index}`,
+          packageText: record.packageText.trim(),
+          claimAmount: Core.parseAmount(record.claimValue) || 0,
+          beforeApproved,
+          proposedApproved: action.proposedApproved,
+          beforeRemarks: record.remarksValue,
+          proposedRemarks: generatedRemarks.length ? existingRemark + generatedRemarks.join('; ') : null,
+          targetRemarks: action.remarks,
+          remarkModes: action.remarkModes,
+          risk: action.enforcement === 'advisory' ? 'high' : 'medium',
+          enforcement: action.enforcement,
+          mandatory: action.enforcement === 'mandatory',
+          reason: `Centrally governed rule${action.ruleIds.length === 1 ? '' : 's'}: ${action.ruleIds.join(', ')}`,
+          ruleIds: action.ruleIds
+        });
+        rowElements.set(key, record.rowEl);
+        if (!apply || selectedRowKeys && !selectedRowKeys.has(key)) continue;
+        setCellValue(record.approvedCell, String(action.proposedApproved), batch);
+        approvedCount++;
+        for (const [columnKey, remark] of Object.entries(action.remarks)) {
+          if (!remark) continue;
+          const cell = record.targetCells[columnKey];
+          const existing = getCellValue(cell);
+          const next = action.remarkModes[columnKey] === 'replace' || !existing ? remark : `${existing}; ${remark}`;
+          setCellValue(cell, next, batch);
+          remarksCount++;
+        }
+        attachFeedbackControls(record, action.ruleIds, {
+          url: location.href,
+          tid: findTid(),
+          mode: 'centrally-governed'
+        });
+      }
+    }
+    const supportsPackageAudit = !isPharmacyPage && bundledFallbackEnabled;
     if (supportsPackageAudit && Audit && AuditRules && auditMode !== 'off' && records.length > 0) {
       const lines = records.map(record => ({
         index: record.index,
@@ -537,10 +690,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         unitValue: record.unitValue,
         dateValue: record.dateValue
       }));
-      const editableRules = globalThis.RGHSCustomRules
+      const centrallyGoverned = processingRuleSet?.mode === 'remote-required';
+      const editableRules = !centrallyGoverned && globalThis.RGHSCustomRules
         ? globalThis.RGHSCustomRules.mergeRuleSet(AuditRules, customRuleConfig)
         : AuditRules;
-      const effectiveRules = Audit.applyRuleOverrides(editableRules, ruleOverrides);
+      const effectiveRules = Audit.applyRuleOverrides(editableRules, centrallyGoverned ? {} : ruleOverrides);
       const findings = Audit.analyzeClaim(lines, effectiveRules);
       const { rowActions } = Audit.planAuditActions(findings, lines, {
         mode: auditMode,
@@ -557,6 +711,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       for (const [rowIndex, actions] of actionsByRow) {
         const record = records.find(r => r.index === rowIndex);
         if (!record) continue;
+        if (auditedRows.has(rowIndex)) continue;
         auditedRows.add(rowIndex);
 
         const deductAction = actions.find(action => action.setApproved !== null);
@@ -674,7 +829,14 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     for (const record of records) {
       if (auditedRows.has(record.index)) continue;
 
-      const plan = isPharmacyPage
+      const plan = !bundledFallbackEnabled
+        ? Core.planRowUpdate({
+            claimValue: record.claimValue,
+            approvedValue: record.approvedValue,
+            particularText: '',
+            remarksValue: record.remarksValue
+          })
+        : isPharmacyPage
         ? Core.planPharmacyRowUpdate({
             claimTotalValue: record.claimValue,
             p25Value: record.p25Value,
@@ -739,6 +901,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
     debugLog(`[Claim Auto-Fill] Processed ${dataRowNum} data rows from table ${tableIndex + 1}`);
   });
 
+  if (processingBlock) return blockedFillResult(processingBlock.reason, processingBlock.details);
+
   // Fallback: Find by input name/id attributes
   if (proposals.length === 0) {
     debugLog('[Claim Auto-Fill] Table strategy found nothing, trying input name/id matching...');
@@ -754,13 +918,26 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         const parent = input.closest('tr, div, form, fieldset');
         if (!parent) return;
 
-        const siblings = parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea');
-        for (const [siblingIndex, sib] of [...siblings].entries()) {
-          if (sib === input) continue;
-          const sName = (sib.name || '').toLowerCase();
-          const sId = (sib.id || '').toLowerCase();
-          if (sName.includes('approved') || sName.includes('sanctioned') ||
-              sId.includes('approved') || sId.includes('sanctioned')) {
+        const siblings = [...parent.querySelectorAll('input[type="text"], input[type="number"], input:not([type]), textarea')];
+        const approvedSiblings = siblings.filter(sib => {
+          const field = `${sib.name || ''} ${sib.id || ''}`.toLowerCase();
+          return field.includes('approved') || field.includes('sanctioned');
+        });
+        const claimSiblings = siblings.filter(sib => {
+          const field = `${sib.name || ''} ${sib.id || ''}`.toLowerCase();
+          return field.includes('claim');
+        });
+        const identity = element => `${element.name || ''} ${element.id || ''}`.toLowerCase()
+          .replace(/claim|approved|sanctioned|amount|amt/g, '').replace(/[^a-z0-9]/g, '');
+        const inputIdentity = identity(input);
+        const candidates = claimSiblings.length === 1 && approvedSiblings.length === 1
+          ? approvedSiblings
+          : inputIdentity
+            ? approvedSiblings.filter(sib => identity(sib) === inputIdentity)
+            : [];
+        if (candidates.length !== 1) return;
+        for (const sib of candidates) {
+          const siblingIndex = siblings.indexOf(sib);
             if (proposedApprovedInputs.has(sib)) continue;
             const claimVal = input.value.trim();
             const appVal = sib.value.trim();
@@ -786,27 +963,33 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
               rowElements.set(key, parent);
               if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
               if (apply) {
-                batch.push({ element: sib, value: getElementValue(sib) });
                 const approvedValue = Object.prototype.hasOwnProperty.call(approvedOverrides, key)
                   ? String(approvedOverrides[key])
                   : String(amount);
+                batch.push({ element: sib, value: getElementValue(sib), after: approvedValue });
                 setElementValue(sib, approvedValue);
               }
               approvedCount++;
             }
-          }
         }
       }
     });
   }
 
   if (apply && batch.length > 0) undoBatch = batch;
-  if (apply && batch.length > 0) persistRecoverySnapshot(batch);
+  const recoveryWrite = apply && batch.length > 0
+    ? persistRecoverySnapshot(batch)
+    : Promise.resolve(true);
   if (apply && auditLogEntries.length > 0) appendAuditLog(auditLogEntries);
   const count = approvedCount + remarksCount + auditFlagged + auditDeducted;
   debugLog(`[Claim Auto-Fill] Done. ${apply ? 'Filled' : 'Previewed'} ${approvedCount} approved amount(s), ${remarksCount} remark(s); audit: ${auditDeducted} deducted, ${auditFlagged} flagged`);
   updateAuditBadge(auditFlagged + auditDeducted);
-  return { count, changedFieldCount: batch.length, approvedCount, remarksCount, auditFlagged, auditDeducted, proposals, rowElements };
+  return {
+    count, changedFieldCount: batch.length, approvedCount, remarksCount,
+    auditFlagged, auditDeducted, processingWarnings, proposals, rowElements,
+    _recoveryWrite: recoveryWrite,
+    _undoBatch: batch
+  };
 }
 
 // Best-effort tab badge showing how many audit findings are open on this page.
@@ -833,9 +1016,12 @@ function formatPreview(raw, createdAt = Date.now()) {
     remarksCount: raw.remarksCount,
     auditFlagged: raw.auditFlagged,
     auditDeducted: raw.auditDeducted,
+    processingWarnings: raw.processingWarnings || [],
     proposals: raw.proposals,
     token,
     createdAt,
+    ruleSetVersion: processingRuleSet?.versionId || '',
+    ruleSetChecksum: processingRuleSet?.checksum || '',
     reconciliation: Review.reconcile(raw.proposals),
     blocked: raw.blocked === true,
     blockReason: raw.blockReason || null,
@@ -866,9 +1052,15 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
   }
   const current = formatPreview(currentRaw, lastPreview?.createdAt);
   const selectedKeys = Array.isArray(selectedRowKeys) ? [...new Set(selectedRowKeys)] : [];
+  const missingMandatory = current.proposals.some(proposal => proposal.mandatory && !selectedKeys.includes(proposal.key));
+  if (missingMandatory) return { blocked: true, blockReason: 'mandatory-action-required', count: 0 };
+  const mandatoryRemarkOverride = Object.keys(remarkOverrides).some(key =>
+    current.proposals.some(proposal => proposal.key === key && proposal.mandatory));
+  if (mandatoryRemarkOverride) return { blocked: true, blockReason: 'mandatory-action-override', count: 0 };
   const invalidOverride = Object.entries(approvedOverrides).some(([key, value]) => {
     const proposal = current.proposals.find(item => item.key === key);
     if (!proposal || !selectedKeys.includes(key)) return true;
+    if (proposal.mandatory) return Math.abs(Number(value) - Number(proposal.proposedApproved)) >= 0.005;
     const allowed = [0, proposal.claimAmount, proposal.beforeApproved, proposal.proposedApproved, proposal.recommendedApproved]
       .filter(item => item !== null && item !== undefined)
       .map(Number);
@@ -909,7 +1101,6 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
     return { ...result, rowElements: undefined, proposals: undefined };
   }
   const ruleIds = [...new Set(selected.flatMap(proposal => proposal.ruleIds || []))];
-  appendClaimActivity('apply', { rowCount: selected.length, fieldCount: result.changedFieldCount, totals: validation.totals, ruleIds });
   lastPreview = null;
   previewRowElements = new Map();
   return {
@@ -917,7 +1108,13 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
     proposals: undefined,
     rowElements: undefined,
     blocked: false,
-    reconciliation: validation.totals
+    reconciliation: validation.totals,
+    _activityDetails: {
+      rowCount: selected.length,
+      fieldCount: result.changedFieldCount,
+      totals: validation.totals,
+      ruleIds
+    }
   };
 }
 
@@ -1147,20 +1344,28 @@ function installPassiveAuditObserver() {
   if (!Core.isSupportedClaimPage(location.pathname)) return;
   const observer = new MutationObserver(mutations => {
     const addedNodes = mutations.flatMap(mutation => [...mutation.addedNodes]);
-    if (addedNodes.length) schedulePassiveAudit(addedNodes);
+    const changedTextParents = mutations
+      .filter(mutation => mutation.type === 'characterData')
+      .map(mutation => mutation.target.parentElement)
+      .filter(Boolean);
+    if (addedNodes.length || changedTextParents.length) schedulePassiveAudit([...addedNodes, ...changedTextParents]);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+  const scheduleFromField = event => {
+    const row = event.target?.closest?.('tr') || event.target?.parentElement;
+    schedulePassiveAudit([row || document]);
+  };
+  document.addEventListener('input', scheduleFromField, true);
+  document.addEventListener('change', scheduleFromField, true);
   schedulePassiveAudit([document]);
 }
 
-let cachedTid;
 function findTid() {
   // Pharmacy claims share one route and replace the selected transaction in
   // place. Read its live hidden identifier on every call so recovery data from
   // a previously opened claim cannot be reused for the next one.
   const pharmacyTid = document.getElementById?.('transid')?.value?.trim();
   if (pharmacyTid) return pharmacyTid;
-  if (cachedTid !== undefined) return cachedTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
   // Process sheets label the claim "TID: <code>"; tpaOPD labels it
   // "transaction id [OPD] :-<code>" instead - both need to resolve to a
@@ -1174,7 +1379,6 @@ function findTid() {
     match = text.match(pattern);
     if (match) break;
   }
-  if (match) cachedTid = match[1];
   return match ? match[1] : '';
 }
 
@@ -1208,7 +1412,7 @@ function appendClaimActivity(event, details = {}) {
     tid: findTid(),
     path: location.pathname,
     extensionVersion: chrome.runtime.getManifest().version,
-    ruleSetVersion: AuditRules?.version || '',
+    ruleSetVersion: processingRuleSet?.versionId || AuditRules?.version || '',
     blocked: details.blocked === true,
     blockReason: String(details.blockReason || ''),
     rowCount: Number(details.rowCount) || 0,
@@ -1270,6 +1474,20 @@ function recordAuditFeedback(record, ruleIds, verdict, context) {
     verdict
   }));
   appendStorageEntries('rghsAuditFeedback', entries);
+  if (verdict === 'dismissed' && processingRuleSet?.versionId) {
+    for (const ruleId of ruleIds) {
+      chrome.runtime.sendMessage({
+        action: 'submitProcessingRuleFeedback',
+        data: {
+          ruleId,
+          ruleSetVersion: processingRuleSet.versionId,
+          category: 'rule_triggered_incorrectly',
+          processingArea: processingAreaForPage(),
+          packageCodes: []
+        }
+      }, () => { void chrome.runtime.lastError; });
+    }
+  }
 }
 
 function appendAuditLog(entries) {
@@ -1280,7 +1498,7 @@ function persistRecoverySnapshot(batch) {
   const entries = batch
     .filter(item => item.element?.id)
     .map(item => ({ id: item.element.id, before: String(item.value ?? ''), after: getElementValue(item.element) }));
-  if (!entries.length) return;
+  if (!entries.length || entries.length !== batch.length) return Promise.resolve(false);
 
   const snapshot = {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1290,7 +1508,31 @@ function persistRecoverySnapshot(batch) {
     version: chrome.runtime.getManifest().version,
     entries
   };
-  appendStorageEntries('claimRecoverySnapshots', [snapshot]);
+  return appendStorageEntries('claimRecoverySnapshots', [snapshot]);
+}
+
+async function finalizeRecovery(result) {
+  const {
+    _recoveryWrite: recoveryWrite = Promise.resolve(true),
+    _undoBatch: resultUndoBatch = [],
+    _activityDetails: activityDetails = null,
+    ...publicResult
+  } = result || {};
+  if (publicResult.blocked || publicResult.changedFieldCount === 0) return publicResult;
+  const recoverySaved = await recoveryWrite;
+  if (recoverySaved) {
+    if (activityDetails) appendClaimActivity('apply', activityDetails);
+    return { ...publicResult, recoverySaved: true };
+  }
+  if (undoBatch === resultUndoBatch) undoBatch = [];
+  const restored = restoreFillBatch(resultUndoBatch, { removeRecovery: false });
+  appendClaimActivity('apply-blocked', { blockReason: 'recovery-save-failed' });
+  return {
+    ...blockedFillResult('recovery-save-failed'),
+    changedFieldCount: 0,
+    restoredFieldCount: restored,
+    recoverySaved: false
+  };
 }
 
 function getMatchingRecoverySnapshot(callback) {
@@ -1313,9 +1555,14 @@ function restorePersistentSnapshot() {
     getMatchingRecoverySnapshot(snapshot => {
       if (!snapshot) return resolve({ count: 0, hasRecovery: false });
       let count = 0;
+      let conflicts = 0;
       for (const entry of snapshot.entries) {
         const element = document.getElementById(entry.id);
         if (!element?.isConnected) continue;
+        if (getElementValue(element) !== String(entry.after ?? '')) {
+          conflicts++;
+          continue;
+        }
         setElementValue(element, entry.before);
         count++;
       }
@@ -1325,7 +1572,7 @@ function restorePersistentSnapshot() {
         queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
       }
       appendClaimActivity('restore', { fieldCount: count });
-      resolve({ count, hasRecovery: !fullyRestored });
+      resolve({ count, conflicts, hasRecovery: !fullyRestored });
     });
   });
 }
@@ -1334,19 +1581,18 @@ function hasPersistentRecovery(callback) {
   getMatchingRecoverySnapshot(snapshot => callback(Boolean(snapshot)));
 }
 
-function undoLastFill() {
-  const batch = undoBatch;
-  undoBatch = [];
+function restoreFillBatch(batch, { removeRecovery = true } = {}) {
   let count = 0;
   for (let index = batch.length - 1; index >= 0; index--) {
     const element = batch[index].element;
     if (!element?.isConnected) continue;
+    if (getElementValue(element) !== String(batch[index].after ?? '')) continue;
     setElementValue(element, batch[index].value);
     count++;
   }
   if (count > 0) {
     appendClaimActivity('undo', { fieldCount: count });
-    if (count === batch.length) {
+    if (removeRecovery && count === batch.length) {
       getMatchingRecoverySnapshot(snapshot => {
         if (snapshot) queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
       });
@@ -1355,13 +1601,27 @@ function undoLastFill() {
   return count;
 }
 
+function undoLastFill() {
+  const batch = undoBatch;
+  undoBatch = [];
+  return restoreFillBatch(batch);
+}
+
 globalThis.ClaimAutoFillActions = {
   preview() {
     const result = createReviewedPreview();
     return { ...result, hasUndo: undoBatch.length > 0 };
   },
-  apply(options) {
-    const result = applyReviewedPreview(options);
+  async apply(options) {
+    const result = await finalizeRecovery(applyReviewedPreview(options));
+    return { ...result, hasUndo: undoBatch.length > 0 };
+  },
+  async previewFresh() {
+    const result = await createFreshPreview();
+    return { ...result, hasUndo: undoBatch.length > 0 };
+  },
+  async applyFresh(options) {
+    const result = await applyFreshPreview(options);
     return { ...result, hasUndo: undoBatch.length > 0 };
   },
   undo() {

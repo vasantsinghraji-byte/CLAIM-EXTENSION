@@ -131,6 +131,30 @@ input, select, textarea {
   background: #f8fafc;
 }
 .inline-form .button { align-self: end; }
+.rule-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 18px 0 24px;
+  padding: 18px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.rule-form label { display: grid; gap: 6px; font-weight: 650; }
+.rule-form .wide-field { grid-column: 1 / -1; }
+.check-label { grid-template-columns: auto 1fr !important; align-items: center; align-self: end; min-height: 42px; }
+.check-label input { width: auto; min-height: 0; }
+.publish-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.impact-box { margin: 12px 0 22px; padding: 16px; border: 1px solid #f59e0b; border-radius: 9px; background: #fffbeb; }
+.rule-builder-section { border: 1px solid #d7dee8; border-radius: 9px; padding: 14px; }
+.rule-builder-section legend { padding: 0 6px; font-weight: 750; }
+.builder-list { display: grid; gap: 10px; margin: 10px 0; }
+.builder-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; align-items: end; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.builder-row label { font-size: .92rem; }
+.builder-row .builder-wide { grid-column: 1 / -1; }
+.builder-remove { justify-self: start; }
+.scenario-lines { display: grid; gap: 8px; grid-column: 1 / -1; }
+.code-meta { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 
 .record-list { display: grid; gap: 10px; margin-top: 18px; }
 .record {

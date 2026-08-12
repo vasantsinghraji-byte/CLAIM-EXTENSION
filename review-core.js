@@ -16,7 +16,12 @@
       beforeRemarks: String(proposal.beforeRemarks || ''),
       proposedRemarks: proposal.proposedRemarks === null ? null : String(proposal.proposedRemarks),
       risk: RISK_ORDER[proposal.risk] === undefined ? 'high' : proposal.risk,
-      reason: String(proposal.reason || '')
+      reason: String(proposal.reason || ''),
+      enforcement: String(proposal.enforcement || 'advisory'),
+      mandatory: proposal.mandatory === true,
+      targetRemarks: proposal.targetRemarks && typeof proposal.targetRemarks === 'object'
+        ? Object.fromEntries(Object.entries(proposal.targetRemarks).sort(([left], [right]) => left.localeCompare(right)))
+        : {}
     };
   }
 

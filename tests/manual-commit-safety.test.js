@@ -11,7 +11,8 @@ test('page load and storage initialization never apply claim changes', () => {
     source.indexOf('// Listen for messages from popup')
   );
   assert.doesNotMatch(initialization, /fillAllApprovedAmounts\s*\(/);
-  assert.match(source, /new MutationObserver[\s\S]*?schedulePassiveAudit\(addedNodes\)/);
+  assert.match(source, /new MutationObserver[\s\S]*?characterData: true[\s\S]*?addEventListener\('input', scheduleFromField, true\)/);
+  assert.match(source, /addEventListener\('change', scheduleFromField, true\)/);
   assert.match(source, /function refreshPassiveAuditHighlights\(\)[\s\S]*?fillAllApprovedAmounts\(\{ apply: false \}\)/);
   assert.doesNotMatch(source, /function refreshPassiveAuditHighlights\(\)[\s\S]*?fillAllApprovedAmounts\(\{ apply: true \}\)/);
 });
@@ -25,7 +26,7 @@ test('enabling claim tools never applies claim changes', () => {
 });
 
 test('writes remain behind explicit fillNow and Apply actions', () => {
-  assert.match(source, /request\.action === 'fillNow'[\s\S]*?applyReviewedPreview\(request\)/);
+  assert.match(source, /request\.action === 'fillNow'[\s\S]*?applyFreshPreview\(request\)/);
   assert.match(source, /apply\(options\)\s*{[\s\S]*?applyReviewedPreview\(options\)/);
   assert.match(source, /function applyReviewedPreview[\s\S]*?fillAllApprovedAmounts\(\{\s*apply: true/);
 });
@@ -65,18 +66,20 @@ test('failed persistent recovery keeps the only saved snapshot', () => {
     'the zero-restore guard must run before snapshot removal'
   );
   assert.match(recovery, /const fullyRestored = count === snapshot\.entries\.length;/);
-  assert.match(recovery, /resolve\(\{ count, hasRecovery: !fullyRestored \}\)/);
+  assert.match(recovery, /getElementValue\(element\) !== String\(entry\.after \?\? ''\)/);
+  assert.match(recovery, /resolve\(\{ count, conflicts, hasRecovery: !fullyRestored \}\)/);
 });
 
 test('session undo restores only connected controls and preserves recovery after partial failure', () => {
   const undo = source.slice(
-    source.indexOf('function undoLastFill'),
+    source.indexOf('function restoreFillBatch'),
     source.indexOf('globalThis.ClaimAutoFillActions')
   );
   assert.match(undo, /if \(!element\?\.isConnected\) continue;/);
   assert.match(undo, /appendClaimActivity\('undo', \{ fieldCount: count \}\)/);
-  assert.match(undo, /if \(count === batch\.length\)[\s\S]*?removeRecoverySnapshot/);
+  assert.match(undo, /if \(removeRecovery && count === batch\.length\)[\s\S]*?removeRecoverySnapshot/);
   assert.match(undo, /return count;/);
+  assert.match(source, /restoreFillBatch\(resultUndoBatch, \{ removeRecovery: false \}\)/);
 });
 
 test('fallback input matching participates in preview and reviewed apply', () => {
@@ -102,7 +105,7 @@ test('fallback preview counts only emitted proposals and never performs a write'
   assert.doesNotMatch(fallback, /: claimVal;/);
 });
 
-test('disabled apply returns a complete blocked result and cannot record an apply event', () => {
+test('disabled or unrecoverable apply cannot record a successful apply event', () => {
   const blockedResult = source.slice(
     source.indexOf('function blockedFillResult'),
     source.indexOf('// Fill all approved amounts')
@@ -110,17 +113,19 @@ test('disabled apply returns a complete blocked result and cannot record an appl
   assert.match(blockedResult, /changedFieldCount: 0/);
   assert.match(source, /if \(!isAutoFillEnabled && apply\) \{\s*return blockedFillResult\('autofill-disabled'\);/);
 
-  const reviewedApply = source.slice(
+  const recoveryFinalize = source.slice(
+    source.indexOf('async function finalizeRecovery'),
+    source.indexOf('function getMatchingRecoverySnapshot')
+  );
+  assert.match(recoveryFinalize, /if \(recoverySaved\) \{[\s\S]*?appendClaimActivity\('apply', activityDetails\)/);
+  assert.match(recoveryFinalize, /appendClaimActivity\('apply-blocked', \{ blockReason: 'recovery-save-failed' \}\)/);
+  assert.doesNotMatch(source.slice(
     source.indexOf('function applyReviewedPreview'),
-    source.indexOf('function clearDecisionHighlights')
-  );
-  assert.ok(
-    reviewedApply.indexOf('if (result.blocked)') < reviewedApply.indexOf("appendClaimActivity('apply'"),
-    'a disabled apply must return before recording a successful apply event'
-  );
+    source.indexOf('// --- RGHS audit helpers ---')
+  ), /appendClaimActivity\('apply',/);
 });
 
-test('findTid retries an early SPA miss and caches only a successful match', () => {
+test('findTid retries an early SPA miss and follows claim changes on a reused SPA page', () => {
   const findTidSource = source.slice(
     source.indexOf('function findTid()'),
     source.indexOf('let localStorageMutationChain')
@@ -132,14 +137,14 @@ test('findTid retries an early SPA miss and caches only a successful match', () 
   };
   const findTid = Function(
     'document',
-    `let cachedTid; return (${findTidSource});`
+    `return (${findTidSource});`
   )(documentFixture);
 
   assert.equal(findTid(), '', 'an early miss should return empty without becoming permanent');
   bodyText = 'Claim details TID: RGHS/2026/12345';
   assert.equal(findTid(), 'RGHS/2026/12345', 'a later SPA render should be discovered');
   bodyText = 'Claim details TID: DIFFERENT/9999';
-  assert.equal(findTid(), 'RGHS/2026/12345', 'a successful TID may remain cached for the page');
+  assert.equal(findTid(), 'DIFFERENT/9999', 'a later claim must replace the previous claim identifier');
 });
 
 test('nested tables and their rows have exactly one scan owner', () => {

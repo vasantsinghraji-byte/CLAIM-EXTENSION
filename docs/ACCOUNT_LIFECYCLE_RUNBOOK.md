@@ -11,14 +11,72 @@ routine production interface.
 
 1. The processor creates an account in Claim Spark.
 2. The processor verifies the email once.
-3. Claim Spark creates a pending processor profile in the platform organization.
-4. Open the administrator dashboard, refresh **Users**, and approve the account.
-5. The processor clicks **Check Status** and is signed in after licence and
+3. The processor chooses **Continue without organisation sponsorship**.
+4. Claim Spark creates a pending processor profile in the platform organization.
+5. Open the administrator dashboard, refresh **Users**, and approve the account.
+6. The processor clicks **Check Status** and is signed in after licence and
    capacity checks succeed.
 
 Use **Reject** when the registration is not authorized. Rejection requires a
 second confirmation, disables the Firebase identity, revokes its sessions and
 records the administrator decision in the audit log.
+
+### Organisation-sponsored roster signup
+
+1. Create and activate the organization and its organisation licence.
+2. In **Roster**, enter the organization ID and add each authorized employee
+   code with its assigned role. Codes are normalized to uppercase and may be
+   claimed only once.
+3. The processor creates an account and verifies the email.
+4. The processor chooses organisation access and enters the organization ID
+   and employee code.
+5. Claim Spark atomically claims the code and creates a pending sponsored user
+   with an inactive organisation license.
+6. In **Users**, approve the pending account. Approval activates the user's
+   license through the organization licence expiry without a separate license
+   action.
+7. The processor clicks **Check Status** and is signed in.
+
+Available roster codes may be removed. Claimed codes cannot be removed; suspend
+or delete the resulting user according to the applicable account procedure.
+
+Legacy available roster entries that predate email binding must be resubmitted
+with the same organization and employee code plus the employee's verified email.
+This updates the available entry in place; claimed entries cannot be reassigned.
+
+### Individual paid signup
+
+The initial manual channel is an administrator-supplied UPI QR code. Do not
+request or retain card numbers, bank credentials, UPI PINs, passwords or OTPs.
+
+1. Confirm the official receiver is **YUVAN ENTERPRISES** at `yuvanent@ybl`.
+   The fixed plans are ₹99/1 week, ₹198/2 weeks, ₹300/4 weeks and ₹500/12 weeks.
+   Send the official UPI QR through an approved channel outside the extension.
+2. The user creates an account, verifies the email and chooses
+   **I'll Purchase Individually**.
+3. After completing payment, the user submits only the UPI transaction ID
+   (UTR) in the extension.
+4. In **Users → Payment verification**, compare the submitted reference with
+   the corresponding settled UPI transaction before verifying it.
+5. Click **Verify payment** only after the payment is independently confirmed.
+6. Approve the pending account if necessary, then use the existing per-user
+   licence controls to activate the purchased number of weeks.
+7. The user clicks **Check Status** or **Recheck Licence**.
+
+Payment verification and licence activation are deliberately separate audited
+actions. A pending payment cannot be used to activate a new individual licence.
+
+If a UTR cannot be independently matched, use **Mark unverified**, record a
+non-sensitive reason, and ask the user to check and resubmit it. For a confirmed
+refund, reversal or payment dispute, deactivate the related user licence while
+the business decision is handled under the published terms. Never record bank
+credentials or dispute narratives containing sensitive financial information.
+
+Refund requests go to 7073684173 within 3 calendar days of payment. Eligible
+cases are verified duplicate payments, cancellation before activation/use, or a
+verified payment that cannot be fulfilled because access cannot be activated.
+Initiate approved refunds within 3 calendar days. The published Terms list the
+non-refundable cases and applicable-law reservation.
 
 ### Explicit invitation
 

@@ -32,11 +32,16 @@
     return !!session && Number.isFinite(session.expiresAt) && session.expiresAt - skewMs > now;
   }
 
-  async function signInWithPassword({ apiKey, email, password, fetchImpl }) {
+  const configuredAuthBaseUrl = globalThis.ClaimSparkRuntimeConfig?.authBaseUrl
+    || 'https://identitytoolkit.googleapis.com/v1';
+  const configuredTokenBaseUrl = globalThis.ClaimSparkRuntimeConfig?.tokenBaseUrl
+    || 'https://securetoken.googleapis.com/v1';
+
+  async function signInWithPassword({ apiKey, authBaseUrl = configuredAuthBaseUrl, email, password, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+        `${authBaseUrl}/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -46,7 +51,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     return {
       idToken: payload.idToken,
@@ -58,11 +63,11 @@
     };
   }
 
-  async function signUp({ apiKey, email, password, fetchImpl }) {
+  async function signUp({ apiKey, authBaseUrl = configuredAuthBaseUrl, email, password, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${encodeURIComponent(apiKey)}`,
+        `${authBaseUrl}/accounts:signUp?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -72,7 +77,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     return {
       idToken: payload.idToken,
@@ -84,11 +89,11 @@
     };
   }
 
-  async function updateProfile({ apiKey, idToken, displayName, fetchImpl }) {
+  async function updateProfile({ apiKey, authBaseUrl = configuredAuthBaseUrl, idToken, displayName, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${encodeURIComponent(apiKey)}`,
+        `${authBaseUrl}/accounts:update?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -98,16 +103,16 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     return { displayName: payload.displayName || displayName };
   }
 
-  async function sendEmailVerification({ apiKey, idToken, fetchImpl }) {
+  async function sendEmailVerification({ apiKey, authBaseUrl = configuredAuthBaseUrl, idToken, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
+        `${authBaseUrl}/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -117,7 +122,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     return { email: payload.email };
   }
@@ -125,11 +130,11 @@
   // Live lookup of the current server-side account state (email_verified in
   // particular) - more reliable than decoding the idToken's own claims, which
   // only reflect verification status as of when that token was issued.
-  async function accountInfo({ apiKey, idToken, fetchImpl }) {
+  async function accountInfo({ apiKey, authBaseUrl = configuredAuthBaseUrl, idToken, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+        `${authBaseUrl}/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -139,7 +144,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     const user = (payload.users || [])[0] || {};
     return {
@@ -148,11 +153,11 @@
     };
   }
 
-  async function refreshIdToken({ apiKey, refreshToken, fetchImpl }) {
+  async function refreshIdToken({ apiKey, tokenBaseUrl = configuredTokenBaseUrl, refreshToken, fetchImpl }) {
     let response;
     try {
       response = await fetchImpl(
-        `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(apiKey)}`,
+        `${tokenBaseUrl}/token?key=${encodeURIComponent(apiKey)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -162,7 +167,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw normalizeRestError(payload);
     return {
       idToken: payload.id_token,
@@ -188,7 +193,7 @@
     } catch (cause) {
       throw networkError(cause);
     }
-    const payload = await response.json();
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok || (payload && payload.error)) {
       const status = payload && payload.error && payload.error.status ? String(payload.error.status) : 'UNKNOWN';
       const message = payload && payload.error && payload.error.message ? String(payload.error.message) : 'Function call failed';
