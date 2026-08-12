@@ -15,7 +15,7 @@ const {
 const developmentOrigins = ['http://localhost/*', 'http://127.0.0.1/*'];
 const testProductionConfig = {
   apiKey: 'test-firebase-key-not-a-real-credential',
-  functionsBaseUrl: 'https://asia-south1-example-prod.cloudfunctions.net'
+  functionsBaseUrl: 'https://asia-south1-claimextension-prod.cloudfunctions.net'
 };
 const testStagingConfig = {
   apiKey: 'test-staging-key-not-a-real-credential',
@@ -48,7 +48,8 @@ test('runtime Firebase configuration is generated from validated untracked value
   const config = validateEnvironmentConfig(testProductionConfig, 'Test');
   const source = runtimeConfigSource(config);
   assert.match(source, /test-firebase-key-not-a-real-credential/);
-  assert.match(source, /asia-south1-example-prod\.cloudfunctions\.net/);
+  assert.match(source, /asia-south1-claimextension-prod\.cloudfunctions\.net/);
+  assert.match(source, /https:\/\/claimextension-prod\.web\.app\/admin/);
   assert.doesNotMatch(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'background.js'), 'utf8'),
     /AIza[0-9A-Za-z_-]{30,}/);
 });
@@ -61,11 +62,9 @@ test('staging manifest and unpacked build isolate callable Functions from produc
 
   const entries = createStagingBuildEntries(testStagingConfig);
   const runtime = entries.find(entry => entry.name === 'runtime-config.js').data.toString('utf8');
-  const popup = entries.find(entry => entry.name === 'popup.js').data.toString('utf8');
   assert.match(runtime, /asia-south1-claimextension\.cloudfunctions\.net/);
+  assert.match(runtime, /https:\/\/claimextension\.web\.app\/admin/);
   assert.doesNotMatch(runtime, /claimextension-prod/);
-  assert.match(popup, /https:\/\/claimextension\.web\.app\/admin/);
-  assert.doesNotMatch(popup, /claimextension-prod\.web\.app\/admin/);
   assert.throws(() => createStagingManifest(sourceManifest, {
     ...testStagingConfig,
     functionsBaseUrl: 'https://asia-south1-claimextension-prod.cloudfunctions.net'

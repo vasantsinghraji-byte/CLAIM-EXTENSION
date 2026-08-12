@@ -81,6 +81,10 @@ function readBuildConfig(configPath = localConfigPath) {
 }
 
 function runtimeConfigSource(config) {
+  const adminDashboardUrl = {
+    'https://asia-south1-claimextension.cloudfunctions.net': 'https://claimextension.web.app/admin',
+    'https://asia-south1-claimextension-prod.cloudfunctions.net': 'https://claimextension-prod.web.app/admin'
+  }[config.functionsBaseUrl] || '';
   return [
     '(function (root) {',
     "  'use strict';",
@@ -88,7 +92,8 @@ function runtimeConfigSource(config) {
       firebaseApiKey: config.apiKey,
       ...(config.authBaseUrl ? { authBaseUrl: config.authBaseUrl } : {}),
       ...(config.tokenBaseUrl ? { tokenBaseUrl: config.tokenBaseUrl } : {}),
-      functionsBaseUrl: config.functionsBaseUrl
+      functionsBaseUrl: config.functionsBaseUrl,
+      adminDashboardUrl
     })});`,
     '})(globalThis);',
     ''
@@ -217,16 +222,7 @@ function createBuildEntries(productionConfig = readBuildConfig().production) {
 }
 
 function createStagingBuildEntries(stagingConfig = readBuildConfig().development) {
-  return createRemoteBuildEntries(stagingConfig, manifest => createStagingManifest(manifest, stagingConfig))
-    .map(entry => entry.name === 'popup.js'
-      ? {
-          ...entry,
-          data: Buffer.from(entry.data.toString('utf8').replace(
-            'https://claimextension-prod.web.app/admin',
-            'https://claimextension.web.app/admin'
-          ))
-        }
-      : entry);
+  return createRemoteBuildEntries(stagingConfig, manifest => createStagingManifest(manifest, stagingConfig));
 }
 
 function createHostingBuild(config) {

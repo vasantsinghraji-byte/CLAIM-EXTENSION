@@ -29,6 +29,7 @@ test('verified registration is pending until an audited administrator approval',
   assert.match(approval, /transaction\.get\(activeUsersQuery\)/);
   assert.match(approval, /activeUsers\.size >= maximumUsers/);
   assert.match(approval, /expiryDate\) < Date\.now\(\)/);
+  assert.match(approval, /latestUser\.data\(\)\.accountStatus === 'invited'/);
 
   assert.match(functions, /exports\.setUserLicense = onCall/);
   assert.match(functions, /action === 'activate'/);
@@ -145,16 +146,19 @@ test('licence policy and filtered administration queries are enforced server-sid
   }
 });
 
-test('pending count and both dashboard launchers target production administration', () => {
+test('pending count and dashboard launchers use their explicit environment targets', () => {
   const functions = read('functions/index.js');
   const dashboardHtml = read('hosting/admin.html');
   const popup = read('popup.js');
   const launcher = read('launch-admin-dashboard.bat');
+  const productionLauncher = read('launch-production-admin-dashboard.bat');
 
   assert.match(functions, /pendingCount: users\.filter\(user => user\.pendingApproval\)\.length/);
   assert.match(dashboardHtml, /id="pendingCount"/);
   assert.match(dashboardHtml, /id="pendingUsersList"/);
   assert.match(popup, /adminOpenDashboardBtn/);
-  assert.match(popup, /https:\/\/claimextension-prod\.web\.app\/admin/);
-  assert.match(launcher, /start "" "https:\/\/claimextension-prod\.web\.app\/admin"/);
+  assert.match(popup, /ClaimSparkRuntimeConfig\?\.adminDashboardUrl/);
+  assert.match(launcher, /start "" "https:\/\/claimextension\.web\.app\/admin"/);
+  assert.doesNotMatch(launcher, /claimextension-prod/);
+  assert.match(productionLauncher, /start "" "https:\/\/claimextension-prod\.web\.app\/admin"/);
 });

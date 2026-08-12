@@ -628,7 +628,12 @@ adminPanel.addEventListener('toggle', () => {
 });
 
 adminOpenDashboardBtn.addEventListener('click', () => {
-  chrome.tabs.create({ url: 'https://claimextension-prod.web.app/admin' });
+  const url = String(globalThis.ClaimSparkRuntimeConfig?.adminDashboardUrl || '');
+  if (!/^https:\/\/claimextension(?:-prod)?\.web\.app\/admin$/.test(url)) {
+    setAdminStatus('Admin dashboard is unavailable for this build.', 'error');
+    return;
+  }
+  chrome.tabs.create({ url });
 });
 
 adminRefreshOrganizationsBtn.addEventListener('click', loadAdminOrganizations);

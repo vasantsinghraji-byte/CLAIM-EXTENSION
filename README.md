@@ -26,7 +26,9 @@ a constrained fallback. See
 `docs/PHASE_4_PRODUCTION_READINESS.md` for the human-controlled production
 activation gates.
 
-On Windows, run `launch-admin-dashboard.bat` to open the production dashboard
+On Windows, run `launch-admin-dashboard.bat` to open the staging dashboard.
+Release operators can use `launch-production-admin-dashboard.bat` to open the
+production dashboard after production deployment has been approved.
 directly in the default browser.
 
 ## Features

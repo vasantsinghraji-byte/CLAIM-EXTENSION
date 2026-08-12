@@ -869,7 +869,10 @@ exports.activateUser = onCall(callableOptions, async request => {
       }
       const updates = { accountStatus: 'active', updatedAt: FieldValue.serverTimestamp() };
       const latestLicense = latestUser.data().license;
-      if (latestLicense?.type === 'organisation') {
+      // Initial approval inherits the organisation entitlement. Reactivating an
+      // account must not undo an independent per-user licence deactivation.
+      if (latestLicense?.type === 'organisation'
+          && latestUser.data().accountStatus === 'invited') {
         const now = Date.now();
         const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
         const durationWeeks = Math.max(1, Math.ceil((expiryMs - now) / (7 * 24 * 60 * 60 * 1000)));
