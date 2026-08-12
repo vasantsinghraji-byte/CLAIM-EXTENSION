@@ -38,7 +38,7 @@
 
     let applyResult;
     try {
-      applyResult = actions.apply({ token: preview.token, selectedRowKeys, acknowledgedHighRisk: false });
+      applyResult = await actions.apply({ token: preview.token, selectedRowKeys, acknowledgedHighRisk: false });
       if (applyResult.blocked) throw new Error(`Apply was blocked: ${applyResult.blockReason}`);
       if (!applyResult.count) throw new Error('Apply changed no fields.');
     } finally {

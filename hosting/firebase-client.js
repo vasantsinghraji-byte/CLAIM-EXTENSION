@@ -2,6 +2,8 @@
   'use strict';
 
   const API_KEY = '__FIREBASE_API_KEY__';
+  const AUTH_ORIGIN = '__AUTH_BASE_URL__';
+  const TOKEN_ORIGIN = '__TOKEN_BASE_URL__';
   const FUNCTIONS_ORIGIN = '__FUNCTIONS_BASE_URL__';
   const SESSION_KEY = 'claimSparkAdminSession';
 
@@ -49,7 +51,7 @@
 
   async function signIn(email, password) {
     const payload = await jsonRequest(
-      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(API_KEY)}`,
+      `${AUTH_ORIGIN}/accounts:signInWithPassword?key=${encodeURIComponent(API_KEY)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -68,7 +70,7 @@
       refresh_token: existing.refreshToken
     });
     const payload = await jsonRequest(
-      `https://securetoken.googleapis.com/v1/token?key=${encodeURIComponent(API_KEY)}`,
+      `${TOKEN_ORIGIN}/token?key=${encodeURIComponent(API_KEY)}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

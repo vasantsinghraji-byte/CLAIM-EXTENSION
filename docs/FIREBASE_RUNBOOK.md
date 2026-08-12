@@ -32,6 +32,9 @@ local parity even if another compatible Node version is installed globally.
 
 ## Development deployment
 
+Use [`STAGING_DEPLOYMENT_CHECKLIST.md`](STAGING_DEPLOYMENT_CHECKLIST.md) for the
+guarded dashboard and unpacked-extension staging acceptance workflow.
+
 1. Confirm the CLI account with `npx firebase login:list`.
 2. Confirm `git status --short --branch`.
 3. Run all local verification commands.
