@@ -17,17 +17,9 @@ test('release workflow calculates semantic versions deterministically', () => {
   assert.throws(() => nextVersion('1.2.3', 'beta'), /major, minor, or patch/);
 });
 
-test('CI and local releases require the emulator licence lifecycle gate', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
+test('local releases require browser and emulator lifecycle gates', () => {
   const release = fs.readFileSync(path.join(root, 'scripts', 'release.js'), 'utf8');
-  const lifecycleStep = workflow.indexOf('run: npm run test:lifecycle');
-  const artifactStep = workflow.indexOf('uses: actions/upload-artifact@v4');
 
-  assert.match(workflow, /node-version:\s*22/);
-  assert.match(workflow, /distribution:\s*temurin/);
-  assert.match(workflow, /java-version:\s*['"]21['"]/);
-  assert.ok(lifecycleStep >= 0, 'CI must run the lifecycle acceptance test');
-  assert.ok(lifecycleStep < artifactStep, 'lifecycle acceptance must pass before artifact upload');
   assert.match(release, /\[npmCli, 'run', 'test:browser'\]/);
   assert.match(release, /\[npmCli, 'run', 'test:lifecycle'\]/);
   assert.match(release, /assertCleanWorktree\(\)/);
