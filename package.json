@@ -4,17 +4,25 @@
   "description": "Chrome extension that fills approved amounts from claim amounts and audits RGHS bundled packages for unbundling",
   "scripts": {
     "build": "node build.js",
+    "build:emulator": "node build.js --emulator",
+    "build:staging": "node build.js --staging",
+    "emulators:local": "npm run build:emulator && node scripts/start-emulators.js",
+    "emulators:seed": "node scripts/seed-emulators.js",
     "firebase:emulators": "firebase emulators:start --project claimextension",
     "firebase:projects": "firebase projects:list",
     "release": "node scripts/release.js",
+    "verify:artifact": "node scripts/verify-artifact.js",
     "test": "node --test \"tests/*.test.js\"",
+    "test:browser": "node scripts/browser-smoke-e2e.js",
     "test:firebase": "firebase emulators:exec --only firestore \"node --test tests/firebase/firestore-rules.test.js\" --project claimextension-test",
+    "test:lifecycle": "node scripts/run-lifecycle-emulators.js",
+    "test:staging": "node scripts/staging-smoke.js",
     "test:hosting": "npm run build && firebase emulators:exec --only hosting \"node scripts/hosting-smoke.js\" --project claimextension",
     "test:functions": "npm --prefix functions test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "prepare": "git config core.hooksPath .githooks && git config commit.template .gitmessage",
-    "check": "python tools/validate-matrix-coverage.py && node tools/check-no-secrets.js && node --check tools/bootstrap-production-admin.js && node --check build.js && node --check audit-rules.js && node --check custom-rules.js && node --check audit-core.js && node --check auth-core.js && node --check claim-core.js && node --check review-core.js && node --check content.js && node --check background.js && node --check options.js && node --check floating-widget.js && node --check popup.js && node --check hosting/firebase-client.js && node --check hosting/admin.js && node --check scripts/hosting-smoke.js && node --check scripts/live-browser-smoke.js && node --check scripts/release.js && node --test \"tests/*.test.js\"",
+    "prepare": "node tools/setup-git-hooks.js",
+    "check": "python tools/validate-matrix-coverage.py && node tools/check-no-secrets.js && node --check tools/bootstrap-production-admin.js && node --check build.js && node --check audit-rules.js && node --check custom-rules.js && node --check processing-rules.js && node --check audit-core.js && node --check auth-core.js && node --check claim-core.js && node --check review-core.js && node --check content.js && node --check background.js && node --check options.js && node --check floating-widget.js && node --check popup.js && node --check hosting/firebase-client.js && node --check hosting/admin.js && node --check scripts/hosting-smoke.js && node --check scripts/staging-smoke.js && node --check scripts/live-browser-smoke.js && node --check scripts/browser-smoke-e2e.js && node --check scripts/license-lifecycle-acceptance.js && node --check scripts/run-lifecycle-emulators.js && node --check scripts/release.js && node --check scripts/verify-artifact.js && node --test \"tests/*.test.js\"",
     "watch": "nodemon --watch . --ignore dist --ignore tests -e js,html,css,json --exec npm run build"
   },
   "keywords": [
@@ -30,5 +38,10 @@
     "eslint": "^10.7.0",
     "firebase-tools": "^15.24.0",
     "nodemon": "^3.0.1"
+  },
+  "overrides": {
+    "@opentelemetry/core": "^2.8.0",
+    "gaxios": "^7.3.0",
+    "uuid": "^11.1.1"
   }
 }

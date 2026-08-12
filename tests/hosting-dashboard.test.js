@@ -27,7 +27,7 @@ test('Firebase Hosting serves the public site and authenticated administrator da
 test('hosted dashboard exposes the complete Phase 4 administration lifecycle', () => {
   const html = read('hosting/admin.html');
   const source = read('hosting/admin.js');
-  for (const panel of ['users', 'invitations', 'organizations', 'licences', 'audit']) {
+  for (const panel of ['users', 'invitations', 'organizations', 'roster', 'licences', 'audit']) {
     assert.match(html, new RegExp(`data-panel="${panel}"`));
   }
   for (const callable of [
@@ -45,8 +45,13 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
     'listOrganizations',
     'createOrganization',
     'updateOrganization',
+    'listRoster',
+    'addRosterEntry',
+    'removeRosterEntry',
     'activateLicence',
     'suspendLicence',
+    'setUserLicense',
+    'verifyUserPayment',
     'listAuditEvents'
   ]) {
     assert.match(source, new RegExp(`['"]${callable}['"]`));
@@ -57,6 +62,27 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
   assert.match(html, /id="pendingCount"/);
   assert.match(source, /Registration approved\./);
   assert.match(source, /Registration rejected\./);
+  assert.match(source, /license-activate/);
+  assert.match(source, /license-extend/);
+  assert.match(source, /license-deactivate/);
+  assert.match(source, /\[1, 2, 4, 12\]/);
+  assert.match(html, /id="pendingPaymentsList"/);
+  assert.match(source, /payment-verify/);
+  assert.match(source, /payment-decline/);
+});
+
+test('paid access disclosures cover UPI references without collecting credentials', () => {
+  const privacy = read('hosting/privacy.html');
+  const terms = read('hosting/terms.html');
+  const store = read('STORE_LISTING.md');
+  assert.match(privacy, /UPI transaction ID \(UTR\)/);
+  assert.match(privacy, /does not request or store UPI PINs, OTPs, card numbers, passwords or bank-account credentials/);
+  assert.match(terms, /exact plan amount/);
+  assert.match(terms, /₹99 for 1 week/);
+  assert.match(terms, /within 3 calendar days/);
+  assert.match(terms, /7073684173/);
+  assert.match(terms, /refund, reversal or payment dispute/i);
+  assert.match(store, /paid features|in-app purchases/);
 });
 
 test('hosted dashboard keeps authentication session-only and renders untrusted data without HTML injection', () => {
@@ -91,6 +117,35 @@ test('hosting security headers deny framing, remote scripts, sensitive browser c
 test('hosted Firebase client is pinned to the isolated production project', () => {
   const client = read('hosting/firebase-client.js');
   assert.match(client, /__FIREBASE_API_KEY__/);
+  assert.match(client, /__AUTH_BASE_URL__/);
+  assert.match(client, /__TOKEN_BASE_URL__/);
   assert.match(client, /__FUNCTIONS_BASE_URL__/);
   assert.doesNotMatch(client, /AIza[0-9A-Za-z_-]{30,}/);
+});
+
+test('local emulator config binds services to loopback and permits only local backend connections', () => {
+  const config = JSON.parse(read('firebase.emulator.json'));
+  for (const service of ['auth', 'functions', 'firestore', 'hosting']) {
+    assert.equal(config.emulators[service].host, '127.0.0.1');
+  }
+  const policy = config.hosting.headers[0].headers
+    .find(header => header.key === 'Content-Security-Policy').value;
+  assert.match(policy, /http:\/\/127\.0\.0\.1:5001/);
+  assert.match(policy, /http:\/\/127\.0\.0\.1:9099/);
+  assert.doesNotMatch(policy, /cloudfunctions\.net|identitytoolkit\.googleapis\.com/);
+});
+
+test('automated licence lifecycle acceptance stays on isolated emulators', () => {
+  const packageJson = JSON.parse(read('package.json'));
+  const source = read('scripts/license-lifecycle-acceptance.js');
+  const runner = read('scripts/run-lifecycle-emulators.js');
+  assert.match(packageJson.scripts['test:lifecycle'], /run-lifecycle-emulators/);
+  assert.match(runner, /'auth,functions,firestore'/);
+  assert.match(runner, /demo-claimextension/);
+  assert.match(runner, /nodeMajor\(candidate\) === 22/);
+  assert.match(source, /FIREBASE_AUTH_EMULATOR_HOST = '127\.0\.0\.1:9099'/);
+  assert.match(source, /FIRESTORE_EMULATOR_HOST = '127\.0\.0\.1:8080'/);
+  assert.match(source, /testSponsoredLifecycle/);
+  assert.match(source, /testIndividualLifecycle/);
+  assert.match(source, /ACCEPTANCE-UPI-UTR-0001/);
 });

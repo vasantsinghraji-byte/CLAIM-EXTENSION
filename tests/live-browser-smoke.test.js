@@ -15,7 +15,7 @@ test('live-browser smoke runs preview, apply, and undo and proves exact restorat
       calls.push('preview');
       return { token: 'safe-token', proposals: [{ key: 'row-0', risk: 'low' }] };
     },
-    apply: options => {
+    apply: async options => {
       calls.push(['apply', options]);
       fields[0].value = '100';
       hasUndo = true;
@@ -34,6 +34,7 @@ test('live-browser smoke runs preview, apply, and undo and proves exact restorat
 
   assert.equal(result.passed, true);
   assert.equal(result.submitted, false);
+  assert.equal(result.appliedFields, 1);
   assert.equal(result.restoredControls, 2);
   assert.deepEqual(calls, [
     'preview',

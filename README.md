@@ -1,8 +1,22 @@
 # Claim Amount Auto-Fill Chrome Extension
 
+Centralized processing-rule governance, publishing, rollback, and processor feedback are documented in [`docs/CENTRALIZED_RULE_GOVERNANCE.md`](docs/CENTRALIZED_RULE_GOVERNANCE.md).
+
+Fully isolated Auth, Functions, Firestore, Hosting, and extension testing is
+documented in [`docs/LOCAL_EMULATOR_TESTING.md`](docs/LOCAL_EMULATOR_TESTING.md).
+
+Non-production Firebase deployment and browser acceptance are documented in
+[`docs/STAGING_DEPLOYMENT_CHECKLIST.md`](docs/STAGING_DEPLOYMENT_CHECKLIST.md).
+
 An authenticated Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
+
+Paid-feature entitlement is represented separately from account approval by a
+per-user license record. Organisation-sponsored onboarding uses a single-use
+roster code and automatically activates the user's licence when an administrator
+approves the account. Individual users pay against an administrator-supplied
+UPI QR code and submit the resulting UPI transaction ID (UTR) for verification.
 
 Current release: **1.11.0**. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
@@ -27,8 +41,12 @@ directly in the default browser.
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
 - **Controlled Processor Signup**: A processor creates an account and verifies
-  the email once; a platform administrator approves the pending account from
-  the dashboard before licensed access is granted
+  the email once, chooses an access path, and waits for administrator approval
+- **Organisation Roster Access**: Platform administrators maintain single-use
+  employee codes; sponsored licence activation is automatic on user approval
+- **Individual Paid Access**: Users submit only a UPI transaction ID (UTR)
+  reference; fixed ₹99/₹198/₹300/₹500 plans map to 1/2/4/12-week licences, and
+  verification and timed licence activation remain separate audited actions
 - **Explicit Invitations**: Invitations remain available for non-default
   organization or elevated-role assignments
 - **Administrator Controls**: Development licence renewal, invitation
@@ -261,7 +279,7 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 - Documentation-dependent upcoding risks (fracture extent, radical hysterectomy, fusion/fixation, burns severity, radiotherapy fractions, multi-trauma extent, cataract/SFIOL technique, and pacemaker/CRT configuration) create review-only proposals even when no second billed component is present.
 - Portal Submit controls are left untouched after extension-applied changes, so IPD, OPD, and Pharmacy claims retain their normal one-click submission behavior.
 - The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
-- Use `npm run release -- patch`, `minor`, or `major` to align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256.
+- Use `npm run release -- patch`, `minor`, or `major` to run the isolated licence lifecycle acceptance gate, align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256. Local releases require Node.js 22 and Java 21 or newer.
 
 ### Shadow-mode promotion workflow (flag-only to auto-deduct)
 

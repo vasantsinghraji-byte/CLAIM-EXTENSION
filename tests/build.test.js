@@ -4,7 +4,10 @@ const sourceManifest = require('../manifest.json');
 const {
   createProductionManifest,
   createBuildEntries,
+  createStagingBuildEntries,
+  createStagingManifest,
   createStoredZip,
+  emulatorConfig,
   runtimeConfigSource,
   validateEnvironmentConfig
 } = require('../build');
@@ -13,6 +16,10 @@ const developmentOrigins = ['http://localhost/*', 'http://127.0.0.1/*'];
 const testProductionConfig = {
   apiKey: 'test-firebase-key-not-a-real-credential',
   functionsBaseUrl: 'https://asia-south1-example-prod.cloudfunctions.net'
+};
+const testStagingConfig = {
+  apiKey: 'test-staging-key-not-a-real-credential',
+  functionsBaseUrl: 'https://asia-south1-claimextension.cloudfunctions.net'
 };
 
 test('production manifest strips development origins from every exposed match list', () => {
@@ -46,6 +53,33 @@ test('runtime Firebase configuration is generated from validated untracked value
     /AIza[0-9A-Za-z_-]{30,}/);
 });
 
+test('staging manifest and unpacked build isolate callable Functions from production', () => {
+  const staging = createStagingManifest(sourceManifest, testStagingConfig);
+  assert.equal(staging.host_permissions.includes('https://asia-south1-claimextension.cloudfunctions.net/*'), true);
+  assert.equal(staging.host_permissions.includes('https://asia-south1-claimextension-prod.cloudfunctions.net/*'), false);
+  assert.equal(JSON.stringify(staging).includes('http://127.0.0.1'), false);
+
+  const entries = createStagingBuildEntries(testStagingConfig);
+  const runtime = entries.find(entry => entry.name === 'runtime-config.js').data.toString('utf8');
+  const popup = entries.find(entry => entry.name === 'popup.js').data.toString('utf8');
+  assert.match(runtime, /asia-south1-claimextension\.cloudfunctions\.net/);
+  assert.doesNotMatch(runtime, /claimextension-prod/);
+  assert.match(popup, /https:\/\/claimextension\.web\.app\/admin/);
+  assert.doesNotMatch(popup, /claimextension-prod\.web\.app\/admin/);
+  assert.throws(() => createStagingManifest(sourceManifest, {
+    ...testStagingConfig,
+    functionsBaseUrl: 'https://asia-south1-claimextension-prod.cloudfunctions.net'
+  }), /cannot target the production Functions project/);
+});
+
+test('emulator runtime configuration is loopback-only', () => {
+  const source = runtimeConfigSource(emulatorConfig);
+  assert.match(source, /127\.0\.0\.1:9099\/identitytoolkit\.googleapis\.com\/v1/);
+  assert.match(source, /127\.0\.0\.1:9099\/securetoken\.googleapis\.com\/v1/);
+  assert.match(source, /127\.0\.0\.1:5001\/demo-claimextension\/asia-south1/);
+  assert.doesNotMatch(source, /cloudfunctions\.net/);
+});
+
 test('a real local Firebase configuration is mandatory outside CI', () => {
   const { readBuildConfig } = require('../build');
   const previous = process.env.CI;
@@ -74,4 +108,10 @@ test('production dist and ZIP inputs contain only the sanitized manifest', () =>
     assert.equal(zip.includes(Buffer.from(origin)), false);
   }
   assert.equal(zip.includes(Buffer.from('asia-south1-claimextension.cloudfunctions.net')), false);
+});
+
+test('production package excludes administrator-supplied payment artifacts', () => {
+  const entries = createBuildEntries(testProductionConfig);
+  const qrEntry = entries.find(entry => /payment-qr/i.test(entry.name));
+  assert.equal(qrEntry, undefined);
 });

@@ -16,6 +16,7 @@ const files = [
   'auth-core.js',
   'audit-rules.js',
   'custom-rules.js',
+  'processing-rules.js',
   'audit-core.js',
   'claim-core.js',
   'review-core.js',
@@ -35,6 +36,12 @@ const files = [
 const developmentOrigins = new Set(['http://localhost/*', 'http://127.0.0.1/*']);
 const developmentFunctionsOrigin = 'https://asia-south1-claimextension.cloudfunctions.net/*';
 const productionFunctionsOrigin = 'https://asia-south1-claimextension-prod.cloudfunctions.net/*';
+const emulatorConfig = Object.freeze({
+  apiKey: 'claimextension-emulator-key',
+  authBaseUrl: 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1',
+  tokenBaseUrl: 'http://127.0.0.1:9099/securetoken.googleapis.com/v1',
+  functionsBaseUrl: 'http://127.0.0.1:5001/demo-claimextension/asia-south1'
+});
 
 function validateEnvironmentConfig(value, name) {
   if (!value || typeof value !== 'object') throw new Error(`${name} Firebase configuration is missing`);
@@ -79,6 +86,8 @@ function runtimeConfigSource(config) {
     "  'use strict';",
     `  root.ClaimSparkRuntimeConfig = Object.freeze(${JSON.stringify({
       firebaseApiKey: config.apiKey,
+      ...(config.authBaseUrl ? { authBaseUrl: config.authBaseUrl } : {}),
+      ...(config.tokenBaseUrl ? { tokenBaseUrl: config.tokenBaseUrl } : {}),
       functionsBaseUrl: config.functionsBaseUrl
     })});`,
     '})(globalThis);',
@@ -100,6 +109,29 @@ function createProductionManifest(sourceManifest) {
     manifest.host_permissions.push(productionFunctionsOrigin);
   }
   assertProductionManifest(manifest);
+  return manifest;
+}
+
+function createStagingManifest(sourceManifest, stagingConfig) {
+  const manifest = JSON.parse(JSON.stringify(sourceManifest));
+  const stagingUrl = new URL(stagingConfig.functionsBaseUrl);
+  if (stagingUrl.hostname.includes('claimextension-prod')) {
+    throw new Error('Staging build cannot target the production Functions project');
+  }
+  for (const script of manifest.content_scripts || []) {
+    script.matches = (script.matches || []).filter(origin => !developmentOrigins.has(origin));
+  }
+  for (const resource of manifest.web_accessible_resources || []) {
+    resource.matches = (resource.matches || []).filter(origin => !developmentOrigins.has(origin));
+  }
+  manifest.host_permissions = (manifest.host_permissions || [])
+    .filter(origin => !developmentOrigins.has(origin))
+    .filter(origin => origin !== developmentFunctionsOrigin && origin !== productionFunctionsOrigin);
+  manifest.host_permissions.push(`${stagingConfig.functionsBaseUrl}/*`);
+  assertProductionManifest(manifest);
+  if (JSON.stringify(manifest).includes('claimextension-prod')) {
+    throw new Error('Production Functions origin leaked into staging manifest');
+  }
   return manifest;
 }
 
@@ -165,14 +197,14 @@ function createStoredZip(entries) {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-function createBuildEntries(productionConfig = readBuildConfig().production) {
+function createRemoteBuildEntries(config, manifestFactory) {
   return [...files].sort().map(relativePath => {
     const source = path.join(rootDir, relativePath);
     let data;
     if (relativePath === 'manifest.json') {
-      data = Buffer.from(`${JSON.stringify(createProductionManifest(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`);
+      data = Buffer.from(`${JSON.stringify(manifestFactory(JSON.parse(fs.readFileSync(source, 'utf8'))), null, 2)}\n`);
     } else if (relativePath === 'runtime-config.js') {
-      data = Buffer.from(runtimeConfigSource(productionConfig));
+      data = Buffer.from(runtimeConfigSource(config));
     } else {
       data = fs.readFileSync(source);
     }
@@ -180,7 +212,24 @@ function createBuildEntries(productionConfig = readBuildConfig().production) {
   });
 }
 
-function createHostingBuild(productionConfig) {
+function createBuildEntries(productionConfig = readBuildConfig().production) {
+  return createRemoteBuildEntries(productionConfig, createProductionManifest);
+}
+
+function createStagingBuildEntries(stagingConfig = readBuildConfig().development) {
+  return createRemoteBuildEntries(stagingConfig, manifest => createStagingManifest(manifest, stagingConfig))
+    .map(entry => entry.name === 'popup.js'
+      ? {
+          ...entry,
+          data: Buffer.from(entry.data.toString('utf8').replace(
+            'https://claimextension-prod.web.app/admin',
+            'https://claimextension.web.app/admin'
+          ))
+        }
+      : entry);
+}
+
+function createHostingBuild(config) {
   fs.rmSync(hostingBuildDir, { recursive: true, force: true });
   fs.mkdirSync(hostingBuildDir, { recursive: true });
   for (const name of fs.readdirSync(hostingSourceDir)) {
@@ -189,15 +238,20 @@ function createHostingBuild(productionConfig) {
     let content = fs.readFileSync(source);
     if (name === 'firebase-client.js') {
       content = Buffer.from(content.toString('utf8')
-        .replace('__FIREBASE_API_KEY__', productionConfig.apiKey)
-        .replace('__FUNCTIONS_BASE_URL__', productionConfig.functionsBaseUrl));
+        .replace('__FIREBASE_API_KEY__', config.apiKey)
+        .replace('__AUTH_BASE_URL__', config.authBaseUrl || 'https://identitytoolkit.googleapis.com/v1')
+        .replace('__TOKEN_BASE_URL__', config.tokenBaseUrl || 'https://securetoken.googleapis.com/v1')
+        .replace('__FUNCTIONS_BASE_URL__', config.functionsBaseUrl));
     }
     fs.writeFileSync(path.join(hostingBuildDir, name), content);
   }
 }
 
 function main() {
-  const config = readBuildConfig();
+  const emulatorMode = process.argv.includes('--emulator');
+  const stagingMode = process.argv.includes('--staging');
+  if (emulatorMode && stagingMode) throw new Error('Choose either --emulator or --staging');
+  const config = emulatorMode ? null : readBuildConfig();
   for (const relativePath of files.filter(file => file !== 'runtime-config.js')) {
     if (!fs.existsSync(path.join(rootDir, relativePath))) {
       throw new Error(`Required extension file is missing: ${relativePath}`);
@@ -206,6 +260,35 @@ function main() {
 
   fs.rmSync(distDir, { recursive: true, force: true });
   fs.mkdirSync(distDir, { recursive: true });
+
+  if (emulatorMode) {
+    fs.writeFileSync(path.join(rootDir, 'runtime-config.js'), runtimeConfigSource(emulatorConfig));
+    createHostingBuild(emulatorConfig);
+    for (const relativePath of files) {
+      const destination = path.join(distDir, relativePath);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, relativePath === 'runtime-config.js'
+        ? runtimeConfigSource(emulatorConfig)
+        : fs.readFileSync(path.join(rootDir, relativePath)));
+    }
+    console.log(`Built emulator extension in ${distDir}`);
+    console.log(`Built emulator hosting in ${hostingBuildDir}`);
+    return;
+  }
+
+  if (stagingMode) {
+    fs.writeFileSync(path.join(rootDir, 'runtime-config.js'), runtimeConfigSource(config.development));
+    createHostingBuild(config.development);
+    const stagingEntries = createStagingBuildEntries(config.development);
+    for (const entry of stagingEntries) {
+      const destination = path.join(distDir, entry.name);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, entry.data);
+    }
+    console.log(`Built staging extension in ${distDir}`);
+    console.log(`Built staging hosting in ${hostingBuildDir}`);
+    return;
+  }
 
   fs.writeFileSync(path.join(rootDir, 'runtime-config.js'), runtimeConfigSource(config.development));
   createHostingBuild(config.production);
@@ -230,9 +313,12 @@ if (require.main === module) main();
 
 module.exports = {
   createBuildEntries,
+  createStagingBuildEntries,
+  createStagingManifest,
   createHostingBuild,
   createProductionManifest,
   createStoredZip,
+  emulatorConfig,
   readBuildConfig,
   runtimeConfigSource,
   validateEnvironmentConfig
