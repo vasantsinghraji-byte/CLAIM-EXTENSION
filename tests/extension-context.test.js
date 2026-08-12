@@ -169,7 +169,7 @@ test('popup uses email-based signup without an invitation-token field', () => {
   assert.match(popup, /onboardingErrorMessages/);
   assert.doesNotMatch(html, /signUpInvitationToken/);
   assert.doesNotMatch(html, /acceptInvitationToken/);
-  assert.match(html, /no invitation code is required/i);
+  assert.match(html, /choose organisation-sponsored or individual access/i);
 });
 
 test('server registers verified processors for manual approval while retaining invitation compatibility', () => {
@@ -223,7 +223,9 @@ test('platform administrators get licence, invitation, and user activation contr
     assert.match(background, new RegExp(`${action}:`));
   }
   assert.match(html, /id="adminOpenDashboardBtn"/);
-  assert.match(popup, /chrome\.tabs\.create\(\{ url: 'https:\/\/claimextension-prod\.web\.app\/admin' \}\)/);
+  assert.match(html, /<script src="runtime-config\.js"><\/script>/);
+  assert.match(popup, /ClaimSparkRuntimeConfig\?\.adminDashboardUrl/);
+  assert.match(popup, /chrome\.tabs\.create\(\{ url \}\)/);
   assert.match(background, /adminRejectUserRegistration: 'rejectUserRegistration'/);
   assert.match(popup, /user\.accountStatus === 'active'[\s\S]*'suspend-user'[\s\S]*'activate-user'/);
   assert.match(popup, /user\.accountStatus === 'active'[\s\S]*'Suspend'[\s\S]*'Activate'/);
@@ -238,6 +240,7 @@ test('per-user license controls are server-enforced independently from account a
   assert.match(functions, /user\.license_updated/);
   assert.match(functions, /license\.type === 'organisation'/);
   assert.match(functions, /license\.status === 'inactive'/);
+  assert.match(functions, /latestUser\.data\(\)\.accountStatus === 'invited'/);
 });
 
 test('Phase 4 administrator lifecycle controls are server-routed and rendered safely', () => {

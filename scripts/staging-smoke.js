@@ -72,11 +72,11 @@ function verifyUnpackedExtension(expectedFunctionsBaseUrl) {
   const manifest = JSON.parse(read(path.join('dist', 'manifest.json')));
   const popup = read(path.join('dist', 'popup.js'));
   assert.match(runtime, new RegExp(expectedFunctionsBaseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(runtime, /https:\/\/claimextension\.web\.app\/admin/);
   assert.doesNotMatch(runtime, /claimextension-prod|127\.0\.0\.1|localhost/);
   assert.ok(manifest.host_permissions.includes(`${expectedFunctionsBaseUrl}/*`));
   assert.equal(manifest.host_permissions.some(value => /claimextension-prod|127\.0\.0\.1|localhost/.test(value)), false);
-  assert.match(popup, /https:\/\/claimextension\.web\.app\/admin/);
-  assert.doesNotMatch(popup, /claimextension-prod\.web\.app\/admin/);
+  assert.match(popup, /ClaimSparkRuntimeConfig\?\.adminDashboardUrl/);
   assert.equal(fs.existsSync(path.join(root, 'dist', 'icons', 'payment-qr.jpeg')), false);
 }
 
