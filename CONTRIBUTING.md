@@ -14,6 +14,10 @@ npm install        # installs dev tools AND activates the versioned git hooks
 pip install -r tools/requirements.txt
 ```
 
+The setup script configures the repository-local hooks and marks them
+executable on platforms that require it. Verify the setup with
+`git config --get core.hooksPath`; it should print `.githooks`.
+
 ## Branching model — GitHub Flow
 
 `main` is always releasable. **Never commit directly to `main`.**
@@ -69,6 +73,12 @@ so an unverified commit just fails later and louder.
 - Anything touching deduction behavior (`planAuditActions`, allowlists,
   safety caps) needs explicit reviewer sign-off in the PR conversation.
 
+Repository administrators should protect `main` in GitHub: require a pull
+request with at least one approval, dismiss stale approvals after new commits,
+require conversation resolution and the `validate` CI check, and block force
+pushes and branch deletion. These server-side rules are authoritative; local
+hooks are an early feedback layer and can be bypassed with `--no-verify`.
+
 ## Generated & special files
 
 | File | Rule |
@@ -96,6 +106,11 @@ installs (`npm ci`, cached), matrix-coverage validation, syntax checks, the
 full test suite, ESLint, a staleness check on generated rules, and a
 reproducible build uploaded as an artifact. If CI fails on a previously green
 branch, bisect from the last green commit rather than pushing guesses.
+
+For a faster workflow loop, install [`act`](https://nektosact.com/) and run
+`act pull_request`. The workflow's browser and Firebase emulator jobs need a
+Docker image with Node, Python, and Java support; CI remains the authoritative
+result when the local container differs from GitHub's hosted runner.
 
 ## Releases
 
