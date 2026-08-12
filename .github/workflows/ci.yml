@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -16,6 +24,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
 
       - uses: actions/setup-python@v5
         with:
@@ -46,8 +57,14 @@ jobs:
       - name: Functions contract tests
         run: npm run test:functions
 
+      - name: Real browser apply and undo smoke
+        run: npm run test:browser
+
       - name: Firestore security rules tests
         run: npm run test:firebase
+
+      - name: Sponsored and individual licence lifecycle acceptance
+        run: npm run test:lifecycle
 
       - name: Rules are freshly generated
         run: |
