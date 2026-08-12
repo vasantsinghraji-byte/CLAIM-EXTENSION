@@ -28,7 +28,12 @@ For invite-only access, the service also handles:
 - display name, organization, role, and account status;
 - invitation status and a SHA-256 hash of the one-time invitation token;
 - licence status, expiry, seat limit, extension version, rate-limit counters,
-  and privacy-safe administrative or extension-event metadata.
+  and privacy-safe administrative or extension-event metadata; and
+- for individual paid access, the submitted UPI transaction ID (UTR), payment
+  provider, verification status, verifier UID and verification time.
+
+The service does not request or store UPI PINs, OTPs, card numbers, passwords
+or bank-account credentials.
 
 This information can constitute personally identifiable information, health
 information, financial information, website content, browsing activity, and
@@ -46,7 +51,9 @@ The extension uses this data only to provide its disclosed purpose:
 - provide undo and recovery functions;
 - keep local audit, activity, rule-feedback, and configuration records; and
 - require acknowledgement of extension-applied changes before portal
-  submission.
+  submission; and
+- verify an individual user's submitted UPI reference before administrators
+  activate paid access.
 
 The extension is a review aid. It does not make final medical or claim
 adjudication decisions and does not submit a claim automatically.
@@ -68,6 +75,8 @@ Data is stored using browser-provided storage:
   they are cleared by the user or replaced by normal extension operation.
 - A short-lived submission summary may be stored in the RGHS tab's session
   storage for up to 24 hours and is scoped to the same portal path.
+- A UPI transaction reference and verification metadata remain in the user's
+  server-side account record until replaced or account deletion/redaction.
 
 Users can clear the local audit and activity logs from the extension popup.
 Removing the extension also removes its extension storage under Chrome's normal

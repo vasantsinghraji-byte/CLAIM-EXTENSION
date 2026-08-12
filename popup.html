@@ -38,6 +38,31 @@
         </div>
         <p class="auth-link"><a href="#" id="cancelSignUpLink1">Start over</a></p>
       </div>
+      <div id="authChoosePath" class="auth-section" hidden>
+        <p>Your email is verified. Choose how you will access Claim Auto-Fill.</p>
+        <p class="auth-help">If your organisation sponsors access, enter the organisation ID and employee code it provided.</p>
+        <input type="text" id="sponsoredOrganizationId" name="sponsoredOrganizationId" placeholder="Organisation ID">
+        <input type="text" id="sponsoredEmployeeCode" name="sponsoredEmployeeCode" placeholder="Employee code">
+        <button id="sponsoredOnboardingBtn" class="btn btn-primary">Use Organisation Access</button>
+        <button id="individualAccessBtn" class="btn btn-secondary" type="button">I'll Purchase Individually</button>
+        <div id="individualPaymentPanel" hidden>
+          <p class="auth-help"><strong>Payee:</strong> YUVAN ENTERPRISES<br><strong>UPI ID:</strong> yuvanent@ybl</p>
+          <label for="individualPlan">Licence plan</label>
+          <select id="individualPlan" name="individualPlan">
+            <option value="1">1 week — ₹99</option>
+            <option value="2">2 weeks — ₹198</option>
+            <option value="4">4 weeks — ₹300</option>
+            <option value="12">12 weeks — ₹500</option>
+          </select>
+          <p class="auth-help">Pay by scanning the official UPI QR code supplied by your administrator. Confirm that the receiver is YUVAN ENTERPRISES and pay the exact selected-plan amount, then enter the UPI transaction ID (UTR) below.</p>
+          <p class="auth-help"><strong>The payment QR is supplied separately by the administrator.</strong> Never enter a UPI PIN, OTP, card number, password, or bank-account credentials in Claim Auto-Fill.</p>
+          <input type="text" id="individualPaymentReference" name="individualPaymentReference" maxlength="160" placeholder="UPI transaction ID (UTR)">
+          <button id="submitPaymentReferenceBtn" class="btn btn-primary" type="button">Submit UPI Reference</button>
+          <p class="auth-help">Refund requests must be made within 3 calendar days of payment. See the published terms for eligibility.</p>
+        </div>
+        <p class="auth-link"><a href="#" id="continueDefaultAccessLink">Continue without organisation sponsorship</a></p>
+        <p class="auth-link"><a href="#" id="cancelSignUpLink4">Start over</a></p>
+      </div>
       <div id="authCompleteOnboarding" class="auth-section" hidden>
         <p>Your email is verified. Confirm your name to finish setup.</p>
         <p id="completeOnboardingError" class="auth-error"></p>

@@ -11,20 +11,8 @@
     <header>
       <h1>RGHS Audit Rules &amp; Statistics</h1>
       <p id="rulesMeta" class="meta"></p>
-      <p class="hint">
-        A rule may be promoted to auto-deduct only after its flags show a clean record:
-        review the Confirmed / Dismissed counts gathered from the on-page &#10003;/&#10007; feedback
-        buttons before switching a toggle on. Toggles apply immediately to every open
-        RGHS tab (mode must be "Flag + auto-deduct" in the popup for deductions to run).
-        Overrides are stored only in this Chrome profile and do not propagate to other signed-in
-        profiles. Review-only rules cannot be promoted by design.
-      </p>
+      <p class="hint">Processing rules are centrally governed. This page provides local statistics only; processors cannot change deductions, remarks, rule priority, or rule activation.</p>
     </header>
-
-    <div class="toolbar">
-      <span id="statusMessage" class="status"></span>
-      <button id="resetOverridesBtn" type="button">Reset all overrides</button>
-    </div>
 
     <table id="rulesTable">
       <thead>
@@ -48,74 +36,9 @@
 
     <p class="footnote" id="otherFamilies"></p>
 
-    <section class="editor-section">
-      <h2>Remark templates</h2>
-      <p class="hint">Remarks are written only into the portal Remarks field. Approved Amount remains numeric. Available tokens: {rule_id}, {main_code}, {main_package}, {component_code}, {component}, {claimed_amount}, {approved_amount}, {deduction}, {reference}, {reason}.</p>
-      <div class="template-grid">
-        <label>Approved<textarea id="remarkApproved" rows="2"></textarea></label>
-        <label>Deducted<textarea id="remarkDeducted" rows="2"></textarea></label>
-        <label>Rejected<textarea id="remarkRejected" rows="2"></textarea></label>
-        <label>Hold / review<textarea id="remarkHold" rows="2"></textarea></label>
-      </div>
-      <button id="saveTemplatesBtn" type="button">Save remark templates</button>
-    </section>
-
-    <section class="editor-section">
-      <div class="section-heading">
-        <div><h2>Custom findings</h2><p>New rules are profile-local and always review-only.</p></div>
-        <div class="editor-actions">
-          <button id="exportRulesBtn" type="button">Export JSON</button>
-          <button id="importRulesBtn" type="button">Import JSON</button>
-          <button id="resetCustomRulesBtn" type="button">Reset custom rules</button>
-          <input id="importRulesFile" type="file" accept="application/json,.json" hidden>
-        </div>
-      </div>
-      <table class="custom-table">
-        <thead><tr><th>Rule</th><th>Type</th><th>Main / reported</th><th>Included component</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody id="customRulesBody"></tbody>
-      </table>
-
-      <form id="ruleEditorForm" class="rule-form">
-        <h3 id="ruleFormTitle">Add custom finding</h3>
-        <div class="form-grid">
-          <label>Rule ID<input id="customRuleId" required placeholder="CUSTOM-001"></label>
-          <label>Type<select id="customRuleType"><option value="unbundling">Unbundling</option><option value="upcoding">Upcoding review</option></select></label>
-          <label>Risk<select id="customRuleRisk"><option>High</option><option>Medium</option><option>Low</option></select></label>
-          <label class="checkbox-label"><input id="customRuleEnabled" type="checkbox" checked> Enabled</label>
-          <label>Main / reported package label<input id="customMainLabel" required></label>
-          <label>Main package codes<input id="customMainCodes" placeholder="CA-001, 1394"></label>
-          <label>Main name patterns<textarea id="customMainPatterns" rows="2" placeholder="One JavaScript regular expression per line"></textarea></label>
-          <label id="componentLabelWrap">Included component label<input id="customComponentLabel"></label>
-          <label id="componentCodesWrap">Component codes<input id="customComponentCodes"></label>
-          <label id="componentPatternsWrap">Component name patterns<textarea id="customComponentPatterns" rows="2"></textarea></label>
-          <label class="wide">Finding reason<textarea id="customReason" rows="2" required></textarea></label>
-          <label class="wide">Reference<textarea id="customReference" rows="2"></textarea></label>
-          <label class="wide">Rule-specific hold remark (optional)<textarea id="customHoldRemark" rows="2"></textarea></label>
-          <label class="wide" id="deductRemarkWrap">Rule-specific deducted remark (optional)<textarea id="customDeductRemark" rows="2"></textarea></label>
-        </div>
-        <div class="editor-actions"><button type="submit">Save finding</button><button id="cancelRuleEditBtn" type="button">Clear</button></div>
-      </form>
-    </section>
-
-    <dialog id="builtInRemarkDialog">
-      <form id="builtInRemarkForm" method="dialog" class="remark-dialog-form">
-        <h2 id="builtInRemarkTitle">Edit rule remarks</h2>
-        <p class="hint">Only this built-in rule will be changed. Leave a field blank to inherit its specialized built-in or global wording.</p>
-        <label>Approved<textarea id="builtInApproved" rows="2"></textarea></label>
-        <label>Deducted<textarea id="builtInDeducted" rows="3"></textarea></label>
-        <label>Rejected<textarea id="builtInRejected" rows="3"></textarea></label>
-        <label>Hold / review<textarea id="builtInHold" rows="3"></textarea></label>
-        <div class="editor-actions">
-          <button id="saveBuiltInRemarksBtn" type="submit" value="save">Save for this rule</button>
-          <button id="resetBuiltInRemarksBtn" type="button">Restore this rule</button>
-          <button type="submit" value="cancel">Cancel</button>
-        </div>
-      </form>
-    </dialog>
   </div>
 
   <script src="audit-rules.js"></script>
-  <script src="custom-rules.js"></script>
   <script src="audit-core.js"></script>
   <script src="options.js"></script>
 </body>

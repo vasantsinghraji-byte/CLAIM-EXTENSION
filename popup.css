@@ -58,6 +58,17 @@ body {
   margin-bottom: 8px;
 }
 
+.auth-section select {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+  margin: 4px 0 8px;
+}
+
 body:has(.admin-panel[open]) {
   width: 620px;
 }

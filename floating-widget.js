@@ -242,8 +242,16 @@
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         'unsupported-layout': 'BLOCKED: The RGHS process-sheet layout is not compatible with this extension version.',
         'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.',
+        'invalid-processing-rule-set': 'BLOCKED: The published processing rules failed validation. Contact an administrator.',
+        'processing-rules-unavailable': 'BLOCKED: The latest processing rules could not be verified. Try again when connected.',
+        'processing-rule-blocked': 'BLOCKED: A centrally governed package rule prevents processing.',
+        'processing-validation-required': 'BLOCKED: A centrally required validation must be completed.',
+        'processing-rule-target-missing': 'BLOCKED: A configured target column is unavailable on this sheet.',
         'signed-out': 'BLOCKED: Sign in to Claim Spark to continue.',
-        'licence-preview-blocked': 'BLOCKED: Your licence does not currently allow Preview. Contact your administrator.'
+        'licence-preview-blocked': 'BLOCKED: Your licence does not currently allow Preview. Contact your administrator.',
+        'update-required': 'BLOCKED: Update Claim Spark before continuing.',
+        maintenance: 'BLOCKED: Claim Spark is temporarily in maintenance mode.',
+        'recovery-save-failed': 'BLOCKED: Changes were rolled back because recovery could not be saved.'
       };
       showStatus(messages[result.blockReason] || 'Preview was blocked by a compatibility check.', 'error');
       return;
@@ -267,6 +275,7 @@
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = selectedKeys.has(proposal.key);
+      checkbox.disabled = proposal.mandatory === true;
       checkbox.setAttribute('aria-label', `Select ${proposal.label}`);
       checkbox.addEventListener('change', () => {
         checkbox.checked ? selectedKeys.add(proposal.key) : selectedKeys.delete(proposal.key);
@@ -364,9 +373,11 @@
     ackCheck.checked = false;
     undoButton.disabled = !result.hasUndo;
     updateReviewState();
+    const warningCount = result.processingWarnings?.length || 0;
     showStatus(result.proposals.length
-      ? `${safeProposals.length} safe row(s); ${Review.groupProposals(result.proposals).length} decision group(s).`
-      : 'No eligible changes found.', result.proposals.length ? 'success' : '');
+      ? `${safeProposals.length} safe row(s); ${Review.groupProposals(result.proposals).length} decision group(s); ${warningCount} central warning(s).`
+      : warningCount ? `${warningCount} centrally configured warning(s) require attention.` : 'No eligible changes found.',
+    result.proposals.length || warningCount ? 'success' : '');
   }
 
   mascot.addEventListener('pointerdown', event => {
@@ -408,22 +419,29 @@
   });
   close.addEventListener('click', () => setOpen(false));
 
-  previewButton.addEventListener('click', () => {
-    withValidExtensionContext(() => renderPreview(actions.preview()));
+  previewButton.addEventListener('click', async () => {
+    if (!hasValidExtensionContext()) return invalidateStaleWidget();
+    renderPreview(await (actions.previewFresh ? actions.previewFresh() : actions.preview()));
   });
   ackCheck.addEventListener('change', updateReviewState);
-  function applySelection(keys, overrides, remarks, acknowledgedHighRisk) {
+  async function applySelection(keys, overrides, remarks, acknowledgedHighRisk) {
     if (!currentPreview || !keys.length) return;
     let result;
-    if (!withValidExtensionContext(() => {
-      result = actions.apply({
+    if (!hasValidExtensionContext()) return invalidateStaleWidget();
+    try {
+      const applyAction = actions.applyFresh || actions.apply;
+      result = await applyAction({
         token: currentPreview.token,
         selectedRowKeys: keys,
         approvedOverrides: overrides,
         remarkOverrides: remarks,
         acknowledgedHighRisk
       });
-    })) return;
+    } catch {
+      if (!hasValidExtensionContext()) return invalidateStaleWidget();
+      showStatus('Unable to verify the latest processing rules.', 'error');
+      return;
+    }
     if (result.blocked) {
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
@@ -432,10 +450,16 @@
         'empty-selection': 'BLOCKED: Select at least one row.',
         'high-risk-unacknowledged': 'BLOCKED: Acknowledge selected high-risk findings.',
         'invalid-decision': 'BLOCKED: Preview again; the selected decision is no longer valid.',
+        'mandatory-action-required': 'BLOCKED: All centrally mandatory actions must remain selected.',
+        'mandatory-action-override': 'BLOCKED: Centrally mandatory amounts and remarks cannot be overridden.',
+        'processing-rules-changed': 'BLOCKED: Processing rules changed after Preview. Preview again.',
+        'processing-rules-unavailable': 'BLOCKED: The latest processing rules could not be verified.',
         unbalanced: 'BLOCKED: Selected totals do not reconcile.',
         'signed-out': 'BLOCKED: Sign in to Claim Spark to apply changes.',
         'licence-unverified': 'BLOCKED: Verify your email to continue - check your inbox for a link from Firebase.',
-        'licence-apply-blocked': 'BLOCKED: Your licence does not currently allow Apply. Preview remains available if allowed.'
+        'licence-apply-blocked': 'BLOCKED: Your licence does not currently allow Apply. Preview remains available if allowed.',
+        'update-required': 'BLOCKED: Update Claim Spark before continuing.',
+        maintenance: 'BLOCKED: Claim Spark is temporarily in maintenance mode.'
       };
       showStatus(messages[result.blockReason] || 'Apply was blocked for safety.', 'error');
       applyButton.disabled = true;
@@ -454,7 +478,7 @@
     applyButton.textContent = 'Apply Selected';
     undoButton.disabled = !result.hasUndo;
     recoverButton.disabled = false;
-    showStatus(`Applied ${result.count} field action(s). A recovery snapshot was saved locally.`, 'success');
+    showStatus(`Applied ${result.count} field action(s). Recovery was saved locally.`, 'success');
   }
 
   safeButton.addEventListener('click', () => {

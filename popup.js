@@ -3,6 +3,7 @@
 const authSignedOut = document.getElementById('authSignedOut');
 const authSignUpPanel = document.getElementById('authSignUpPanel');
 const authVerifyEmail = document.getElementById('authVerifyEmail');
+const authChoosePath = document.getElementById('authChoosePath');
 const authCompleteOnboarding = document.getElementById('authCompleteOnboarding');
 const authAwaitingActivation = document.getElementById('authAwaitingActivation');
 const authSignedIn = document.getElementById('authSignedIn');
@@ -52,6 +53,15 @@ const signUpBtn = document.getElementById('signUpBtn');
 const verifyEmailLabel = document.getElementById('verifyEmailLabel');
 const resendVerificationBtn = document.getElementById('resendVerificationBtn');
 const checkVerifiedBtn = document.getElementById('checkVerifiedBtn');
+const sponsoredOrganizationId = document.getElementById('sponsoredOrganizationId');
+const sponsoredEmployeeCode = document.getElementById('sponsoredEmployeeCode');
+const sponsoredOnboardingBtn = document.getElementById('sponsoredOnboardingBtn');
+const individualAccessBtn = document.getElementById('individualAccessBtn');
+const individualPaymentPanel = document.getElementById('individualPaymentPanel');
+const individualPlan = document.getElementById('individualPlan');
+const individualPaymentReference = document.getElementById('individualPaymentReference');
+const submitPaymentReferenceBtn = document.getElementById('submitPaymentReferenceBtn');
+const continueDefaultAccessLink = document.getElementById('continueDefaultAccessLink');
 const completeOnboardingError = document.getElementById('completeOnboardingError');
 const completeOnboardingNameInput = document.getElementById('completeOnboardingName');
 const completeOnboardingBtn = document.getElementById('completeOnboardingBtn');
@@ -59,7 +69,8 @@ const checkActivationBtn = document.getElementById('checkActivationBtn');
 const cancelSignUpLinks = [
   document.getElementById('cancelSignUpLink1'),
   document.getElementById('cancelSignUpLink2'),
-  document.getElementById('cancelSignUpLink3')
+  document.getElementById('cancelSignUpLink3'),
+  document.getElementById('cancelSignUpLink4')
 ];
 let showingSignUp = false;
 const toggle = document.getElementById('autoFillToggle');
@@ -130,7 +141,10 @@ function describeLicenceStatus(state) {
   if (!state) return '';
   if (state.status === 'active') return `Licence active until ${new Date(state.expiresAt).toLocaleString()}`;
   if (state.status === 'grace') return `Licence expired — Preview only until ${new Date(state.graceEndsAt).toLocaleString()}`;
+  if (state.status === 'payment-pending') return 'Payment reference is waiting for administrator verification.';
   if (state.status === 'unverified') return 'Verify your email to continue — check your inbox for a link from Firebase.';
+  if (state.status === 'update-required') return `Update required. Minimum supported version: ${state.minimumVersion}.`;
+  if (state.status === 'maintenance') return 'Claim Spark is temporarily in maintenance mode.';
   return 'Apply disabled. Contact your administrator.';
 }
 
@@ -147,6 +161,7 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   authSignedOut.hidden = stage !== 'signed-out';
   authSignUpPanel.hidden = stage !== 'sign-up';
   authVerifyEmail.hidden = stage !== 'verify-email';
+  authChoosePath.hidden = stage !== 'choose-access-path';
   authCompleteOnboarding.hidden = stage !== 'complete-onboarding';
   authAwaitingActivation.hidden = stage !== 'awaiting-activation';
   authSignedIn.hidden = stage !== 'signed-in';
@@ -260,9 +275,79 @@ checkVerifiedBtn.addEventListener('click', () => {
     showStatus(
       response.error
         ? 'Email verified, but setup needs attention.'
-        : (response.stage === 'active' ? 'Email verified. Account ready.' : 'Email verified. Waiting for administrator approval.'),
+        : (response.stage === 'choose-access-path' ? 'Email verified. Choose your access path.' : 'Email verified. Account ready.'),
       response.error ? 'warning' : 'success'
     );
+    loadAuthState();
+  });
+});
+
+sponsoredOnboardingBtn.addEventListener('click', () => {
+  const organizationId = sponsoredOrganizationId.value.trim();
+  const employeeCode = sponsoredEmployeeCode.value.trim();
+  if (!organizationId || !employeeCode) {
+    showStatus('Enter your organisation ID and employee code', 'warning');
+    return;
+  }
+  sponsoredOnboardingBtn.disabled = true;
+  chrome.runtime.sendMessage({
+    action: 'authOrganizationSponsoredOnboarding',
+    organizationId,
+    employeeCode
+  }, response => {
+    sponsoredOnboardingBtn.disabled = false;
+    if (!response?.success) {
+      const message = onboardingErrorMessages[response?.error]
+        || 'The organisation or employee code could not be verified.';
+      showStatus(message, 'error');
+      return;
+    }
+    showStatus(
+      response.stage === 'active'
+        ? 'Organisation access activated. Signed in.'
+        : 'Organisation access confirmed. Waiting for administrator approval.',
+      'success'
+    );
+    loadAuthState();
+  });
+});
+
+individualAccessBtn.addEventListener('click', () => {
+  individualPaymentPanel.hidden = !individualPaymentPanel.hidden;
+  if (!individualPaymentPanel.hidden) individualPaymentReference.focus();
+});
+
+submitPaymentReferenceBtn.addEventListener('click', () => {
+  const paymentReference = individualPaymentReference.value.trim();
+  if (!paymentReference) {
+    showStatus('Enter the UPI transaction ID (UTR) from your completed payment', 'warning');
+    return;
+  }
+  submitPaymentReferenceBtn.disabled = true;
+  chrome.runtime.sendMessage({
+    action: 'authIndividualPaidOnboarding',
+    paymentReference,
+    durationWeeks: Number(individualPlan.value)
+  }, response => {
+    submitPaymentReferenceBtn.disabled = false;
+    if (!response?.success) {
+      showStatus(onboardingErrorMessages[response?.error] || 'Unable to submit the payment reference.', 'error');
+      return;
+    }
+    individualPaymentReference.value = '';
+    showStatus('Payment reference submitted. Waiting for administrator verification and activation.', 'success');
+    loadAuthState();
+  });
+});
+
+continueDefaultAccessLink.addEventListener('click', event => {
+  event.preventDefault();
+  chrome.runtime.sendMessage({ action: 'authCompleteOnboarding' }, response => {
+    if (!response?.success) {
+      showStatus('Unable to continue setup right now', 'error');
+      return;
+    }
+    showStatus('Setup complete. Waiting for administrator approval.', 'success');
     loadAuthState();
   });
 });
@@ -420,6 +505,7 @@ async function loadAdminOrganizations() {
   }));
   if (!records.length) showAdminEmpty(adminOrganizationsList, 'No organizations found.');
 }
+
 
 async function loadAdminInvitations() {
   showAdminEmpty(adminInvitationsList, 'Loading invitations...');
@@ -685,6 +771,7 @@ adminActivateLicenceBtn.addEventListener('click', async () => {
     return;
   }
   setAdminStatus(`Licence active for ${termDays} days (maximum ${maximumUsers} users).`, 'success');
+  loadAdminOrganizations();
   loadAuthState();
 });
 
@@ -801,6 +888,7 @@ function describeCounts(response) {
   ];
   if (response?.auditDeducted) parts.push(`${response.auditDeducted} audit deduction(s)`);
   if (response?.auditFlagged) parts.push(`${response.auditFlagged} audit flag(s)`);
+  if (response?.processingWarnings?.length) parts.push(`${response.processingWarnings.length} central warning(s)`);
   return parts.join(', ');
 }
 
@@ -809,10 +897,21 @@ function blockedMessage(reason) {
     'autofill-disabled': 'Claim Extension is OFF. Turn it on, then preview again.',
     'unsupported-layout': 'Unsupported RGHS portal layout. No fields were changed.',
     'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.',
+    'invalid-processing-rule-set': 'Published processing rules failed validation. Contact an administrator.',
+    'processing-rules-unavailable': 'The latest processing rules could not be verified. Check your connection and try again.',
+    'processing-rules-changed': 'Processing rules changed after Preview. Preview the claim again.',
+    'processing-rule-blocked': 'A centrally governed package rule blocks this claim.',
+    'processing-validation-required': 'A centrally required validation must be completed before processing.',
+    'processing-rule-target-missing': 'A configured rule target column is unavailable on this sheet.',
+    'mandatory-action-required': 'All centrally mandatory actions must be applied together.',
+    'mandatory-action-override': 'Centrally mandatory deductions and remarks cannot be overridden.',
     'signed-out': 'Sign in to Claim Spark to apply changes.',
     'licence-unverified': 'Verify your email to continue — check your inbox for a link from Firebase.',
     'licence-apply-blocked': 'Your licence does not currently allow Apply. Preview remains available if allowed.',
-    'licence-preview-blocked': 'Your licence does not currently allow Preview. Contact your administrator.'
+    'licence-preview-blocked': 'Your licence does not currently allow Preview. Contact your administrator.',
+    'update-required': 'Update Claim Spark before continuing.',
+    maintenance: 'Claim Spark is temporarily in maintenance mode.',
+    'recovery-save-failed': 'Apply was rolled back because a recovery snapshot could not be saved.'
   };
   return messages[reason] || 'Apply was blocked because the preview is stale or unsafe. Preview again.';
 }

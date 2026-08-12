@@ -4,11 +4,21 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   ACCOUNT_STATUSES,
+  DEFAULT_LICENSE,
+  INDIVIDUAL_PLAN_PRICES,
+  LICENSE_STATUSES,
+  LICENSE_TYPES,
+  PAYMENT_STATUSES,
   assertKeys,
   assertNoClaimContent,
   boundedInteger,
+  compareSemanticVersions,
+  computeLicenseExpiry,
+  individualPlan,
   licenceAccessDecision,
   normalizedEmail,
+  normalizedPaymentReference,
+  rosterDocumentId,
   resolveActivationTarget,
   safeDocumentId,
   selectEmailInvitation,
@@ -19,6 +29,34 @@ test('rejected is a distinct non-active account status', () => {
   assert.ok(ACCOUNT_STATUSES.includes('rejected'));
   assert.ok(ACCOUNT_STATUSES.includes('invited'));
   assert.ok(ACCOUNT_STATUSES.includes('active'));
+});
+
+test('per-user license contracts include both commercial access models and safe defaults', () => {
+  assert.deepEqual(LICENSE_TYPES, ['organisation', 'individual']);
+  assert.deepEqual(LICENSE_STATUSES, ['inactive', 'active', 'expired']);
+  assert.deepEqual(PAYMENT_STATUSES, ['not_required', 'pending_verification', 'verified']);
+  assert.equal(DEFAULT_LICENSE.type, 'individual');
+  assert.equal(DEFAULT_LICENSE.status, 'inactive');
+  assert.equal(DEFAULT_LICENSE.paymentProvider, 'upi');
+  assert.deepEqual(INDIVIDUAL_PLAN_PRICES, { 1: 99, 2: 198, 4: 300, 12: 500 });
+});
+
+test('individual plans map only approved terms to fixed rupee prices', () => {
+  assert.deepEqual(individualPlan(1), { durationWeeks: 1, price: 99 });
+  assert.deepEqual(individualPlan(12), { durationWeeks: 12, price: 500 });
+  assert.throws(() => individualPlan(3), /not an available individual plan/);
+});
+
+test('computeLicenseExpiry converts whole weeks to an exact millisecond offset', () => {
+  const from = 1_800_000_000_000;
+  assert.equal(computeLicenseExpiry(1, from), from + 7 * 24 * 60 * 60 * 1000);
+  assert.equal(computeLicenseExpiry(12, from), from + 84 * 24 * 60 * 60 * 1000);
+});
+
+test('roster document IDs normalize employee codes within an organization', () => {
+  assert.equal(rosterDocumentId('org_01', 'emp-42'), 'org_01_EMP-42');
+  assert.throws(() => rosterDocumentId('../org', 'EMP-42'), /invalid/);
+  assert.throws(() => rosterDocumentId('org_01', '../EMP'), /invalid/);
 });
 
 test('strict request contracts reject unknown and missing fields', () => {
@@ -105,4 +143,17 @@ test('licence decisions preserve apply safety during grace and suspension', () =
     now,
     gracePeriodMs
   }), { status: 'expired', previewAllowed: false, applyAllowed: false });
+});
+
+test('semantic version gates compare numeric components instead of lexicographic text', () => {
+  assert.equal(compareSemanticVersions('1.10.0', '1.9.9'), 1);
+  assert.equal(compareSemanticVersions('2.0.0', '2.0.0'), 0);
+  assert.equal(compareSemanticVersions('1.9.9', '1.10.0'), -1);
+  assert.throws(() => compareSemanticVersions('1.2', '1.2.0'), /invalid/);
+});
+
+test('payment references have one canonical representation for uniqueness checks', () => {
+  assert.equal(normalizedPaymentReference('  abc 123_xyz '), 'ABC123_XYZ');
+  assert.throws(() => normalizedPaymentReference('short'), /invalid/);
+  assert.throws(() => normalizedPaymentReference('unsafe/reference'), /invalid/);
 });

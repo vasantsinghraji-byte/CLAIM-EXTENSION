@@ -56,7 +56,8 @@ The architecture uses:
   administration, payment verification, and optional AI processing.
 - Firebase Hosting for the public website and authenticated admin dashboard.
 - Gemini API only for an explicitly requested, separately gated AI feature.
-- Razorpay Payment Links or invoices initially; webhook automation later.
+- Manual UPI QR payments with administrator verification initially; Razorpay
+  checkout and webhook automation remain on hold.
 - Chrome Web Store for beta and unlisted production distribution.
 
 ## 2. Non-negotiable principles
@@ -575,7 +576,7 @@ performing its operation.
 
 ```mermaid
 flowchart LR
-    A[Quotation or invoice approved] --> B[Bank, UPI or Razorpay Payment Link]
+    A[Price and term confirmed] --> B[Official UPI QR payment]
     B --> C[Platform admin verifies payment]
     C --> D[Record payment reference without payment credentials]
     D --> E[Activate or renew Firestore licence]
@@ -583,7 +584,7 @@ flowchart LR
     F --> G[Extension sees active licence at next check]
 ```
 
-## 16. Future Razorpay webhook automation
+## 16. Future Razorpay webhook automation — on hold
 
 ```mermaid
 flowchart LR

@@ -7,25 +7,41 @@ const { HttpsError, onCall } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
 const {
   ACCOUNT_STATUSES,
+  DEFAULT_LICENSE,
   EVENT_ACTIONS,
   INVITABLE_ROLES,
   LICENCE_STATUSES,
+  LICENSE_STATUSES,
+  LICENSE_TYPES,
   ORGANIZATION_STATUSES,
+  PAYMENT_STATUSES,
   ROLES,
   assertKeys,
   assertNoClaimContent,
   boundedInteger,
   callableData,
+  compareSemanticVersions,
+  computeLicenseExpiry,
   enumValue,
   invitationToken,
+  individualPlan,
   licenceAccessDecision,
   normalizedEmail,
+  normalizedPaymentReference,
   requiredString,
   resolveActivationTarget,
+  rosterDocumentId,
   safeDocumentId,
   selectEmailInvitation,
   tokenHash
 } = require('./lib/contracts');
+const {
+  FEEDBACK_CATEGORIES,
+  SCHEMA_VERSION: PROCESSING_RULE_SCHEMA_VERSION,
+  normalizeRule: normalizeProcessingRule,
+  normalizeRuleSet: normalizeProcessingRuleSet,
+  runScenarios: runProcessingRuleScenarios
+} = require('./lib/processing-rules');
 
 initializeApp();
 const db = getFirestore();
@@ -106,6 +122,111 @@ async function recordAdminEvent(auth, action, targetType, targetId, details = {}
   });
 }
 
+async function recordProcessingRuleHistory(auth, action, targetId, details = {}) {
+  assertNoClaimContent(details);
+  await db.collection('processingRuleHistory').add({
+    actorId: auth.uid,
+    actorRole: 'platformAdmin',
+    action,
+    targetId: String(targetId).slice(0, 128),
+    details,
+    timestamp: FieldValue.serverTimestamp()
+  });
+  await recordAdminEvent(auth, action, 'processingRule', targetId, details);
+}
+
+function processingRuleVersion(snapshot) {
+  const value = snapshot.data();
+  return {
+    versionId: snapshot.id,
+    schemaVersion: value.schemaVersion,
+    checksum: value.checksum,
+    ruleCount: Array.isArray(value.rules) ? value.rules.length : 0,
+    createdAt: timestampIso(value.createdAt),
+    createdBy: value.createdBy || null,
+    bundledFallbackEnabled: value.bundledFallbackEnabled !== false
+  };
+}
+
+function processingRuleDraft(snapshot) {
+  const value = snapshot.data();
+  return {
+    ruleId: value.ruleId,
+    name: value.name,
+    description: value.description || '',
+    schemaVersion: value.schemaVersion,
+    processingArea: value.processingArea,
+    enabled: value.enabled,
+    priority: value.priority,
+    enforcement: value.enforcement,
+    conditions: value.conditions,
+    actions: value.actions,
+    scenarios: value.scenarios || []
+  };
+}
+
+function ruleImpact(previousRules, nextRules) {
+  const previous = new Map((previousRules || []).map(rule => [rule.ruleId, rule]));
+  const next = new Map((nextRules || []).map(rule => [rule.ruleId, rule]));
+  const added = [...next.keys()].filter(id => !previous.has(id));
+  const removed = [...previous.keys()].filter(id => !next.has(id));
+  const modified = [...next.keys()].filter(id => previous.has(id)
+    && JSON.stringify(previous.get(id)) !== JSON.stringify(next.get(id)));
+  const highImpact = [...new Set([...next.keys(), ...previous.keys()])].filter(ruleId => {
+    const rule = next.get(ruleId);
+    const old = previous.get(ruleId);
+    if (!rule) return old.actions.some(action => ['applyDeduction', 'excludePackage'].includes(action.type))
+      || old.enforcement === 'blocking';
+    if (old && JSON.stringify(old) === JSON.stringify(rule)) return false;
+    return rule.enforcement === 'blocking'
+      || (old?.enforcement === 'advisory' && rule.enforcement !== 'advisory')
+      || [...(old?.actions || []), ...rule.actions].some(action => ['applyDeduction', 'excludePackage'].includes(action.type));
+  });
+  const dualApproval = [...new Set([...next.keys(), ...previous.keys()])].filter(ruleId => {
+    const old = previous.get(ruleId);
+    const rule = next.get(ruleId);
+    if (old && rule && JSON.stringify(old) === JSON.stringify(rule)) return false;
+    return [...(old?.actions || []), ...(rule?.actions || [])]
+      .some(action => ['applyDeduction', 'excludePackage'].includes(action.type));
+  });
+  return { added, modified, removed, highImpact, dualApproval };
+}
+
+function approvalRecord(snapshot) {
+  const value = snapshot.data();
+  return {
+    approvalId: snapshot.id,
+    status: value.status,
+    requestedBy: value.requestedBy,
+    requestedAt: timestampIso(value.requestedAt),
+    expiresAt: timestampIso(value.expiresAt),
+    reviewedBy: value.reviewedBy || null,
+    reviewedAt: timestampIso(value.reviewedAt),
+    checksum: value.checksum,
+    activeVersionId: value.activeVersionId || '',
+    bundledFallbackEnabled: value.bundledFallbackEnabled !== false,
+    impact: value.impact || {},
+    kind: value.kind || 'publish',
+    targetVersionId: value.targetVersionId || null
+  };
+}
+
+function scenarioPublicationCheck(normalized, impact, bundledFallbackEnabled) {
+  const report = runProcessingRuleScenarios(normalized.rules);
+  const rulesById = new Map(normalized.rules.map(rule => [rule.ruleId, rule]));
+  const requiredIds = new Set(impact.highImpact);
+  if (!bundledFallbackEnabled) {
+    for (const rule of normalized.rules.filter(item => item.enabled)) requiredIds.add(rule.ruleId);
+  }
+  const covered = new Set(report.results
+    .filter(result => result.passed && (rulesById.get(result.ruleId)?.enabled
+      ? result.actual.matchedRuleIds.includes(result.ruleId)
+      : !result.actual.matchedRuleIds.includes(result.ruleId)))
+    .map(result => result.ruleId));
+  const missingRuleIds = [...requiredIds].filter(ruleId => !covered.has(ruleId));
+  return { ...report, requiredRuleIds: [...requiredIds], missingRuleIds, publishable: report.passed && missingRuleIds.length === 0 };
+}
+
 function serializeUser(snapshot) {
   const user = snapshot.data();
   return {
@@ -115,6 +236,7 @@ function serializeUser(snapshot) {
     organizationId: user.organizationId,
     role: user.role,
     accountStatus: user.accountStatus,
+    license: user.license || DEFAULT_LICENSE,
     onboardingSource: user.onboardingSource || 'invitation',
     pendingApproval: user.accountStatus === 'invited',
     createdAt: timestampIso(user.createdAt),
@@ -181,7 +303,8 @@ exports.getCurrentUserProfile = onCall(callableOptions, async request => {
     displayName: user.displayName || '',
     organizationId: user.organizationId,
     role: user.role,
-    accountStatus: user.accountStatus
+    accountStatus: user.accountStatus,
+    license: user.license || DEFAULT_LICENSE
   };
 });
 
@@ -193,29 +316,63 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     const auth = requireVerifiedEmail(request);
     await enforceRateLimit(auth.uid, 'licence', 120, 60 * 60 * 1000);
     const user = await activeUser(auth.uid);
-    const [organizationSnapshot, licenceSnapshot, configSnapshot] = await Promise.all([
-      db.doc(`organizations/${user.organizationId}`).get(),
-      db.doc(`licences/${user.organizationId}`).get(),
-      db.doc('appConfig/production').get()
-    ]);
-    if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
-      return { status: 'suspended', previewAllowed: false, applyAllowed: false };
-    }
-    if (!licenceSnapshot.exists) {
+    const license = user.license;
+    if (!license || !LICENSE_TYPES.includes(license.type)) {
       return { status: 'unlicensed', previewAllowed: false, applyAllowed: false };
     }
-    const licence = licenceSnapshot.data();
-    const expiryMs = timestampMillis(licence.expiryDate);
     const now = Date.now();
+    const userExpiryMs = timestampMillis(license.expiresAt);
+    if (license.type === 'individual' && license.paymentStatus === 'pending_verification') {
+      return { status: 'payment-pending', previewAllowed: false, applyAllowed: false };
+    }
+    if (license.status === 'inactive') {
+      return { status: 'inactive', previewAllowed: false, applyAllowed: false };
+    }
+    const configSnapshot = await db.doc('appConfig/production').get();
+    const config = configSnapshot.exists ? configSnapshot.data() : {};
     const minimumVersion = configSnapshot.exists
-      ? String(configSnapshot.data().minimumSupportedVersion || '0.0.0')
+      ? String(config.minimumSupportedVersion || '0.0.0')
       : '0.0.0';
-    const access = licenceAccessDecision({
-      status: licence.status,
-      expiryMs,
+    if (config.maintenanceMode === true) {
+      return { status: 'maintenance', previewAllowed: false, applyAllowed: false, minimumVersion };
+    }
+    if (compareSemanticVersions(extensionVersion, minimumVersion) < 0) {
+      return { status: 'update-required', previewAllowed: false, applyAllowed: false, minimumVersion };
+    }
+    const userAccess = licenceAccessDecision({
+      status: license.status,
+      expiryMs: userExpiryMs,
       now,
       gracePeriodMs: GRACE_PERIOD_MS
     });
+    let access = userAccess;
+    let expiryMs = userExpiryMs;
+    if (license.type === 'organisation') {
+      const [organizationSnapshot, licenceSnapshot] = await Promise.all([
+        db.doc(`organizations/${user.organizationId}`).get(),
+        db.doc(`licences/${user.organizationId}`).get()
+      ]);
+      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+        return { status: 'suspended', previewAllowed: false, applyAllowed: false, minimumVersion };
+      }
+      if (!licenceSnapshot.exists) {
+        return { status: 'unlicensed', previewAllowed: false, applyAllowed: false, minimumVersion };
+      }
+      const organisationLicence = licenceSnapshot.data();
+      const organisationExpiryMs = timestampMillis(organisationLicence.expiryDate);
+      const organisationAccess = licenceAccessDecision({
+        status: organisationLicence.status,
+        expiryMs: organisationExpiryMs,
+        now,
+        gracePeriodMs: GRACE_PERIOD_MS
+      });
+      if (!userAccess.applyAllowed || !organisationAccess.applyAllowed) {
+        access = !userAccess.previewAllowed || !organisationAccess.previewAllowed
+          ? { status: userAccess.status === 'active' ? organisationAccess.status : userAccess.status, previewAllowed: false, applyAllowed: false }
+          : { status: 'grace', previewAllowed: true, applyAllowed: false };
+      }
+      expiryMs = Math.min(userExpiryMs, organisationExpiryMs);
+    }
     if (access.status === 'active') {
       return {
         ...access,
@@ -248,6 +405,57 @@ exports.getExtensionConfig = onCall(callableOptions, async request => {
     aiEnabled: false,
     supportMessage: String(config.supportMessage || '').slice(0, 500)
   };
+});
+
+exports.getActiveProcessingRules = onCall(callableOptions, async request => {
+  try {
+    const data = callableData(request);
+    assertKeys(data, ['knownVersionId', 'extensionVersion', 'supportedRuleSchemaVersions'], ['extensionVersion']);
+    const auth = requireVerifiedEmail(request);
+    await enforceRateLimit(auth.uid, 'processingRules', 240, 60 * 60 * 1000);
+    await activeUser(auth.uid);
+    requiredString(data.extensionVersion, 'extensionVersion', 32);
+    const supported = data.supportedRuleSchemaVersions === undefined
+      ? []
+      : data.supportedRuleSchemaVersions;
+    if (!Array.isArray(supported) || supported.some(value => !Number.isSafeInteger(value))) {
+      fail('invalid-argument', 'supportedRuleSchemaVersions is invalid');
+    }
+    const [stateSnapshot, appConfigSnapshot] = await Promise.all([
+      db.doc('processingRuleState/active').get(),
+      db.doc('appConfig/production').get()
+    ]);
+    const configuredMode = appConfigSnapshot.exists
+      ? String(appConfigSnapshot.data().processingRulesMode || '')
+      : '';
+    const mode = configuredMode || (stateSnapshot.exists ? 'remote-required' : 'bundled');
+    if (!stateSnapshot.exists) {
+      if (mode === 'remote-required') fail('failed-precondition', 'No active processing rule set');
+      return { mode, unchanged: true, versionId: '', schemaVersion: PROCESSING_RULE_SCHEMA_VERSION, checksum: '' };
+    }
+    const state = stateSnapshot.data();
+    const versionId = safeDocumentId(state.versionId, 'versionId');
+    if (!supported.includes(Number(state.schemaVersion))) {
+      fail('failed-precondition', 'Extension does not support the active processing rule schema');
+    }
+    if (data.knownVersionId && String(data.knownVersionId) === versionId) {
+      return { mode, unchanged: true, versionId, schemaVersion: state.schemaVersion, checksum: state.checksum };
+    }
+    const versionSnapshot = await db.doc(`processingRuleSets/${versionId}`).get();
+    if (!versionSnapshot.exists) fail('failed-precondition', 'Active processing rule set is unavailable');
+    const version = versionSnapshot.data();
+    return {
+      mode,
+      unchanged: false,
+      versionId,
+      schemaVersion: version.schemaVersion,
+      checksum: version.checksum,
+      bundledFallbackEnabled: version.bundledFallbackEnabled !== false,
+      rules: version.rules
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
 });
 
 exports.createOrganization = onCall(callableOptions, async request => {
@@ -353,6 +561,7 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
             organizationId: invitation.organizationId,
             role: invitation.role,
             accountStatus: 'invited',
+            license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId: invitation.organizationId },
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             recoveredAt: FieldValue.serverTimestamp()
@@ -373,6 +582,7 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
         organizationId: invitation.organizationId,
         role: invitation.role,
         accountStatus: 'invited',
+        license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId: invitation.organizationId },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp()
       });
@@ -466,6 +676,7 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
           organizationId: SELF_SERVICE_ORGANIZATION_ID,
           role: SELF_SERVICE_ROLE,
           accountStatus: 'invited',
+          license: { ...DEFAULT_LICENSE },
           onboardingSource: 'self-registration',
           createdAt: FieldValue.serverTimestamp(),
           updatedAt: FieldValue.serverTimestamp()
@@ -493,6 +704,7 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
         organizationId: invitation.organizationId,
         role: invitation.role,
         accountStatus: 'invited',
+        license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId: invitation.organizationId },
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
         ...(acceptedForSameCaller ? { recoveredAt: FieldValue.serverTimestamp() } : {})
@@ -521,6 +733,92 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
   }
 });
 
+exports.completeOrganizationSponsoredOnboarding = onCall(callableOptions, async request => {
+  try {
+    const auth = requireVerifiedEmail(request);
+    await enforceRateLimit(auth.uid, 'organizationSponsoredOnboarding', 10, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['organizationId', 'employeeCode', 'displayName'], ['organizationId', 'employeeCode', 'displayName']);
+    const organizationId = safeDocumentId(data.organizationId, 'organizationId');
+    const employeeCode = safeDocumentId(String(data.employeeCode).toUpperCase(), 'employeeCode');
+    const displayName = requiredString(data.displayName, 'displayName', 120);
+    const authenticatedEmail = normalizedEmail(auth.token.email);
+    const rosterId = rosterDocumentId(organizationId, employeeCode);
+    const organizationReference = db.doc(`organizations/${organizationId}`);
+    const rosterReference = db.doc(`orgRoster/${rosterId}`);
+    const userReference = db.doc(`users/${auth.uid}`);
+    const auditReference = db.collection('auditLogs').doc();
+    let role;
+    let accountStatus = 'invited';
+    let alreadyCompleted = false;
+
+    await db.runTransaction(async transaction => {
+      const [organizationSnapshot, rosterSnapshot, userSnapshot] = await Promise.all([
+        transaction.get(organizationReference),
+        transaction.get(rosterReference),
+        transaction.get(userReference)
+      ]);
+      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+        fail('failed-precondition', 'Organization is not active');
+      }
+      if (!rosterSnapshot.exists) fail('not-found', 'Employee code is not registered');
+      const roster = rosterSnapshot.data();
+      role = enumValue(roster.role, 'role', INVITABLE_ROLES);
+      if (userSnapshot.exists) {
+        const user = userSnapshot.data();
+        if (user.email !== authenticatedEmail || user.organizationId !== organizationId
+            || user.onboardingSource !== 'organisation-roster') {
+          fail('failed-precondition', 'Existing user profile belongs to a different onboarding path');
+        }
+        if (roster.status !== 'claimed' || roster.claimedByUid !== auth.uid) {
+          fail('failed-precondition', 'Employee code is not assigned to this user');
+        }
+        role = user.role;
+        accountStatus = user.accountStatus;
+        alreadyCompleted = true;
+        return;
+      }
+      if (roster.status !== 'available' || roster.email !== authenticatedEmail) {
+        fail('permission-denied', 'Sponsorship credentials are invalid');
+      }
+      transaction.create(userReference, {
+        email: authenticatedEmail,
+        displayName,
+        organizationId,
+        role,
+        accountStatus: 'invited',
+        onboardingSource: 'organisation-roster',
+        employeeCode,
+        license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId },
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      transaction.update(rosterReference, {
+        status: 'claimed',
+        claimedByUid: auth.uid,
+        claimedAt: FieldValue.serverTimestamp()
+      });
+      transaction.create(auditReference, {
+        actorId: auth.uid,
+        actorRole: role,
+        action: 'user.registration_requested',
+        targetType: 'user',
+        targetId: auth.uid,
+        details: { organizationId, onboardingSource: 'organisation-roster' },
+        timestamp: FieldValue.serverTimestamp()
+      });
+    });
+    await getAuth().setCustomUserClaims(auth.uid, { organizationId, role, accountStatus });
+    return {
+      status: accountStatus === 'active' ? 'active' : 'accepted',
+      activationRequired: accountStatus !== 'active',
+      alreadyCompleted
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
 async function resolveUid(target) {
   if (target.by === 'uid') return target.value;
   try {
@@ -542,23 +840,53 @@ exports.activateUser = onCall(callableOptions, async request => {
     if (!snapshot.exists) fail('not-found', 'User not found');
     const user = snapshot.data();
     if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot be activated');
-    const [organizationSnapshot, licenceSnapshot, organizationUsers] = await Promise.all([
-      db.doc(`organizations/${user.organizationId}`).get(),
-      db.doc(`licences/${user.organizationId}`).get(),
-      db.collection('users').where('organizationId', '==', user.organizationId).get()
-    ]);
-    if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
-      fail('failed-precondition', 'Organization is not active');
-    }
-    if (!licenceSnapshot.exists || licenceSnapshot.data().status !== 'active') {
-      fail('failed-precondition', 'Licence is not active');
-    }
-    const maximumUsers = boundedInteger(licenceSnapshot.data().maximumUsers, 'maximumUsers', 1, 500);
-    const activeUsers = organizationUsers.docs.filter(document =>
-      document.id !== uid && document.data().accountStatus === 'active'
-    ).length;
-    if (activeUsers >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
-    await reference.update({ accountStatus: 'active', updatedAt: FieldValue.serverTimestamp() });
+    await db.runTransaction(async transaction => {
+      const organizationReference = db.doc(`organizations/${user.organizationId}`);
+      const licenceReference = db.doc(`licences/${user.organizationId}`);
+      const activeUsersQuery = db.collection('users')
+        .where('organizationId', '==', user.organizationId)
+        .where('accountStatus', '==', 'active');
+      const [latestUser, organizationSnapshot, licenceSnapshot, activeUsers] = await Promise.all([
+        transaction.get(reference),
+        transaction.get(organizationReference),
+        transaction.get(licenceReference),
+        transaction.get(activeUsersQuery)
+      ]);
+      if (!latestUser.exists || latestUser.data().accountStatus === 'deleted') {
+        fail('failed-precondition', 'User cannot be activated');
+      }
+      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+        fail('failed-precondition', 'Organization is not active');
+      }
+      if (!licenceSnapshot.exists || licenceSnapshot.data().status !== 'active'
+          || timestampMillis(licenceSnapshot.data().expiryDate) < Date.now()) {
+        fail('failed-precondition', 'Licence is not active');
+      }
+      const maximumUsers = boundedInteger(licenceSnapshot.data().maximumUsers, 'maximumUsers', 1, 500);
+      const alreadyActive = activeUsers.docs.some(document => document.id === uid);
+      if (!alreadyActive && activeUsers.size >= maximumUsers) {
+        fail('resource-exhausted', 'Licence user limit reached');
+      }
+      const updates = { accountStatus: 'active', updatedAt: FieldValue.serverTimestamp() };
+      const latestLicense = latestUser.data().license;
+      if (latestLicense?.type === 'organisation') {
+        const now = Date.now();
+        const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
+        const durationWeeks = Math.max(1, Math.ceil((expiryMs - now) / (7 * 24 * 60 * 60 * 1000)));
+        updates.license = {
+          ...DEFAULT_LICENSE,
+          ...latestLicense,
+          type: 'organisation',
+          status: 'active',
+          durationWeeks,
+          activatedAt: Timestamp.fromMillis(now),
+          expiresAt: licenceSnapshot.data().expiryDate,
+          organizationId: user.organizationId,
+          paymentStatus: 'not_required'
+        };
+      }
+      transaction.update(reference, updates);
+    });
     await getAuth().setCustomUserClaims(uid, {
       organizationId: user.organizationId,
       role: user.role,
@@ -574,6 +902,124 @@ exports.activateUser = onCall(callableOptions, async request => {
       previousStatus: user.accountStatus
     });
     return { uid, accountStatus: 'active' };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.addRosterEntry = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'addRosterEntry', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['organizationId', 'employeeCode', 'email', 'role'], ['organizationId', 'employeeCode', 'email', 'role']);
+    const organizationId = safeDocumentId(data.organizationId, 'organizationId');
+    const employeeCode = safeDocumentId(String(data.employeeCode).toUpperCase(), 'employeeCode');
+    const email = normalizedEmail(data.email);
+    const role = enumValue(data.role, 'role', INVITABLE_ROLES);
+    const organization = await db.doc(`organizations/${organizationId}`).get();
+    if (!organization.exists || organization.data().status !== 'active') {
+      fail('failed-precondition', 'Organization is not active');
+    }
+    const rosterId = rosterDocumentId(organizationId, employeeCode);
+    const reference = db.doc(`orgRoster/${rosterId}`);
+    let created = true;
+    await db.runTransaction(async transaction => {
+      const existing = await transaction.get(reference);
+      if (existing.exists) {
+        if (existing.data().status !== 'available') {
+          fail('failed-precondition', 'Claimed roster entries cannot be reassigned');
+        }
+        created = false;
+        transaction.update(reference, {
+          email,
+          role,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: auth.uid
+        });
+        return;
+      }
+      transaction.create(reference, {
+        organizationId,
+        employeeCode,
+        email,
+        role,
+        status: 'available',
+        claimedByUid: null,
+        claimedAt: null,
+        createdAt: FieldValue.serverTimestamp(),
+        createdBy: auth.uid
+      });
+    });
+    await recordAdminEvent(auth, created ? 'roster.entry_added' : 'roster.entry_updated', 'orgRoster', rosterId, {
+      organizationId,
+      employeeCode,
+      email,
+      role
+    });
+    return { rosterId, organizationId, employeeCode, email, role, status: 'available', created };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.removeRosterEntry = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'removeRosterEntry', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['organizationId', 'employeeCode'], ['organizationId', 'employeeCode']);
+    const organizationId = safeDocumentId(data.organizationId, 'organizationId');
+    const employeeCode = safeDocumentId(String(data.employeeCode).toUpperCase(), 'employeeCode');
+    const rosterId = rosterDocumentId(organizationId, employeeCode);
+    const reference = db.doc(`orgRoster/${rosterId}`);
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) fail('not-found', 'Roster entry not found');
+      if (snapshot.data().status === 'claimed') {
+        fail('failed-precondition', 'Claimed roster entries cannot be removed; suspend the resulting user instead');
+      }
+      transaction.delete(reference);
+    });
+    await recordAdminEvent(auth, 'roster.entry_removed', 'orgRoster', rosterId, {
+      organizationId,
+      employeeCode
+    });
+    return { rosterId, removed: true };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.listRoster = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listRoster', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['organizationId'], ['organizationId']);
+    const organizationId = safeDocumentId(data.organizationId, 'organizationId');
+    const snapshot = await db.collection('orgRoster')
+      .where('organizationId', '==', organizationId)
+      .limit(ADMIN_LIST_LIMIT)
+      .get();
+    return {
+      entries: snapshot.docs.map(document => {
+        const entry = document.data();
+        return {
+          rosterId: document.id,
+          organizationId: entry.organizationId,
+          employeeCode: entry.employeeCode,
+          email: entry.email,
+          role: entry.role,
+          status: entry.status,
+          claimedByUid: entry.claimedByUid || null,
+          claimedAt: timestampIso(entry.claimedAt),
+          createdAt: timestampIso(entry.createdAt)
+        };
+      }).sort((left, right) => left.employeeCode.localeCompare(right.employeeCode)),
+      limit: ADMIN_LIST_LIMIT,
+      truncated: snapshot.size === ADMIN_LIST_LIMIT
+    };
   } catch (error) {
     translateValidation(error);
   }
@@ -658,12 +1104,15 @@ exports.activateLicence = onCall(callableOptions, async request => {
     const termDays = data.termDays === undefined
       ? 90
       : boundedInteger(data.termDays, 'termDays', 1, 366);
+    const organization = await db.doc(`organizations/${organizationId}`).get();
+    if (!organization.exists) fail('not-found', 'Organization not found');
     const now = Date.now();
     await db.doc(`licences/${organizationId}`).set({
       organizationId,
       status: 'active',
       startDate: Timestamp.fromMillis(now),
       expiryDate: Timestamp.fromMillis(now + termDays * 24 * 60 * 60 * 1000),
+      termDays,
       maximumUsers,
       monthlyAiLimit: 0,
       updatedAt: FieldValue.serverTimestamp()
@@ -705,10 +1154,11 @@ exports.listUsers = onCall(callableOptions, async request => {
     const organizationId = data.organizationId === undefined
       ? null
       : safeDocumentId(data.organizationId, 'organizationId');
-    const snapshot = await db.collection('users').limit(ADMIN_LIST_LIMIT).get();
+    let query = db.collection('users');
+    if (organizationId) query = query.where('organizationId', '==', organizationId);
+    const snapshot = await query.limit(ADMIN_LIST_LIMIT).get();
     const users = snapshot.docs
       .map(serializeUser)
-      .filter(user => !organizationId || user.organizationId === organizationId)
       .sort((left, right) => left.email.localeCompare(right.email));
     return {
       users,
@@ -730,10 +1180,11 @@ exports.listInvitations = onCall(callableOptions, async request => {
     const organizationId = data.organizationId === undefined
       ? null
       : safeDocumentId(data.organizationId, 'organizationId');
-    const snapshot = await db.collection('invitations').limit(ADMIN_LIST_LIMIT).get();
+    let query = db.collection('invitations');
+    if (organizationId) query = query.where('organizationId', '==', organizationId);
+    const snapshot = await query.limit(ADMIN_LIST_LIMIT).get();
     const invitations = snapshot.docs
       .map(serializeInvitation)
-      .filter(invitation => !organizationId || invitation.organizationId === organizationId)
       .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
     return { invitations, limit: ADMIN_LIST_LIMIT, truncated: snapshot.size === ADMIN_LIST_LIMIT };
   } catch (error) {
@@ -850,6 +1301,193 @@ exports.changeUserRole = onCall(callableOptions, async request => {
   }
 });
 
+exports.setUserLicense = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'setUserLicense', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['uid', 'action', 'durationWeeks'], ['uid', 'action']);
+    const uid = safeDocumentId(data.uid, 'uid');
+    const action = enumValue(data.action, 'action', ['activate', 'deactivate', 'extend']);
+    const durationWeeks = action === 'deactivate'
+      ? null
+      : boundedInteger(data.durationWeeks, 'durationWeeks', 1, 52);
+    const reference = db.doc(`users/${uid}`);
+    const now = Date.now();
+    let auditDetails;
+    let resultLicense;
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) fail('not-found', 'User not found');
+      const user = snapshot.data();
+      if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot hold a license');
+      const current = { ...DEFAULT_LICENSE, ...(user.license || {}) };
+      const legacyActiveIndividual = current.type === 'individual'
+        && current.status === 'active'
+        && current.paymentStatus === 'not_required';
+      if (current.type === 'individual' && action !== 'deactivate'
+          && current.paymentStatus !== 'verified' && !legacyActiveIndividual) {
+        fail('failed-precondition', 'Individual payment must be verified before license activation');
+      }
+      if (current.type === 'individual' && action === 'activate' && current.requestedDurationWeeks
+          && durationWeeks !== current.requestedDurationWeeks) {
+        fail('failed-precondition', 'License duration must match the verified individual plan');
+      }
+      let next;
+      if (action === 'activate') {
+        const expiresAtMs = computeLicenseExpiry(durationWeeks, now);
+        next = {
+          ...current,
+          status: 'active',
+          durationWeeks,
+          activatedAt: Timestamp.fromMillis(now),
+          expiresAt: Timestamp.fromMillis(expiresAtMs)
+        };
+      } else if (action === 'extend') {
+        const currentExpiryMs = timestampMillis(current.expiresAt);
+        const from = Number.isFinite(currentExpiryMs) && currentExpiryMs > now ? currentExpiryMs : now;
+        const expiresAtMs = computeLicenseExpiry(durationWeeks, from);
+        next = {
+          ...current,
+          status: 'active',
+          durationWeeks: boundedInteger(current.durationWeeks || 0, 'license.durationWeeks', 0, 5200) + durationWeeks,
+          activatedAt: current.activatedAt || Timestamp.fromMillis(now),
+          expiresAt: Timestamp.fromMillis(expiresAtMs)
+        };
+      } else {
+        next = { ...current, status: 'inactive' };
+      }
+      transaction.update(reference, { license: next, updatedAt: FieldValue.serverTimestamp() });
+      const expiresAtMs = timestampMillis(next.expiresAt);
+      auditDetails = {
+        action,
+        fromStatus: current.status,
+        toStatus: next.status,
+        durationWeeks: next.durationWeeks,
+        expiresAt: Number.isFinite(expiresAtMs) ? new Date(expiresAtMs).toISOString() : null
+      };
+      resultLicense = {
+        ...next,
+        activatedAt: timestampIso(next.activatedAt),
+        expiresAt: timestampIso(next.expiresAt),
+        verifiedAt: timestampIso(next.verifiedAt)
+      };
+    });
+    await recordAdminEvent(auth, 'user.license_updated', 'user', uid, auditDetails);
+    return { uid, license: resultLicense };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.submitPaymentProof = onCall(callableOptions, async request => {
+  try {
+    const auth = requireVerifiedEmail(request);
+    await enforceRateLimit(auth.uid, 'submitPaymentProof', 5, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['paymentReference', 'durationWeeks'], ['paymentReference', 'durationWeeks']);
+    const paymentReference = normalizedPaymentReference(data.paymentReference);
+    const plan = individualPlan(data.durationWeeks);
+    const userReference = db.doc(`users/${auth.uid}`);
+    const paymentClaimReference = db.doc(`paymentClaims/${tokenHash(paymentReference)}`);
+    const auditReference = db.collection('auditLogs').doc();
+    await db.runTransaction(async transaction => {
+      const [snapshot, paymentClaim] = await Promise.all([
+        transaction.get(userReference),
+        transaction.get(paymentClaimReference)
+      ]);
+      if (!snapshot.exists) fail('not-found', 'Complete individual onboarding before submitting payment');
+      const user = snapshot.data();
+      if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot submit payment');
+      const current = { ...DEFAULT_LICENSE, ...(user.license || {}) };
+      if (current.type !== 'individual') fail('failed-precondition', 'Payment proof is only accepted for individual access');
+      if (current.paymentStatus === 'verified') fail('failed-precondition', 'Payment is already verified');
+      if (paymentClaim.exists && paymentClaim.data().uid !== auth.uid) {
+        fail('already-exists', 'Payment reference was already submitted');
+      }
+      if (!paymentClaim.exists) {
+        transaction.create(paymentClaimReference, {
+          uid: auth.uid,
+          submittedAt: FieldValue.serverTimestamp()
+        });
+      }
+      transaction.update(userReference, {
+        license: {
+          ...current,
+          paymentStatus: 'pending_verification',
+          paymentReference,
+          paymentProvider: 'upi',
+          requestedDurationWeeks: plan.durationWeeks,
+          paymentAmount: plan.price
+        },
+        updatedAt: FieldValue.serverTimestamp()
+      });
+      transaction.create(auditReference, {
+        actorId: auth.uid,
+        actorRole: user.role,
+        action: 'user.payment_submitted',
+        targetType: 'user',
+        targetId: auth.uid,
+        details: {
+          paymentProvider: 'upi',
+          durationWeeks: plan.durationWeeks,
+          paymentAmount: plan.price
+        },
+        timestamp: FieldValue.serverTimestamp()
+      });
+    });
+    return {
+      paymentStatus: 'pending_verification',
+      durationWeeks: plan.durationWeeks,
+      paymentAmount: plan.price
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.verifyUserPayment = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'verifyUserPayment', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['uid', 'verified', 'reason'], ['uid', 'verified']);
+    const uid = safeDocumentId(data.uid, 'uid');
+    if (typeof data.verified !== 'boolean') fail('invalid-argument', 'verified must be a boolean');
+    const reason = data.reason === undefined ? '' : requiredString(data.reason, 'reason', 300);
+    const reference = db.doc(`users/${uid}`);
+    let paymentStatus;
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(reference);
+      if (!snapshot.exists) fail('not-found', 'User not found');
+      const user = snapshot.data();
+      const current = { ...DEFAULT_LICENSE, ...(user.license || {}) };
+      if (current.type !== 'individual') fail('failed-precondition', 'User does not have an individual license');
+      if (!current.paymentReference) fail('failed-precondition', 'User has not submitted a payment reference');
+      paymentStatus = data.verified ? 'verified' : 'pending_verification';
+      transaction.update(reference, {
+        license: {
+          ...current,
+          paymentStatus,
+          verifiedBy: data.verified ? auth.uid : null,
+          verifiedAt: data.verified ? FieldValue.serverTimestamp() : null
+        },
+        updatedAt: FieldValue.serverTimestamp()
+      });
+    });
+    await recordAdminEvent(
+      auth,
+      data.verified ? 'user.payment_verified' : 'user.payment_verification_declined',
+      'user',
+      uid,
+      { paymentStatus, reason: reason || null }
+    );
+    return { uid, paymentStatus };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
 exports.deleteUserAccount = onCall(callableOptions, async request => {
   try {
     const auth = await requirePlatformAdmin(request);
@@ -940,6 +1578,489 @@ exports.listOrganizations = onCall(callableOptions, async request => {
   }
 });
 
+exports.listProcessingRuleDrafts = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listProcessingRuleDrafts', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, []);
+    const snapshot = await db.collection('processingRuleDrafts').orderBy('priority').limit(1000).get();
+    return { rules: snapshot.docs.map(processingRuleDraft) };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.saveProcessingRuleDraft = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'saveProcessingRuleDraft', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['rule'], ['rule']);
+    const rule = normalizeProcessingRule(data.rule);
+    const reference = db.doc(`processingRuleDrafts/${rule.ruleId}`);
+    const existing = await reference.get();
+    await reference.set({
+      ...rule,
+      createdAt: existing.exists ? existing.data().createdAt : FieldValue.serverTimestamp(),
+      createdBy: existing.exists ? existing.data().createdBy : auth.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: auth.uid
+    });
+    await recordProcessingRuleHistory(auth, existing.exists ? 'processing_rule_draft_updated' : 'processing_rule_draft_created', rule.ruleId, {
+      enabled: rule.enabled,
+      priority: rule.priority,
+      processingArea: rule.processingArea,
+      enforcement: rule.enforcement
+    });
+    return { rule };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.setProcessingRuleStatus = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'setProcessingRuleStatus', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['ruleId', 'enabled'], ['ruleId', 'enabled']);
+    const ruleId = safeDocumentId(String(data.ruleId).toUpperCase(), 'ruleId');
+    if (typeof data.enabled !== 'boolean') fail('invalid-argument', 'enabled must be boolean');
+    const reference = db.doc(`processingRuleDrafts/${ruleId}`);
+    if (!(await reference.get()).exists) fail('not-found', 'Processing rule draft not found');
+    await reference.update({ enabled: data.enabled, updatedAt: FieldValue.serverTimestamp(), updatedBy: auth.uid });
+    await recordProcessingRuleHistory(auth, data.enabled ? 'processing_rule_enabled' : 'processing_rule_disabled', ruleId, {});
+    return { ruleId, enabled: data.enabled };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+async function draftRuleSetAndImpact() {
+  const [draftSnapshot, activeState] = await Promise.all([
+    db.collection('processingRuleDrafts').orderBy('priority').limit(1000).get(),
+    db.doc('processingRuleState/active').get()
+  ]);
+  const normalized = normalizeProcessingRuleSet(draftSnapshot.docs.map(processingRuleDraft));
+  let previousRules = [];
+  let activeVersionId = '';
+  if (activeState.exists && activeState.data().versionId) {
+    activeVersionId = String(activeState.data().versionId);
+    const activeVersion = await db.doc(`processingRuleSets/${activeVersionId}`).get();
+    if (activeVersion.exists && Array.isArray(activeVersion.data().rules)) previousRules = activeVersion.data().rules;
+  }
+  const impact = ruleImpact(previousRules, normalized.rules);
+  return { normalized, impact, activeVersionId };
+}
+
+exports.validateProcessingRuleDrafts = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'validateProcessingRuleDrafts', 120, 60 * 60 * 1000);
+    assertKeys(callableData(request), ['bundledFallbackEnabled']);
+    const { normalized, impact, activeVersionId } = await draftRuleSetAndImpact();
+    const bundledFallbackEnabled = callableData(request).bundledFallbackEnabled !== false;
+    const scenarios = scenarioPublicationCheck(normalized, impact, bundledFallbackEnabled);
+    return {
+      valid: true,
+      schemaVersion: normalized.schemaVersion,
+      checksum: normalized.checksum,
+      ruleCount: normalized.rules.length,
+      activeVersionId,
+      impact,
+      scenarios
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.publishProcessingRuleDrafts = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'publishProcessingRuleDrafts', 20, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['confirmHighImpact', 'bundledFallbackEnabled'], ['bundledFallbackEnabled']);
+    if (typeof data.bundledFallbackEnabled !== 'boolean') fail('invalid-argument', 'bundledFallbackEnabled must be boolean');
+    const { normalized, impact, activeVersionId } = await draftRuleSetAndImpact();
+    const scenarios = scenarioPublicationCheck(normalized, impact, data.bundledFallbackEnabled);
+    const dualApprovalRequired = impact.dualApproval.length > 0 || data.bundledFallbackEnabled === false;
+    if (dualApprovalRequired && !scenarios.publishable) {
+      fail('failed-precondition', `Passing synthetic scenarios are required for: ${scenarios.missingRuleIds.join(', ') || 'all high-impact rules'}`);
+    }
+    const publishedChecksum = `${normalized.checksum}:${data.bundledFallbackEnabled ? 'fallback' : 'central'}`;
+    if (dualApprovalRequired) {
+      const approvalReference = db.collection('processingRuleApprovals').doc();
+      await approvalReference.create({
+        kind: 'publish',
+        status: 'pending',
+        checksum: publishedChecksum,
+        activeVersionId,
+        bundledFallbackEnabled: data.bundledFallbackEnabled,
+        impact,
+        scenarioSummary: { total: scenarios.total, requiredRuleIds: scenarios.requiredRuleIds },
+        requestedAt: FieldValue.serverTimestamp(),
+        requestedBy: auth.uid,
+        expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
+        reviewedAt: null,
+        reviewedBy: null
+      });
+      await recordProcessingRuleHistory(auth, 'processing_rule_approval_requested', approvalReference.id, {
+        checksum: publishedChecksum,
+        changedRuleIds: [...new Set([...impact.added, ...impact.modified, ...impact.removed])],
+        bundledFallbackEnabled: data.bundledFallbackEnabled
+      });
+      return { approvalRequired: true, approval: approvalRecord(await approvalReference.get()), impact, scenarios };
+    }
+    const versionReference = db.collection('processingRuleSets').doc();
+    const stateReference = db.doc('processingRuleState/active');
+    await db.runTransaction(async transaction => {
+      const latestState = await transaction.get(stateReference);
+      const latestVersionId = latestState.exists ? String(latestState.data().versionId || '') : '';
+      if (latestVersionId !== activeVersionId) fail('aborted', 'Active rule version changed; validate again');
+      transaction.create(versionReference, {
+        schemaVersion: normalized.schemaVersion,
+        checksum: publishedChecksum,
+        rules: normalized.rules,
+        bundledFallbackEnabled: data.bundledFallbackEnabled,
+        createdAt: FieldValue.serverTimestamp(),
+        createdBy: auth.uid
+      });
+      transaction.set(stateReference, {
+        versionId: versionReference.id,
+        schemaVersion: normalized.schemaVersion,
+        checksum: publishedChecksum,
+        bundledFallbackEnabled: data.bundledFallbackEnabled,
+        publishedAt: FieldValue.serverTimestamp(),
+        publishedBy: auth.uid
+      });
+    });
+    await recordProcessingRuleHistory(auth, 'processing_rule_set_published', versionReference.id, {
+      fromVersionId: activeVersionId,
+      checksum: publishedChecksum,
+      ruleCount: normalized.rules.length,
+      bundledFallbackEnabled: data.bundledFallbackEnabled,
+      changedRuleIds: [...new Set([...impact.added, ...impact.modified, ...impact.removed])]
+    });
+    return { approvalRequired: false, ...processingRuleVersion(await versionReference.get()), impact, scenarios };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.listProcessingRuleApprovals = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listProcessingRuleApprovals', 120, 60 * 60 * 1000);
+    assertKeys(callableData(request), []);
+    const snapshot = await db.collection('processingRuleApprovals').orderBy('requestedAt', 'desc').limit(50).get();
+    return { approvals: snapshot.docs.map(approvalRecord) };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.approveProcessingRulePublication = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'approveProcessingRulePublication', 20, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['approvalId'], ['approvalId']);
+    const approvalId = safeDocumentId(data.approvalId, 'approvalId');
+    const approvalReference = db.doc(`processingRuleApprovals/${approvalId}`);
+    const approvalSnapshot = await approvalReference.get();
+    if (!approvalSnapshot.exists) fail('not-found', 'Processing-rule approval request not found');
+    const approval = approvalSnapshot.data();
+    if (approval.status !== 'pending') fail('failed-precondition', 'Approval request is no longer pending');
+    if (approval.requestedBy === auth.uid) fail('permission-denied', 'A different platform administrator must approve this publication');
+    if (timestampMillis(approval.expiresAt) <= Date.now()) fail('failed-precondition', 'Approval request has expired');
+    if (approval.kind === 'activation') {
+      const targetReference = db.doc(`processingRuleSets/${safeDocumentId(approval.targetVersionId, 'targetVersionId')}`);
+      const targetSnapshot = await targetReference.get();
+      if (!targetSnapshot.exists || targetSnapshot.data().checksum !== approval.checksum) fail('aborted', 'Target rule version changed or is unavailable');
+      const stateReference = db.doc('processingRuleState/active');
+      await db.runTransaction(async transaction => {
+        const [latestApproval, latestState] = await Promise.all([transaction.get(approvalReference), transaction.get(stateReference)]);
+        if (!latestApproval.exists || latestApproval.data().status !== 'pending') fail('aborted', 'Approval request is no longer pending');
+        const latestVersionId = latestState.exists ? String(latestState.data().versionId || '') : '';
+        if (latestVersionId !== approval.activeVersionId) fail('aborted', 'Active rule version changed; request approval again');
+        transaction.set(stateReference, {
+          versionId: targetSnapshot.id,
+          schemaVersion: targetSnapshot.data().schemaVersion,
+          checksum: targetSnapshot.data().checksum,
+          bundledFallbackEnabled: targetSnapshot.data().bundledFallbackEnabled !== false,
+          publishedAt: FieldValue.serverTimestamp(),
+          publishedBy: approval.requestedBy,
+          approvedBy: auth.uid
+        });
+        transaction.update(approvalReference, {
+          status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: auth.uid, versionId: targetSnapshot.id
+        });
+      });
+      await recordProcessingRuleHistory(auth, 'processing_rule_activation_approved', targetSnapshot.id, {
+        approvalId, requestedBy: approval.requestedBy, fromVersionId: approval.activeVersionId
+      });
+      return { ...processingRuleVersion(targetSnapshot), approvalId };
+    }
+    const { normalized, impact, activeVersionId } = await draftRuleSetAndImpact();
+    const scenarios = scenarioPublicationCheck(normalized, impact, approval.bundledFallbackEnabled !== false);
+    const checksum = `${normalized.checksum}:${approval.bundledFallbackEnabled === false ? 'central' : 'fallback'}`;
+    if (checksum !== approval.checksum || activeVersionId !== approval.activeVersionId) fail('aborted', 'Rules or active version changed; request approval again');
+    if (!scenarios.publishable) fail('failed-precondition', 'Synthetic scenarios must still pass before approval');
+    const versionReference = db.collection('processingRuleSets').doc();
+    const stateReference = db.doc('processingRuleState/active');
+    await db.runTransaction(async transaction => {
+      const [latestApproval, latestState] = await Promise.all([
+        transaction.get(approvalReference), transaction.get(stateReference)
+      ]);
+      if (!latestApproval.exists || latestApproval.data().status !== 'pending') fail('aborted', 'Approval request is no longer pending');
+      const latestVersionId = latestState.exists ? String(latestState.data().versionId || '') : '';
+      if (latestVersionId !== activeVersionId) fail('aborted', 'Active rule version changed; request approval again');
+      transaction.create(versionReference, {
+        schemaVersion: normalized.schemaVersion,
+        checksum,
+        rules: normalized.rules,
+        bundledFallbackEnabled: approval.bundledFallbackEnabled !== false,
+        createdAt: FieldValue.serverTimestamp(),
+        createdBy: approval.requestedBy,
+        approvedAt: FieldValue.serverTimestamp(),
+        approvedBy: auth.uid,
+        approvalId
+      });
+      transaction.set(stateReference, {
+        versionId: versionReference.id,
+        schemaVersion: normalized.schemaVersion,
+        checksum,
+        bundledFallbackEnabled: approval.bundledFallbackEnabled !== false,
+        publishedAt: FieldValue.serverTimestamp(),
+        publishedBy: approval.requestedBy,
+        approvedBy: auth.uid
+      });
+      transaction.update(approvalReference, {
+        status: 'approved', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: auth.uid, versionId: versionReference.id
+      });
+    });
+    await recordProcessingRuleHistory(auth, 'processing_rule_publication_approved', versionReference.id, {
+      approvalId, requestedBy: approval.requestedBy, checksum
+    });
+    return { ...processingRuleVersion(await versionReference.get()), approvalId };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.rejectProcessingRulePublication = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'rejectProcessingRulePublication', 60, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['approvalId'], ['approvalId']);
+    const approvalId = safeDocumentId(data.approvalId, 'approvalId');
+    const reference = db.doc(`processingRuleApprovals/${approvalId}`);
+    const snapshot = await reference.get();
+    if (!snapshot.exists) fail('not-found', 'Processing-rule approval request not found');
+    if (snapshot.data().status !== 'pending') fail('failed-precondition', 'Approval request is no longer pending');
+    if (snapshot.data().requestedBy === auth.uid) fail('permission-denied', 'A different platform administrator must review this publication');
+    await reference.update({ status: 'rejected', reviewedAt: FieldValue.serverTimestamp(), reviewedBy: auth.uid });
+    await recordProcessingRuleHistory(auth, 'processing_rule_publication_rejected', approvalId, { requestedBy: snapshot.data().requestedBy });
+    return { approvalId, status: 'rejected' };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.listProcessingRuleVersions = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listProcessingRuleVersions', 120, 60 * 60 * 1000);
+    assertKeys(callableData(request), []);
+    const [versions, active] = await Promise.all([
+      db.collection('processingRuleSets').orderBy('createdAt', 'desc').limit(50).get(),
+      db.doc('processingRuleState/active').get()
+    ]);
+    const activeVersionId = active.exists ? String(active.data().versionId || '') : '';
+    return {
+      activeVersionId,
+      versions: versions.docs.map(document => ({ ...processingRuleVersion(document), active: document.id === activeVersionId }))
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.activateProcessingRuleVersion = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'activateProcessingRuleVersion', 20, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['versionId'], ['versionId']);
+    const versionId = safeDocumentId(data.versionId, 'versionId');
+    const version = await db.doc(`processingRuleSets/${versionId}`).get();
+    if (!version.exists) fail('not-found', 'Published processing rule version not found');
+    const previous = await db.doc('processingRuleState/active').get();
+    const previousVersionId = previous.exists ? String(previous.data().versionId || '') : '';
+    let previousRules = [];
+    if (previousVersionId) {
+      const previousVersion = await db.doc(`processingRuleSets/${previousVersionId}`).get();
+      if (previousVersion.exists) previousRules = previousVersion.data().rules || [];
+    }
+    const impact = ruleImpact(previousRules, version.data().rules || []);
+    if (impact.dualApproval.length || version.data().bundledFallbackEnabled === false) {
+      const approvalReference = db.collection('processingRuleApprovals').doc();
+      await approvalReference.create({
+        kind: 'activation',
+        targetVersionId: versionId,
+        status: 'pending',
+        checksum: version.data().checksum,
+        activeVersionId: previousVersionId,
+        bundledFallbackEnabled: version.data().bundledFallbackEnabled !== false,
+        impact,
+        requestedAt: FieldValue.serverTimestamp(),
+        requestedBy: auth.uid,
+        expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
+        reviewedAt: null,
+        reviewedBy: null
+      });
+      await recordProcessingRuleHistory(auth, 'processing_rule_activation_approval_requested', approvalReference.id, {
+        targetVersionId: versionId, fromVersionId: previousVersionId
+      });
+      return { approvalRequired: true, approval: approvalRecord(await approvalReference.get()) };
+    }
+    await db.doc('processingRuleState/active').set({
+      versionId,
+      schemaVersion: version.data().schemaVersion,
+      checksum: version.data().checksum,
+      bundledFallbackEnabled: version.data().bundledFallbackEnabled !== false,
+      publishedAt: FieldValue.serverTimestamp(),
+      publishedBy: auth.uid
+    });
+    await recordProcessingRuleHistory(auth, 'processing_rule_version_activated', versionId, {
+      fromVersionId: previousVersionId,
+      rollback: previousVersionId !== ''
+    });
+    return { approvalRequired: false, ...processingRuleVersion(version) };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.listProcessingRuleHistory = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listProcessingRuleHistory', 120, 60 * 60 * 1000);
+    assertKeys(callableData(request), []);
+    const snapshot = await db.collection('processingRuleHistory').orderBy('timestamp', 'desc').limit(100).get();
+    return {
+      events: snapshot.docs.map(document => {
+        const value = document.data();
+        return {
+          id: document.id,
+          action: value.action,
+          actorId: value.actorId,
+          targetId: value.targetId,
+          details: value.details || {},
+          timestamp: timestampIso(value.timestamp)
+        };
+      })
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.submitProcessingRuleFeedback = onCall(callableOptions, async request => {
+  try {
+    const auth = requireVerifiedEmail(request);
+    await enforceRateLimit(auth.uid, 'submitProcessingRuleFeedback', 60, 60 * 60 * 1000);
+    const user = await activeUser(auth.uid);
+    const data = callableData(request);
+    assertKeys(data, ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes'],
+      ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes']);
+    const ruleId = safeDocumentId(String(data.ruleId).toUpperCase(), 'ruleId');
+    const ruleSetVersion = safeDocumentId(data.ruleSetVersion, 'ruleSetVersion');
+    const category = enumValue(data.category, 'category', FEEDBACK_CATEGORIES);
+    const processingArea = enumValue(data.processingArea, 'processingArea', ['OPD', 'PHARMACY', 'IPD']);
+    if (!Array.isArray(data.packageCodes) || data.packageCodes.length > 20) fail('invalid-argument', 'packageCodes is invalid');
+    const packageCodes = [...new Set(data.packageCodes.map(value => requiredString(value, 'packageCode', 80).toUpperCase()))];
+    const reference = db.collection('processingRuleFeedback').doc();
+    await reference.create({
+      ruleId,
+      ruleSetVersion,
+      category,
+      processingArea,
+      packageCodes,
+      organizationId: user.organizationId,
+      status: 'open',
+      submittedBy: auth.uid,
+      submittedAt: FieldValue.serverTimestamp(),
+      reviewedBy: null,
+      reviewedAt: null,
+      resolution: null
+    });
+    return { feedbackId: reference.id, status: 'open' };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.listProcessingRuleFeedback = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'listProcessingRuleFeedback', 120, 60 * 60 * 1000);
+    assertKeys(callableData(request), []);
+    const snapshot = await db.collection('processingRuleFeedback').orderBy('submittedAt', 'desc').limit(100).get();
+    return {
+      feedback: snapshot.docs.map(document => {
+        const value = document.data();
+        return {
+          feedbackId: document.id,
+          ruleId: value.ruleId,
+          ruleSetVersion: value.ruleSetVersion,
+          category: value.category,
+          processingArea: value.processingArea,
+          packageCodes: value.packageCodes || [],
+          organizationId: value.organizationId,
+          status: value.status,
+          submittedBy: value.submittedBy,
+          submittedAt: timestampIso(value.submittedAt),
+          reviewedBy: value.reviewedBy || null,
+          reviewedAt: timestampIso(value.reviewedAt),
+          resolution: value.resolution || null
+        };
+      })
+    };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
+exports.reviewProcessingRuleFeedback = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'reviewProcessingRuleFeedback', 120, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['feedbackId', 'status', 'resolution'], ['feedbackId', 'status']);
+    const feedbackId = safeDocumentId(data.feedbackId, 'feedbackId');
+    const status = enumValue(data.status, 'status', ['under_review', 'accepted', 'rejected', 'resolved']);
+    const resolution = data.resolution === undefined || data.resolution === null
+      ? null
+      : enumValue(data.resolution, 'resolution', ['rule_updated', 'no_change', 'duplicate', 'insufficient_information']);
+    const reference = db.doc(`processingRuleFeedback/${feedbackId}`);
+    if (!(await reference.get()).exists) fail('not-found', 'Processing rule feedback not found');
+    await reference.update({
+      status,
+      resolution,
+      reviewedBy: auth.uid,
+      reviewedAt: FieldValue.serverTimestamp()
+    });
+    await recordProcessingRuleHistory(auth, 'processing_rule_feedback_reviewed', feedbackId, { status, resolution });
+    return { feedbackId, status, resolution };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
 exports.listAuditEvents = onCall(callableOptions, async request => {
   try {
     const auth = await requirePlatformAdmin(request);
@@ -1001,9 +2122,13 @@ exports.recordExtensionEvent = onCall(callableOptions, async request => {
 
 exports._test = {
   ACCOUNT_STATUSES,
+  DEFAULT_LICENSE,
   EVENT_ACTIONS,
   GRACE_PERIOD_MS,
   INVITABLE_ROLES,
   LICENCE_STATUSES,
-  ORGANIZATION_STATUSES
+  LICENSE_STATUSES,
+  LICENSE_TYPES,
+  ORGANIZATION_STATUSES,
+  PAYMENT_STATUSES
 };

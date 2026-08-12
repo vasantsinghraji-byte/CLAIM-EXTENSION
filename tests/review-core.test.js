@@ -13,6 +13,18 @@ test('fingerprint is stable across proposal order and changes when values change
   assert.notEqual(fingerprint(rows), fingerprint(rows.map(row => row.key === 'r1' ? { ...row, beforeApproved: 1 } : row)));
 });
 
+test('fingerprint binds centrally governed enforcement and target remarks', () => {
+  const base = [{
+    key: 'row-1', claimAmount: 1000, beforeApproved: 0, proposedApproved: 900,
+    beforeRemarks: '', proposedRemarks: 'Deducted', risk: 'medium', reason: 'central',
+    enforcement: 'mandatory', mandatory: true, targetRemarks: { remarks: 'Deducted' }
+  }];
+  assert.notEqual(
+    fingerprint(base),
+    fingerprint([{ ...base[0], targetRemarks: { remarks: 'Changed centrally' } }])
+  );
+});
+
 test('reconciliation returns selected before/after totals and deductions', () => {
   assert.deepEqual(reconcile(rows, ['r1', 'r2']), {
     rowCount: 2,

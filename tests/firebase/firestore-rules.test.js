@@ -49,6 +49,10 @@ test.beforeEach(async () => {
     await setDoc(doc(firestore, 'licences/org-a'), { status: 'active' });
     await setDoc(doc(firestore, 'auditLogs/log-a'), { action: 'preview_created' });
     await setDoc(doc(firestore, 'rateLimits/user-a_extensionEvent'), { count: 1 });
+    await setDoc(doc(firestore, 'paymentClaims/reference-hash'), { uid: 'user-a' });
+    await setDoc(doc(firestore, 'orgRoster/org-a_EMP-01'), {
+      organizationId: 'org-a', employeeCode: 'EMP-01', status: 'available'
+    });
     await setDoc(doc(firestore, 'appConfig/production'), {
       minimumSupportedVersion: '1.6.0',
       maintenanceMode: false,
@@ -91,6 +95,27 @@ test('processors cannot write protected profiles, licences, audit logs or rate l
   await assertFails(setDoc(doc(firestore, 'auditLogs/new-log'), { action: 'preview_created' }));
   await assertFails(getDoc(doc(firestore, 'rateLimits/user-a_extensionEvent')));
   await assertFails(setDoc(doc(firestore, 'rateLimits/user-a_extensionEvent'), { count: 0 }));
+  await assertFails(getDoc(doc(firestore, 'orgRoster/org-a_EMP-01')));
+  await assertFails(setDoc(doc(firestore, 'orgRoster/org-a_EMP-02'), { status: 'available' }));
+  await assertFails(getDoc(doc(firestore, 'paymentClaims/reference-hash')));
+  await assertFails(setDoc(doc(firestore, 'paymentClaims/another-hash'), { uid: 'user-a' }));
+});
+
+test('processors and browser admins cannot access processing-rule governance collections directly', async () => {
+  for (const role of ['processor', 'platformAdmin']) {
+    const firestore = environment.authenticatedContext(`${role}-user`, {
+      organizationId: 'org-a',
+      role
+    }).firestore();
+    for (const collection of [
+      'processingRuleDrafts', 'processingRuleSets', 'processingRuleState',
+      'processingRuleHistory', 'processingRuleFeedback', 'processingRuleApprovals'
+    ]) {
+      const reference = doc(firestore, `${collection}/test`);
+      await assertFails(getDoc(reference));
+      await assertFails(setDoc(reference, { ruleId: 'TEST-RULE' }));
+    }
+  }
 });
 
 test('own settings accept only the allowlisted schema', async () => {
@@ -108,6 +133,16 @@ test('own settings accept only the allowlisted schema', async () => {
     extensionPreferences: { auditMode: 'flag', claimToolsEnabled: true },
     enabledFeatures: { claimAssistance: true, packageAudit: true },
     patientName: 'forbidden',
+    lastSyncedAt: serverTimestamp()
+  }));
+  await assertFails(setDoc(reference, {
+    extensionPreferences: { auditMode: 'flag', claimToolsEnabled: 'yes' },
+    enabledFeatures: { claimAssistance: true, packageAudit: true },
+    lastSyncedAt: serverTimestamp()
+  }));
+  await assertFails(setDoc(reference, {
+    extensionPreferences: { auditMode: 'unsafe-mode', claimToolsEnabled: true },
+    enabledFeatures: { claimAssistance: true, packageAudit: true },
     lastSyncedAt: serverTimestamp()
   }));
   const otherReference = doc(firestore, 'userSettings/user-b');

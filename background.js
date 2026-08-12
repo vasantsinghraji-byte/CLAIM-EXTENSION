@@ -2,7 +2,7 @@
 
 // runtime-config.js is generated from the git-ignored Firebase build config.
 // It must load before auth-core.js in the service worker.
-if (typeof importScripts === 'function') importScripts('runtime-config.js', 'auth-core.js');
+if (typeof importScripts === 'function') importScripts('runtime-config.js', 'auth-core.js', 'processing-rules.js');
 
 const STORAGE_POLICIES = Object.freeze({
   claimActivityLog: { limit: 500, timestampField: 'timestamp', maxAgeMs: 30 * 24 * 60 * 60 * 1000 },
@@ -14,6 +14,7 @@ const STORAGE_POLICIES = Object.freeze({
 const FIREBASE_WEB_API_KEY = globalThis.ClaimSparkRuntimeConfig?.firebaseApiKey || '';
 const FUNCTIONS_BASE_URL = globalThis.ClaimSparkRuntimeConfig?.functionsBaseUrl || '';
 const LICENCE_RECHECK_ALARM = 'claimExtensionLicenceRecheck';
+const PROCESSING_RULE_SCHEMA_VERSION = 2;
 // How long Apply keeps trusting the last successful licence check if the
 // backend is simply unreachable (not an expired/suspended licence - a
 // network failure). Matches the ID token lifetime.
@@ -160,6 +161,12 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         return Array.isArray(config?.rules) ? config.rules.length : 0;
       });
     },
+    setProcessingRuleSet(ruleSet) {
+      return enqueue('processingRuleSet', async () => {
+        await storageSet(storage, { processingRuleSet: ruleSet });
+        return ruleSet;
+      });
+    },
     setAuthSession(session) {
       return enqueue('authSession', async () => {
         await storageSet(storage, { authSession: session });
@@ -198,6 +205,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   const overrideMigration = migrateRuleOverridesToLocal(chrome.storage.local, chrome.storage.sync)
     .catch(() => false);
   const AuthCore = globalThis.ClaimAuthCore;
+  const ProcessingRules = globalThis.ClaimProcessingRules;
 
   async function handleAuthSignIn(email, password) {
     const session = await AuthCore.signInWithPassword({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
@@ -289,6 +297,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     });
     await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
     if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    refreshProcessingRules().catch(() => undefined);
     return { success: true };
   }
 
@@ -326,6 +335,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
     await storageWriter.clearPendingAuth();
     if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    refreshProcessingRules().catch(() => undefined);
   }
 
   // Registers a verified processor for administrator approval. An explicit
@@ -391,8 +401,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  // On success, registers an ordinary processor for approval or claims an
-  // explicit invitation when one exists.
+  // Email verification precedes the access-path choice. No account profile is
+  // created until the user chooses organisation sponsorship or the default path.
   async function handleCheckEmailVerified() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -417,11 +427,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       expiresAt: refreshed.expiresAt
     };
     await storageWriter.setPendingAuth(pending);
-    const displayName = pending.displayName || info.displayName || '';
-    const afterCompletion = displayName
-      ? await attemptCompleteOnboarding({ ...pending, displayName, stage: 'complete-onboarding' })
-      : { ...pending, stage: 'complete-onboarding', lastError: 'DISPLAY_NAME_REQUIRED' };
-    if (afterCompletion.stage !== 'active') await storageWriter.setPendingAuth(afterCompletion);
+    const afterCompletion = {
+      ...pending,
+      displayName: pending.displayName || info.displayName || '',
+      stage: 'choose-access-path',
+      lastError: null
+    };
+    await storageWriter.setPendingAuth(afterCompletion);
     return {
       success: true,
       emailVerified: true,
@@ -438,9 +450,69 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     const pending = await refreshPendingIfStale(pendingAuth);
     const result = await attemptCompleteOnboarding({
       ...pending,
-      displayName: String(displayName || '').trim()
+      displayName: String(displayName || pending.displayName || '').trim()
     });
     return { success: !result.lastError, stage: result.stage, error: result.lastError };
+  }
+
+  async function handleOrgSponsoredOnboarding(organizationId, employeeCode) {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    const onboarding = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'completeOrganizationSponsoredOnboarding',
+      idToken: pending.idToken,
+      data: {
+        organizationId: String(organizationId || '').trim(),
+        employeeCode: String(employeeCode || '').trim(),
+        displayName: String(pending.displayName || '').trim()
+      },
+      fetchImpl: fetch
+    });
+    const next = { ...pending, stage: 'awaiting-activation', lastError: null };
+    await storageWriter.setPendingAuth(next);
+    if (!onboarding.activationRequired) {
+      const profile = await AuthCore.callFunction({
+        functionsBaseUrl: FUNCTIONS_BASE_URL,
+        name: 'getCurrentUserProfile',
+        idToken: pending.idToken,
+        data: {},
+        fetchImpl: fetch
+      });
+      await establishActiveSession(pending, profile);
+      return { success: true, stage: 'active' };
+    }
+    return { success: true, stage: 'awaiting-activation' };
+  }
+
+  async function handleIndividualPaidOnboarding(paymentReference, durationWeeks) {
+    const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+    if (!pendingAuth) throw new Error('No pending sign-up');
+    const pending = await refreshPendingIfStale(pendingAuth);
+    await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'completeInvitationOnboarding',
+      idToken: pending.idToken,
+      data: { displayName: String(pending.displayName || '').trim() },
+      fetchImpl: fetch
+    });
+    await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'submitPaymentProof',
+      idToken: pending.idToken,
+      data: {
+        paymentReference: String(paymentReference || '').trim(),
+        durationWeeks: Number(durationWeeks)
+      },
+      fetchImpl: fetch
+    });
+    await storageWriter.setPendingAuth({
+      ...pending,
+      stage: 'awaiting-activation',
+      lastError: null
+    });
+    return { success: true, stage: 'awaiting-activation' };
   }
 
   // Both ordinary registrations and explicit invitations require administrator
@@ -493,10 +565,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       const state = { ...licence, checkedAt: Date.now(), source: 'server' };
       await storageWriter.setLicenceState(state);
       return state;
-    } catch {
+    } catch (error) {
       const { licenceState: previous } = await storageGet(chrome.storage.local, 'licenceState');
       const lastCheckedAt = previous?.checkedAt;
-      const withinTolerance = Number.isFinite(lastCheckedAt) && Date.now() - lastCheckedAt <= LICENCE_OUTAGE_TOLERANCE_MS;
+      const transportFailure = error?.code === 'NETWORK_ERROR';
+      const withinTolerance = transportFailure && Number.isFinite(lastCheckedAt)
+        && Date.now() - lastCheckedAt <= LICENCE_OUTAGE_TOLERANCE_MS;
       const state = withinTolerance
         ? { ...previous, source: 'error' }
         : {
@@ -512,6 +586,85 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       await storageWriter.setLicenceState(state);
       return state;
     }
+  }
+
+  async function refreshProcessingRules() {
+    const { authSession, processingRuleSet: cached } = await new Promise((resolve, reject) =>
+      chrome.storage.local.get(['authSession', 'processingRuleSet'], result => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(result || {});
+      }));
+    if (!authSession) throw new Error('Sign in first');
+    let session = authSession;
+    if (!AuthCore.isTokenFresh(session)) {
+      const refreshed = await AuthCore.refreshIdToken({
+        apiKey: FIREBASE_WEB_API_KEY,
+        refreshToken: session.refreshToken,
+        fetchImpl: fetch
+      });
+      session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
+      await storageWriter.setAuthSession(session);
+    }
+    const response = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'getActiveProcessingRules',
+      idToken: session.idToken,
+      data: {
+        knownVersionId: cached?.versionId || '',
+        extensionVersion: chrome.runtime.getManifest().version,
+        supportedRuleSchemaVersions: [PROCESSING_RULE_SCHEMA_VERSION]
+      },
+      fetchImpl: fetch
+    });
+    if (response.unchanged && response.versionId && cached?.versionId !== response.versionId) {
+      throw new Error('Active rule version is not available in the local cache');
+    }
+    if (response.unchanged && response.checksum && cached?.versionId === response.versionId
+        && (cached.checksum !== response.checksum || !(await ProcessingRules.verifyPublishedRuleSet(cached)))) {
+      await storageWriter.setProcessingRuleSet(null);
+      throw new Error('Cached processing rule checksum is invalid');
+    }
+    const ruleSet = response.unchanged && cached?.versionId === response.versionId
+      ? { ...cached, mode: response.mode, checkedAt: Date.now(), source: 'server' }
+      : {
+          schemaVersion: response.schemaVersion,
+          versionId: response.versionId || '',
+          checksum: response.checksum || '',
+          rules: Array.isArray(response.rules) ? response.rules : [],
+          bundledFallbackEnabled: response.bundledFallbackEnabled !== false,
+          mode: response.mode || 'bundled',
+          checkedAt: Date.now(),
+          source: 'server'
+        };
+    if (!response.unchanged && response.checksum && !(await ProcessingRules.verifyPublishedRuleSet(ruleSet))) {
+      await storageWriter.setProcessingRuleSet(null);
+      throw new Error('Published processing rule checksum is invalid');
+    }
+    await storageWriter.setProcessingRuleSet(ruleSet);
+    return ruleSet;
+  }
+
+  async function submitProcessingRuleFeedback(data) {
+    const { authSession } = await storageGet(chrome.storage.local, 'authSession');
+    if (!authSession) throw new Error('Sign in first');
+    let session = authSession;
+    if (!AuthCore.isTokenFresh(session)) {
+      const refreshed = await AuthCore.refreshIdToken({
+        apiKey: FIREBASE_WEB_API_KEY,
+        refreshToken: session.refreshToken,
+        fetchImpl: fetch
+      });
+      session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
+      await storageWriter.setAuthSession(session);
+    }
+    return AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'submitProcessingRuleFeedback',
+      idToken: session.idToken,
+      data,
+      fetchImpl: fetch
+    });
   }
 
   const ADMIN_FUNCTIONS = Object.freeze({
@@ -566,7 +719,10 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
 
   if (chrome.alarms) {
     chrome.alarms.onAlarm.addListener(alarm => {
-      if (alarm.name === LICENCE_RECHECK_ALARM) performLicenceRecheck();
+      if (alarm.name === LICENCE_RECHECK_ALARM) {
+        performLicenceRecheck();
+        refreshProcessingRules().catch(() => undefined);
+      }
     });
   }
 
@@ -575,6 +731,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       setTabBadge(sender.tab.id, request.count > 0 ? String(request.count) : '', '#c0392b');
       return undefined;
     }
+    if (request?.action === 'refreshProcessingRules') {
+      refreshProcessingRules()
+        .then(ruleSet => sendResponse({ success: true, ruleSet }))
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'submitProcessingRuleFeedback') {
+      submitProcessingRuleFeedback(request.data)
+        .then(result => sendResponse({ success: true, result }))
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
     if (request?.action === 'authSignIn') {
       handleAuthSignIn(request.email, request.password)
         .then(sendResponse)
@@ -582,7 +750,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignOut') {
-      Promise.all([storageWriter.clearAuthSession(), storageWriter.setLicenceState(null)])
+      Promise.all([
+        storageWriter.clearAuthSession(),
+        storageWriter.clearPendingAuth(),
+        storageWriter.setLicenceState(null),
+        storageWriter.setProcessingRuleSet(null)
+      ])
         .then(() => {
           if (chrome.alarms) chrome.alarms.clear(LICENCE_RECHECK_ALARM);
           sendResponse({ success: true });
@@ -620,6 +793,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;
     }
+    if (request?.action === 'authOrganizationSponsoredOnboarding') {
+      handleOrgSponsoredOnboarding(request.organizationId, request.employeeCode)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authIndividualPaidOnboarding') {
+      handleIndividualPaidOnboarding(request.paymentReference, request.durationWeeks)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
     if (request?.action === 'authCheckActivation') {
       handleCheckActivation()
         .then(sendResponse)
@@ -646,14 +831,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       mutation = storageWriter.append(request.key, request.entries);
     } else if (request?.action === 'removeRecoverySnapshot') {
       mutation = storageWriter.removeRecoverySnapshot(request.id);
-    } else if (request?.action === 'setRuleOverride') {
-      mutation = overrideMigration.then(() => storageWriter.setRuleOverride(request.ruleId, request.autoDeductEligible));
-    } else if (request?.action === 'resetRuleOverrides') {
-      mutation = overrideMigration.then(() => storageWriter.resetRuleOverrides());
     } else if (request?.action === 'ensureRuleOverridesMigration') {
       mutation = overrideMigration.then(() => 0);
-    } else if (request?.action === 'setCustomRuleConfig') {
-      mutation = storageWriter.setCustomRuleConfig(request.config);
     }
     if (!mutation) return undefined;
     mutation.then(count => sendResponse({ success: true, count }))

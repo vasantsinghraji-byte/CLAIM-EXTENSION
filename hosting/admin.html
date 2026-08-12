@@ -40,7 +40,10 @@
         <button type="button" data-tab="users" class="active">Users</button>
         <button type="button" data-tab="invitations">Invitations</button>
         <button type="button" data-tab="organizations">Organizations</button>
+        <button type="button" data-tab="roster">Roster</button>
         <button type="button" data-tab="licences">Licences</button>
+        <button type="button" data-tab="rules">Processing rules</button>
+        <button type="button" data-tab="rule-feedback">Rule feedback</button>
         <button type="button" data-tab="audit">Audit events</button>
       </nav>
 
@@ -52,6 +55,10 @@
         <section class="pending-approvals" aria-labelledby="pendingUsersHeading">
           <h3 id="pendingUsersHeading">Pending approvals</h3>
           <div id="pendingUsersList" class="record-list"></div>
+        </section>
+        <section class="pending-approvals" aria-labelledby="pendingPaymentsHeading">
+          <h3 id="pendingPaymentsHeading">Payment verification <span id="pendingPaymentCount" class="count-badge">0 pending</span></h3>
+          <div id="pendingPaymentsList" class="record-list"></div>
         </section>
         <h3>Approved and inactive users</h3>
         <div id="usersList" class="record-list"></div>
@@ -105,8 +112,31 @@
         <div id="organizationsList" class="record-list"></div>
       </section>
 
+      <section id="rosterPanel" class="panel" data-panel="roster" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2>Organisation roster</h2>
+            <p class="meta">Add employee codes before sponsored users register. Codes are single-use.</p>
+          </div>
+          <button id="refreshRoster" class="button secondary" type="button">Refresh</button>
+        </div>
+        <form id="rosterForm" class="inline-form">
+          <label>Organization <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Employee code <input name="employeeCode" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Employee email <input name="email" type="email" required autocomplete="off"></label>
+          <label>Role
+            <select name="role">
+              <option value="processor">Processor</option>
+              <option value="organizationAdmin">Organization administrator</option>
+            </select>
+          </label>
+          <button class="button primary" type="submit">Add roster entry</button>
+        </form>
+        <div id="rosterList" class="record-list"></div>
+      </section>
+
       <section id="licencesPanel" class="panel" data-panel="licences" hidden>
-        <h2>Activate or renew licence</h2>
+        <h2>Activate or renew organisation licence</h2>
         <form id="licenceForm" class="inline-form">
           <label>Organization <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
           <label>Maximum users <input name="maximumUsers" type="number" min="1" max="500" value="1" required></label>
@@ -116,6 +146,91 @@
             <button class="button secondary danger" type="submit" name="mode" value="suspend">Suspend licence</button>
           </div>
         </form>
+      </section>
+
+      <section id="rulesPanel" class="panel" data-panel="rules" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2>Processing rules</h2>
+            <p class="meta">Only published rules are applied by processors. Lower priority numbers execute first.</p>
+          </div>
+          <button id="refreshRules" class="button secondary" type="button">Refresh</button>
+        </div>
+        <form id="ruleForm" class="rule-form">
+          <label>Rule ID <input name="ruleId" required pattern="[A-Za-z][A-Za-z0-9_-]{2,79}" maxlength="80"></label>
+          <label>Name <input name="name" required maxlength="160"></label>
+          <label>Processing area
+            <select name="processingArea">
+              <option value="ALL">All</option>
+              <option value="OPD">OPD</option>
+              <option value="PHARMACY">Pharmacy</option>
+              <option value="IPD">IPD</option>
+            </select>
+          </label>
+          <label>Priority <input name="priority" type="number" min="1" max="9999" value="300" required></label>
+          <label>Enforcement
+            <select name="enforcement">
+              <option value="advisory">Advisory</option>
+              <option value="mandatory">Mandatory</option>
+              <option value="blocking">Blocking</option>
+              <option value="manualReview">Manual review</option>
+            </select>
+          </label>
+          <label class="check-label"><input name="enabled" type="checkbox" checked> Active when published</label>
+          <label class="wide-field">Description <input name="description" maxlength="500"></label>
+          <fieldset class="wide-field rule-builder-section">
+            <legend>Conditions</legend>
+            <p class="meta">Choose whether every condition or any condition must match.</p>
+            <label>Match
+              <select id="conditionMode"><option value="all">All conditions</option><option value="any">Any condition</option></select>
+            </label>
+            <div id="conditionBuilder" class="builder-list"></div>
+            <button id="addCondition" class="button secondary" type="button">Add condition</button>
+          </fieldset>
+          <fieldset class="wide-field rule-builder-section">
+            <legend>Actions</legend>
+            <p class="meta">Actions run in the displayed order when the conditions match.</p>
+            <div id="actionBuilder" class="builder-list"></div>
+            <button id="addAction" class="button secondary" type="button">Add action</button>
+          </fieldset>
+          <fieldset class="wide-field rule-builder-section">
+            <legend>Synthetic publish tests</legend>
+            <p class="meta">High-impact rules require at least one passing scenario that triggers the rule.</p>
+            <div id="scenarioBuilder" class="builder-list"></div>
+            <button id="addScenario" class="button secondary" type="button">Add scenario</button>
+          </fieldset>
+          <div class="form-actions wide-field">
+            <button class="button primary" type="submit">Save draft</button>
+            <button id="resetRuleForm" class="button secondary" type="button">New rule</button>
+          </div>
+        </form>
+        <div class="publish-bar">
+          <label class="check-label"><input id="bundledFallbackEnabled" type="checkbox" checked> Retain bundled safety fallback during migration</label>
+          <button id="validateRules" class="button secondary" type="button">Validate and review impact</button>
+          <button id="publishRules" class="button primary" type="button" disabled>Publish validated rules</button>
+          <span id="ruleValidationSummary" class="meta"></span>
+        </div>
+        <section id="ruleImpact" class="impact-box" hidden></section>
+        <h3>Publication approvals</h3>
+        <p class="meta">Deductions, exclusions, blocking changes, and disabling fallback require approval by a different active platform administrator.</p>
+        <div id="ruleApprovalsList" class="record-list"></div>
+        <h3>Draft rules</h3>
+        <div id="rulesList" class="record-list"></div>
+        <h3>Published versions</h3>
+        <div id="ruleVersionsList" class="record-list"></div>
+        <h3>Rule history</h3>
+        <div id="ruleHistoryList" class="record-list"></div>
+      </section>
+
+      <section id="ruleFeedbackPanel" class="panel" data-panel="rule-feedback" hidden>
+        <div class="panel-heading">
+          <div>
+            <h2>Processing-rule feedback</h2>
+            <p class="meta">Structured, claim-free exceptions submitted by processors.</p>
+          </div>
+          <button id="refreshRuleFeedback" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div id="ruleFeedbackList" class="record-list"></div>
       </section>
 
       <section id="auditPanel" class="panel" data-panel="audit" hidden>
