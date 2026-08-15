@@ -116,9 +116,14 @@ async function seedFoundation(auth, db) {
 
 async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   const sponsored = await createVerifiedUser(auth, 'acceptance-sponsored@claim-spark.local', 'Sponsored Processor');
-  await callFunction('addRosterEntry', adminToken, {
-    organizationId: 'acceptance-org', employeeCode: 'EMP-ACCEPT-01', email: sponsored.email, role: 'processor'
+  const rosterImport = await callFunction('bulkAddRosterEntries', adminToken, {
+    organizationId: 'acceptance-org',
+    entries: [
+      { employeeCode: 'EMP-ACCEPT-01', email: sponsored.email, role: 'processor' },
+      { employeeCode: 'EMP-ACCEPT-02', email: 'unused-sponsored@claim-spark.local', role: 'processor' }
+    ]
   });
+  assert.deepEqual(rosterImport, { organizationId: 'acceptance-org', submitted: 2, created: 2, updated: 0 });
   const sponsoredToken = await signIn(sponsored.email);
   const onboarding = await callFunction('completeOrganizationSponsoredOnboarding', sponsoredToken, {
     organizationId: 'acceptance-org', employeeCode: 'EMP-ACCEPT-01', displayName: 'Sponsored Processor'
@@ -128,6 +133,7 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   const pending = (await db.doc(`users/${sponsored.uid}`).get()).data();
   assert.equal(roster.status, 'claimed');
   assert.equal(roster.claimedByUid, sponsored.uid);
+  assert.equal((await db.doc('orgRoster/acceptance-org_EMP-ACCEPT-02').get()).data().status, 'available');
   assert.equal(pending.accountStatus, 'invited');
   assert.equal(pending.license.type, 'organisation');
   assert.equal(pending.license.status, 'inactive');
@@ -188,6 +194,30 @@ async function testIndividualLifecycle(auth, db, adminToken) {
   const access = await callFunction('verifyLicence', individualToken, { extensionVersion: '1.11.1' });
   assert.equal(access.status, 'active');
   assert.equal(access.applyAllowed, true);
+
+  const renewalBase = Date.now() + 6 * 24 * 60 * 60 * 1000;
+  await db.doc(`users/${individual.uid}`).update({
+    'license.expiresAt': Timestamp.fromMillis(renewalBase),
+    'license.paymentStatus': 'verified'
+  });
+  const renewal = await callFunction('submitPaymentProof', individualToken, {
+    paymentReference: 'ACCEPTANCE-UPI-UTR-0002', durationWeeks: 2
+  });
+  assert.deepEqual(renewal, { paymentStatus: 'pending_verification', durationWeeks: 2, paymentAmount: 198 });
+  const pendingRenewalAccess = await callFunction('verifyLicence', individualToken, { extensionVersion: '1.11.1' });
+  assert.equal(pendingRenewalAccess.status, 'active');
+  assert.equal(pendingRenewalAccess.applyAllowed, true);
+  assert.equal(pendingRenewalAccess.expiringSoon, true);
+  assert.equal(pendingRenewalAccess.paymentStatus, 'pending_verification');
+  await callFunction('verifyUserPayment', adminToken, { uid: individual.uid, verified: true });
+  await callFunction('setUserLicense', adminToken, {
+    uid: individual.uid, action: 'extend', durationWeeks: 1
+  }, 'FAILED_PRECONDITION');
+  await callFunction('setUserLicense', adminToken, {
+    uid: individual.uid, action: 'extend', durationWeeks: 2
+  });
+  const renewed = (await db.doc(`users/${individual.uid}`).get()).data();
+  assert.ok(renewed.license.expiresAt.toMillis() > renewalBase);
 }
 
 async function main() {

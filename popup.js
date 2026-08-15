@@ -1,6 +1,7 @@
 // Popup script for controlling the extension
 
 const authSignedOut = document.getElementById('authSignedOut');
+const authPasswordReset = document.getElementById('authPasswordReset');
 const authSignUpPanel = document.getElementById('authSignUpPanel');
 const authVerifyEmail = document.getElementById('authVerifyEmail');
 const authChoosePath = document.getElementById('authChoosePath');
@@ -14,6 +15,20 @@ const authEmailLabel = document.getElementById('authEmailLabel');
 const licenceStatusLabel = document.getElementById('licenceStatusLabel');
 const authRecheckBtn = document.getElementById('authRecheckBtn');
 const authSignOutBtn = document.getElementById('authSignOutBtn');
+const showPasswordResetLink = document.getElementById('showPasswordResetLink');
+const passwordResetEmail = document.getElementById('passwordResetEmail');
+const passwordResetBtn = document.getElementById('passwordResetBtn');
+const cancelPasswordResetLink = document.getElementById('cancelPasswordResetLink');
+const showRenewalBtn = document.getElementById('showRenewalBtn');
+const renewalPaymentPanel = document.getElementById('renewalPaymentPanel');
+const renewalPlan = document.getElementById('renewalPlan');
+const renewalPaymentReference = document.getElementById('renewalPaymentReference');
+const submitRenewalBtn = document.getElementById('submitRenewalBtn');
+const showChangePasswordBtn = document.getElementById('showChangePasswordBtn');
+const changePasswordPanel = document.getElementById('changePasswordPanel');
+const newPassword = document.getElementById('newPassword');
+const confirmNewPassword = document.getElementById('confirmNewPassword');
+const changePasswordBtn = document.getElementById('changePasswordBtn');
 const adminPanel = document.getElementById('adminPanel');
 const adminOpenDashboardBtn = document.getElementById('adminOpenDashboardBtn');
 const adminLicenceOrganization = document.getElementById('adminLicenceOrganization');
@@ -73,6 +88,7 @@ const cancelSignUpLinks = [
   document.getElementById('cancelSignUpLink4')
 ];
 let showingSignUp = false;
+let showingPasswordReset = false;
 const toggle = document.getElementById('autoFillToggle');
 const auditModeSelect = document.getElementById('auditMode');
 const fillNowBtn = document.getElementById('fillNowBtn');
@@ -137,14 +153,37 @@ const onboardingErrorMessages = {
   DISPLAY_NAME_REQUIRED: 'Enter your name to finish setup.'
 };
 
+const renewalErrorMessages = {
+  FAILED_PRECONDITION: 'This licence is not currently eligible for renewal.',
+  ALREADY_EXISTS: 'This payment reference was already submitted.',
+  RESOURCE_EXHAUSTED: 'Too many renewal attempts. Try again later.',
+  UNAUTHENTICATED: 'Sign in again before submitting a renewal.'
+};
+
 function describeLicenceStatus(state) {
   if (!state) return '';
-  if (state.status === 'active') return `Licence active until ${new Date(state.expiresAt).toLocaleString()}`;
+  if (state.status === 'active') {
+    const suffix = state.paymentStatus === 'pending_verification'
+      ? ' Renewal payment is awaiting verification.'
+      : state.expiringSoon
+        ? (state.licenseType === 'individual'
+            ? ' Renew now to avoid interruption.'
+            : ' Ask your organisation administrator to renew access.')
+        : '';
+    return `Licence active until ${new Date(state.expiresAt).toLocaleString()}.${suffix}`;
+  }
+  if (state.paymentStatus === 'pending_verification') {
+    return state.status === 'grace'
+      ? `Licence expired — Preview only until ${new Date(state.graceEndsAt).toLocaleString()}. Renewal payment is awaiting verification.`
+      : 'Renewal payment reference is waiting for administrator verification.';
+  }
   if (state.status === 'grace') return `Licence expired — Preview only until ${new Date(state.graceEndsAt).toLocaleString()}`;
   if (state.status === 'payment-pending') return 'Payment reference is waiting for administrator verification.';
   if (state.status === 'unverified') return 'Verify your email to continue — check your inbox for a link from Firebase.';
   if (state.status === 'update-required') return `Update required. Minimum supported version: ${state.minimumVersion}.`;
   if (state.status === 'maintenance') return 'Claim Spark is temporarily in maintenance mode.';
+  if (state.status === 'expired' && state.licenseType === 'individual') return 'Individual licence expired. Submit a renewal payment reference below.';
+  if (state.status === 'inactive' && state.licenseType === 'individual') return 'Individual licence inactive. Submit a payment reference to restore access.';
   return 'Apply disabled. Contact your administrator.';
 }
 
@@ -156,9 +195,10 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
     ? 'signed-in'
     : pendingAuth
       ? pendingStage
-      : showingSignUp ? 'sign-up' : 'signed-out';
+      : showingPasswordReset ? 'password-reset' : showingSignUp ? 'sign-up' : 'signed-out';
 
   authSignedOut.hidden = stage !== 'signed-out';
+  authPasswordReset.hidden = stage !== 'password-reset';
   authSignUpPanel.hidden = stage !== 'sign-up';
   authVerifyEmail.hidden = stage !== 'verify-email';
   authChoosePath.hidden = stage !== 'choose-access-path';
@@ -170,6 +210,11 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   if (stage === 'signed-in') {
     authEmailLabel.textContent = authSession.email || '';
     licenceStatusLabel.textContent = describeLicenceStatus(licenceState);
+    const renewalEligible = licenceState?.licenseType === 'individual'
+      && (licenceState.expiringSoon === true || ['grace', 'expired', 'inactive', 'payment-pending'].includes(licenceState.status));
+    const renewalPending = licenceState?.paymentStatus === 'pending_verification' || licenceState?.status === 'payment-pending';
+    showRenewalBtn.hidden = !renewalEligible || renewalPending;
+    renewalPaymentPanel.hidden = !renewalEligible || renewalPending || renewalPaymentPanel.hidden;
     if (authSession.role === 'platformAdmin' && authSession.organizationId) {
       adminLicenceOrganization.value = authSession.organizationId;
     }
@@ -202,13 +247,45 @@ chrome.storage.onChanged.addListener((changes, area) => {
 showSignUpLink.addEventListener('click', event => {
   event.preventDefault();
   showingSignUp = true;
+  showingPasswordReset = false;
   loadAuthState();
 });
 
 showSignInLink.addEventListener('click', event => {
   event.preventDefault();
   showingSignUp = false;
+  showingPasswordReset = false;
   loadAuthState();
+});
+
+showPasswordResetLink.addEventListener('click', event => {
+  event.preventDefault();
+  passwordResetEmail.value = authEmailInput.value.trim();
+  showingSignUp = false;
+  showingPasswordReset = true;
+  loadAuthState();
+});
+
+cancelPasswordResetLink.addEventListener('click', event => {
+  event.preventDefault();
+  showingPasswordReset = false;
+  loadAuthState();
+});
+
+passwordResetBtn.addEventListener('click', () => {
+  const email = passwordResetEmail.value.trim();
+  if (!email) return showStatus('Enter your account email', 'warning');
+  passwordResetBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authSendPasswordReset', email }, response => {
+    passwordResetBtn.disabled = false;
+    if (!response?.success) {
+      showStatus(authErrorMessages[response?.error] || 'Unable to request a reset link right now.', 'error');
+      return;
+    }
+    showStatus('If that account exists, a password-reset link has been sent.', 'success');
+    showingPasswordReset = false;
+    loadAuthState();
+  });
 });
 
 for (const link of cancelSignUpLinks) {
@@ -227,7 +304,7 @@ signUpBtn.addEventListener('click', () => {
   const confirmPassword = signUpConfirmPasswordInput.value;
   const displayName = signUpDisplayNameInput.value.trim();
   if (!email || !password || !displayName) {
-    showStatus('Enter your invited email, name, and password', 'warning');
+    showStatus('Enter your email, name, and password', 'warning');
     return;
   }
   if (password !== confirmPassword) {
@@ -438,6 +515,57 @@ authRecheckBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ action: 'authRefreshLicence' }, response => {
     authRecheckBtn.disabled = false;
     showStatus(response?.success ? 'Licence rechecked' : 'Unable to recheck licence', response?.success ? 'success' : 'error');
+  });
+});
+
+showRenewalBtn.addEventListener('click', () => {
+  renewalPaymentPanel.hidden = !renewalPaymentPanel.hidden;
+  if (!renewalPaymentPanel.hidden) renewalPaymentReference.focus();
+});
+
+submitRenewalBtn.addEventListener('click', () => {
+  const paymentReference = renewalPaymentReference.value.trim();
+  if (!paymentReference) return showStatus('Enter the new UPI transaction ID (UTR)', 'warning');
+  submitRenewalBtn.disabled = true;
+  chrome.runtime.sendMessage({
+    action: 'authSubmitRenewal',
+    paymentReference,
+    durationWeeks: Number(renewalPlan.value)
+  }, response => {
+    submitRenewalBtn.disabled = false;
+    if (!response?.success) {
+      const message = response?.message
+        || renewalErrorMessages[response?.error]
+        || 'Unable to submit the renewal reference.';
+      showStatus(message, 'error');
+      return;
+    }
+    renewalPaymentReference.value = '';
+    renewalPaymentPanel.hidden = true;
+    showStatus('Renewal reference submitted for administrator verification.', 'success');
+    loadAuthState();
+  });
+});
+
+showChangePasswordBtn.addEventListener('click', () => {
+  changePasswordPanel.hidden = !changePasswordPanel.hidden;
+  if (!changePasswordPanel.hidden) newPassword.focus();
+});
+
+changePasswordBtn.addEventListener('click', () => {
+  if (newPassword.value.length < 6) return showStatus('Password must be at least 6 characters.', 'warning');
+  if (newPassword.value !== confirmNewPassword.value) return showStatus('Passwords do not match.', 'warning');
+  changePasswordBtn.disabled = true;
+  chrome.runtime.sendMessage({ action: 'authChangePassword', password: newPassword.value }, response => {
+    changePasswordBtn.disabled = false;
+    if (!response?.success) {
+      showStatus(authErrorMessages[response?.error] || 'Unable to change password.', 'error');
+      return;
+    }
+    newPassword.value = '';
+    confirmNewPassword.value = '';
+    changePasswordPanel.hidden = true;
+    showStatus('Password updated.', 'success');
   });
 });
 

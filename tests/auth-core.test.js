@@ -102,6 +102,44 @@ test('sendEmailVerification returns the target email on success', async () => {
   assert.equal(result.email, 'new-processor@example.com');
 });
 
+test('sendPasswordReset requests a reset link using only the account email', async () => {
+  const result = await AuthCore.sendPasswordReset({
+    apiKey: 'test-key',
+    email: 'processor@example.com',
+    fetchImpl: async (url, init) => {
+      assert.match(url, /accounts:sendOobCode/);
+      assert.deepEqual(JSON.parse(init.body), {
+        requestType: 'PASSWORD_RESET',
+        email: 'processor@example.com'
+      });
+      return jsonResponse(true, { email: 'processor@example.com' });
+    }
+  });
+  assert.equal(result.email, 'processor@example.com');
+});
+
+test('updatePassword rotates the authenticated Firebase session', async () => {
+  const result = await AuthCore.updatePassword({
+    apiKey: 'test-key',
+    idToken: 'old-id-token',
+    password: 'new-secret',
+    fetchImpl: async (url, init) => {
+      assert.match(url, /accounts:update/);
+      assert.deepEqual(JSON.parse(init.body), {
+        idToken: 'old-id-token',
+        password: 'new-secret',
+        returnSecureToken: true
+      });
+      return jsonResponse(true, {
+        idToken: 'new-id-token', refreshToken: 'new-refresh-token', expiresIn: '3600'
+      });
+    }
+  });
+  assert.equal(result.idToken, 'new-id-token');
+  assert.equal(result.refreshToken, 'new-refresh-token');
+  assert.ok(result.expiresAt > Date.now());
+});
+
 test('updateProfile persists the signup display name without rotating tokens', async () => {
   const result = await AuthCore.updateProfile({
     apiKey: 'test-key',

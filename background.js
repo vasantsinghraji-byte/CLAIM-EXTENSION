@@ -515,6 +515,72 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true, stage: 'awaiting-activation' };
   }
 
+  async function handlePasswordReset(email) {
+    try {
+      await AuthCore.sendPasswordReset({
+        apiKey: FIREBASE_WEB_API_KEY,
+        email: String(email || '').trim().toLowerCase(),
+        fetchImpl: fetch
+      });
+    } catch (error) {
+      // Do not disclose whether an account exists for the supplied address.
+      if (error?.code !== 'EMAIL_NOT_FOUND') throw error;
+    }
+    return { success: true };
+  }
+
+  async function freshAuthenticatedSession() {
+    const { authSession } = await storageGet(chrome.storage.local, 'authSession');
+    if (!authSession) throw new Error('Sign in first');
+    if (AuthCore.isTokenFresh(authSession)) return authSession;
+    const refreshed = await AuthCore.refreshIdToken({
+      apiKey: FIREBASE_WEB_API_KEY,
+      refreshToken: authSession.refreshToken,
+      fetchImpl: fetch
+    });
+    const session = {
+      ...authSession,
+      idToken: refreshed.idToken,
+      refreshToken: refreshed.refreshToken,
+      expiresAt: refreshed.expiresAt
+    };
+    await storageWriter.setAuthSession(session);
+    return session;
+  }
+
+  async function handleChangePassword(password) {
+    const session = await freshAuthenticatedSession();
+    const updated = await AuthCore.updatePassword({
+      apiKey: FIREBASE_WEB_API_KEY,
+      idToken: session.idToken,
+      password: String(password || ''),
+      fetchImpl: fetch
+    });
+    await storageWriter.setAuthSession({
+      ...session,
+      idToken: updated.idToken,
+      refreshToken: updated.refreshToken || session.refreshToken,
+      expiresAt: updated.expiresAt
+    });
+    return { success: true };
+  }
+
+  async function handleIndividualRenewal(paymentReference, durationWeeks) {
+    const session = await freshAuthenticatedSession();
+    const result = await AuthCore.callFunction({
+      functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'submitPaymentProof',
+      idToken: session.idToken,
+      data: {
+        paymentReference: String(paymentReference || '').trim(),
+        durationWeeks: Number(durationWeeks)
+      },
+      fetchImpl: fetch
+    });
+    const licenceState = await performLicenceRecheck();
+    return { success: true, result, licenceState };
+  }
+
   // Both ordinary registrations and explicit invitations require administrator
   // approval before the user becomes active.
   async function handleCheckActivation() {
@@ -747,6 +813,28 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       handleAuthSignIn(request.email, request.password)
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authSendPasswordReset') {
+      handlePasswordReset(request.email)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authChangePassword') {
+      handleChangePassword(request.password)
+        .then(sendResponse)
+        .catch(error => sendResponse({ success: false, error: String(error.code || error.message || error) }));
+      return true;
+    }
+    if (request?.action === 'authSubmitRenewal') {
+      handleIndividualRenewal(request.paymentReference, request.durationWeeks)
+        .then(sendResponse)
+        .catch(error => sendResponse({
+          success: false,
+          error: String(error.code || error.status || 'UNKNOWN'),
+          message: String(error.message || '')
+        }));
       return true;
     }
     if (request?.action === 'authSignOut') {

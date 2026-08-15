@@ -40,6 +40,11 @@ records the administrator decision in the audit log.
 Available roster codes may be removed. Claimed codes cannot be removed; suspend
 or delete the resulting user according to the applicable account procedure.
 
+For larger organisations, use the dashboard's bulk CSV importer with
+`employeeCode,email,role` rows. Imports contain at most 100 rows, reject
+duplicate employee codes, and apply atomically: a claimed-code conflict rejects
+the whole import rather than leaving a partial roster.
+
 Legacy available roster entries that predate email binding must be resubmitted
 with the same organization and employee code plus the employee's verified email.
 This updates the available entry in place; claimed entries cannot be reassigned.
@@ -65,6 +70,30 @@ request or retain card numbers, bank credentials, UPI PINs, passwords or OTPs.
 
 Payment verification and licence activation are deliberately separate audited
 actions. A pending payment cannot be used to activate a new individual licence.
+
+### Individual licence renewal
+
+The signed-in popup offers renewal seven days before an individual licence
+expires and after expiry. The user pays the selected fixed plan and submits a
+new UPI transaction ID (UTR) themselves. A pending renewal never extends the
+licence and does not interrupt access that is still valid; after the current
+expiry, Apply remains blocked until the administrator verifies the new payment
+and extends the licence for exactly the purchased term.
+
+The administrator dashboard lists active user licences expiring within seven
+days and shows renewal submissions in **Payment verification**. Verify the UTR
+first, then use **Extend license** with the matching plan duration. A mismatched
+duration is rejected server-side.
+
+### Password recovery and rotation
+
+- Signed-out users choose **Forgot password?** and receive Firebase's reset
+  email. The extension always shows the same completion message so it does not
+  disclose whether an address is registered.
+- Signed-in users choose **Change Password**, enter the new password twice, and
+  retain a refreshed authenticated session after Firebase accepts the change.
+- Suspected account compromise still requires the administrator incident flow:
+  suspend the user, revoke refresh tokens, and complete a security review.
 
 If a UTR cannot be independently matched, use **Mark unverified**, record a
 non-sensitive reason, and ask the user to check and resubmit it. For a confirmed
