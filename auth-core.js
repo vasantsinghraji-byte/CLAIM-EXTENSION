@@ -127,6 +127,49 @@
     return { email: payload.email };
   }
 
+  async function sendPasswordReset({ apiKey, authBaseUrl = configuredAuthBaseUrl, email, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `${authBaseUrl}/accounts:sendOobCode?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestType: 'PASSWORD_RESET', email })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw normalizeRestError(payload);
+    return { email: payload.email || email };
+  }
+
+  async function updatePassword({ apiKey, authBaseUrl = configuredAuthBaseUrl, idToken, password, fetchImpl }) {
+    let response;
+    try {
+      response = await fetchImpl(
+        `${authBaseUrl}/accounts:update?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, password, returnSecureToken: true })
+        }
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw normalizeRestError(payload);
+    return {
+      idToken: payload.idToken || idToken,
+      refreshToken: payload.refreshToken || null,
+      expiresAt: computeExpiresAt(payload.expiresIn),
+      email: payload.email || null
+    };
+  }
+
   // Live lookup of the current server-side account state (email_verified in
   // particular) - more reliable than decoding the idToken's own claims, which
   // only reflect verification status as of when that token was issued.
@@ -208,7 +251,9 @@
     signInWithPassword,
     signUp,
     updateProfile,
+    updatePassword,
     sendEmailVerification,
+    sendPasswordReset,
     accountInfo,
     refreshIdToken,
     callFunction,

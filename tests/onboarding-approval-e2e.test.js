@@ -80,6 +80,10 @@ test('sponsored roster claims are single-use and activate a matching user licens
   );
   assert.match(rosterAdministration, /existing\.data\(\)\.status !== 'available'/);
   assert.match(rosterAdministration, /transaction\.update\(reference, \{[\s\S]*?email,[\s\S]*?role/);
+  assert.match(functions, /exports\.bulkAddRosterEntries = onCall/);
+  assert.match(functions, /entries must contain between 1 and 100 roster records/);
+  assert.match(functions, /CSV contains duplicate employee codes/);
+  assert.match(functions, /roster\.bulk_imported/);
 
   const approval = functions.slice(
     functions.indexOf('exports.activateUser'),
@@ -110,6 +114,7 @@ test('individual payment submission, verification, and license activation stay s
   assert.match(submission, /requestedDurationWeeks: plan\.durationWeeks/);
   assert.match(submission, /paymentAmount: plan\.price/);
   assert.match(submission, /user\.payment_submitted/);
+  assert.match(submission, /Renewal opens seven days before license expiry/);
 
   const verification = functions.slice(
     functions.indexOf('exports.verifyUserPayment'),
@@ -121,9 +126,12 @@ test('individual payment submission, verification, and license activation stay s
 
   assert.match(functions, /Individual payment must be verified before license activation/);
   assert.match(functions, /License duration must match the verified individual plan/);
+  assert.match(functions, /Use Extend license to preserve the remaining individual licence term/);
   assert.match(dashboard, /action\('verifyUserPayment', \{ uid, verified: true \}/);
   assert.match(dashboard, /action\('verifyUserPayment', \{[\s\S]*verified: false/);
   assert.match(background, /name: 'submitPaymentProof'/);
+  assert.match(background, /async function handleIndividualRenewal/);
+  assert.match(functions, /expiringSoon: expiryMs - now <= EXPIRING_SOON_MS/);
 });
 
 test('licence policy and filtered administration queries are enforced server-side', () => {
@@ -139,8 +147,9 @@ test('licence policy and filtered administration queries are enforced server-sid
     const start = functions.indexOf(`exports.${exportName}`);
     const end = functions.indexOf('exports.', start + 8);
     const listing = functions.slice(start, end);
+    const limitConstant = exportName === 'listUsers' ? 'USER_LIST_LIMIT' : 'ADMIN_LIST_LIMIT';
     assert.ok(
-      listing.indexOf("where('organizationId', '==', organizationId)") < listing.indexOf('.limit(ADMIN_LIST_LIMIT)'),
+      listing.indexOf("where('organizationId', '==', organizationId)") < listing.indexOf(`.limit(${limitConstant})`),
       `${exportName} must filter by organization before limiting results`
     );
   }

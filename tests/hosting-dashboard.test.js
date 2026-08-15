@@ -47,6 +47,7 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
     'updateOrganization',
     'listRoster',
     'addRosterEntry',
+    'bulkAddRosterEntries',
     'removeRosterEntry',
     'activateLicence',
     'suspendLicence',
@@ -69,6 +70,9 @@ test('hosted dashboard exposes the complete Phase 4 administration lifecycle', (
   assert.match(html, /id="pendingPaymentsList"/);
   assert.match(source, /payment-verify/);
   assert.match(source, /payment-decline/);
+  assert.match(html, /id="bulkRosterForm"/);
+  assert.match(html, /id="expiringUsersList"/);
+  assert.match(source, /Expiring|expiry warnings|warningEnd/i);
 });
 
 test('paid access disclosures cover UPI references without collecting credentials', () => {

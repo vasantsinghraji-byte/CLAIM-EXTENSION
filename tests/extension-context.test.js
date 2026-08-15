@@ -129,7 +129,7 @@ test('sponsored onboarding uses roster credentials while retaining the default p
   assert.match(popup, /id="sponsoredOrganizationId"/);
   assert.match(popup, /id="sponsoredEmployeeCode"/);
   assert.match(popup, /id="individualPaymentReference"/);
-  assert.match(popup, /official UPI QR code supplied by your administrator/);
+  assert.match(popup, /official QR supplied with Claim Auto-Fill/);
   assert.match(popupSource, /action: 'authCompleteOnboarding'/);
 });
 
@@ -143,7 +143,7 @@ test('individual paid onboarding submits only a bounded payment reference', () =
   assert.match(popup, /maxlength="160"/);
   assert.match(popup, /YUVAN ENTERPRISES/);
   assert.match(popup, /yuvanent@ybl/);
-  assert.match(popup, /payment QR is supplied separately by the administrator/i);
+  assert.match(popup, /official QR supplied with Claim Auto-Fill/i);
   assert.doesNotMatch(popup, /<img[^>]+payment-qr/i);
   for (const plan of ['1 week — ₹99', '2 weeks — ₹198', '4 weeks — ₹300', '12 weeks — ₹500']) {
     assert.match(popup, new RegExp(plan));
@@ -170,6 +170,27 @@ test('popup uses email-based signup without an invitation-token field', () => {
   assert.doesNotMatch(html, /signUpInvitationToken/);
   assert.doesNotMatch(html, /acceptInvitationToken/);
   assert.match(html, /choose organisation-sponsored or individual access/i);
+  assert.doesNotMatch(popup, /Enter your invited email, name, and password/);
+});
+
+test('signed-in individual users can renew and manage their password', () => {
+  const background = read('background.js');
+  const popup = read('popup.html');
+  const popupSource = read('popup.js');
+  const auth = read('auth-core.js');
+  assert.match(popup, /id="showPasswordResetLink"/);
+  assert.match(popup, /id="showChangePasswordBtn"/);
+  assert.match(popup, /id="showRenewalBtn"/);
+  assert.match(popupSource, /action: 'authSendPasswordReset'/);
+  assert.match(popupSource, /action: 'authChangePassword'/);
+  assert.match(popupSource, /action: 'authSubmitRenewal'/);
+  assert.match(popupSource, /response\?\.message\s*\|\|\s*renewalErrorMessages\[response\?\.error\]/);
+  assert.match(background, /AuthCore\.sendPasswordReset/);
+  assert.match(background, /AuthCore\.updatePassword/);
+  assert.match(background, /async function handleIndividualRenewal/);
+  assert.match(background, /message: String\(error\.message \|\| ''\)/);
+  assert.match(auth, /requestType: 'PASSWORD_RESET'/);
+  assert.match(auth, /returnSecureToken: true/);
 });
 
 test('server registers verified processors for manual approval while retaining invitation compatibility', () => {

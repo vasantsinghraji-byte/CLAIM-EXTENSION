@@ -60,6 +60,10 @@
           <h3 id="pendingPaymentsHeading">Payment verification <span id="pendingPaymentCount" class="count-badge">0 pending</span></h3>
           <div id="pendingPaymentsList" class="record-list"></div>
         </section>
+        <section class="pending-approvals" aria-labelledby="expiringUsersHeading">
+          <h3 id="expiringUsersHeading">Expiring within 7 days <span id="expiringUserCount" class="count-badge">0 users</span></h3>
+          <div id="expiringUsersList" class="record-list"></div>
+        </section>
         <h3>Approved and inactive users</h3>
         <div id="usersList" class="record-list"></div>
       </section>
@@ -131,6 +135,15 @@
             </select>
           </label>
           <button class="button primary" type="submit">Add roster entry</button>
+        </form>
+        <form id="bulkRosterForm" class="inline-form">
+          <h3>Bulk CSV import</h3>
+          <p class="meta">Up to 100 rows: employeeCode,email,role. The header row is optional.</p>
+          <label>Organization <input name="organizationId" required pattern="[A-Za-z0-9_-]+"></label>
+          <label>Roster CSV
+            <textarea name="csv" rows="8" required placeholder="EMP001,person@example.com,processor&#10;EMP002,manager@example.com,organizationAdmin"></textarea>
+          </label>
+          <button class="button primary" type="submit">Import roster CSV</button>
         </form>
         <div id="rosterList" class="record-list"></div>
       </section>

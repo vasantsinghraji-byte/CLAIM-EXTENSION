@@ -18,7 +18,14 @@
         <input type="email" id="authEmail" name="authEmail" placeholder="Email" autocomplete="username">
         <input type="password" id="authPassword" name="authPassword" placeholder="Password" autocomplete="current-password">
         <button id="authSignInBtn" class="btn btn-primary">Sign In</button>
+        <p class="auth-link"><a href="#" id="showPasswordResetLink">Forgot password?</a></p>
         <p class="auth-link"><a href="#" id="showSignUpLink">New processor? Create an account</a></p>
+      </div>
+      <div id="authPasswordReset" class="auth-section" hidden>
+        <p>Enter your account email. If it is registered, Firebase will send a password-reset link.</p>
+        <input type="email" id="passwordResetEmail" name="passwordResetEmail" placeholder="Email" autocomplete="username">
+        <button id="passwordResetBtn" class="btn btn-primary">Send Reset Link</button>
+        <p class="auth-link"><a href="#" id="cancelPasswordResetLink">Back to sign in</a></p>
       </div>
       <div id="authSignUpPanel" class="auth-section" hidden>
         <input type="email" id="signUpEmail" name="signUpEmail" placeholder="Email" autocomplete="username">
@@ -55,7 +62,7 @@
             <option value="12">12 weeks — ₹500</option>
           </select>
           <p class="auth-help">Pay by scanning the official UPI QR code supplied by your administrator. Confirm that the receiver is YUVAN ENTERPRISES and pay the exact selected-plan amount, then enter the UPI transaction ID (UTR) below.</p>
-          <p class="auth-help"><strong>The payment QR is supplied separately by the administrator.</strong> Never enter a UPI PIN, OTP, card number, password, or bank-account credentials in Claim Auto-Fill.</p>
+          <p class="auth-help"><strong>Use only the official QR supplied with Claim Auto-Fill.</strong> Never enter a UPI PIN, OTP, card number, password, or bank-account credentials in Claim Auto-Fill.</p>
           <input type="text" id="individualPaymentReference" name="individualPaymentReference" maxlength="160" placeholder="UPI transaction ID (UTR)">
           <button id="submitPaymentReferenceBtn" class="btn btn-primary" type="button">Submit UPI Reference</button>
           <p class="auth-help">Refund requests must be made within 3 calendar days of payment. See the published terms for eligibility.</p>
@@ -78,6 +85,26 @@
       <div id="authSignedIn" class="auth-section" hidden>
         <p id="authEmailLabel"></p>
         <p id="licenceStatusLabel"></p>
+        <button id="showRenewalBtn" class="btn btn-primary btn-small" type="button" hidden>Renew Individual Licence</button>
+        <div id="renewalPaymentPanel" hidden>
+          <p class="auth-help"><strong>Payee:</strong> YUVAN ENTERPRISES<br><strong>UPI ID:</strong> yuvanent@ybl</p>
+          <label for="renewalPlan">Renewal plan</label>
+          <select id="renewalPlan" name="renewalPlan">
+            <option value="1">1 week — ₹99</option>
+            <option value="2">2 weeks — ₹198</option>
+            <option value="4">4 weeks — ₹300</option>
+            <option value="12">12 weeks — ₹500</option>
+          </select>
+          <input type="text" id="renewalPaymentReference" name="renewalPaymentReference" maxlength="160" placeholder="New UPI transaction ID (UTR)">
+          <button id="submitRenewalBtn" class="btn btn-primary btn-small" type="button">Submit Renewal Reference</button>
+          <p class="auth-help">Pay the exact selected amount and submit a new UTR. Existing access remains available until its current expiry while verification is pending.</p>
+        </div>
+        <button id="showChangePasswordBtn" class="btn btn-secondary btn-small" type="button">Change Password</button>
+        <div id="changePasswordPanel" hidden>
+          <input type="password" id="newPassword" name="newPassword" minlength="6" placeholder="New password (min 6 characters)" autocomplete="new-password">
+          <input type="password" id="confirmNewPassword" name="confirmNewPassword" minlength="6" placeholder="Confirm new password" autocomplete="new-password">
+          <button id="changePasswordBtn" class="btn btn-primary btn-small" type="button">Update Password</button>
+        </div>
         <div class="btn-row">
           <button id="authRecheckBtn" class="btn btn-secondary btn-small">Recheck Licence</button>
           <button id="authSignOutBtn" class="btn btn-secondary btn-small">Sign Out</button>

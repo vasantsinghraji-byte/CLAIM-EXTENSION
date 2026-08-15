@@ -47,6 +47,7 @@ initializeApp();
 const db = getFirestore();
 const REGION = 'asia-south1';
 const GRACE_PERIOD_MS = 72 * 60 * 60 * 1000;
+const EXPIRING_SOON_MS = 7 * 24 * 60 * 60 * 1000;
 const INVITATION_LIFETIME_MS = 72 * 60 * 60 * 1000;
 const callableOptions = Object.freeze({
   region: REGION,
@@ -57,6 +58,7 @@ const callableOptions = Object.freeze({
   memory: '256MiB'
 });
 const ADMIN_LIST_LIMIT = 100;
+const USER_LIST_LIMIT = 500;
 const SELF_SERVICE_ORGANIZATION_ID = 'platform';
 const SELF_SERVICE_ROLE = 'processor';
 
@@ -322,11 +324,16 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     }
     const now = Date.now();
     const userExpiryMs = timestampMillis(license.expiresAt);
-    if (license.type === 'individual' && license.paymentStatus === 'pending_verification') {
-      return { status: 'payment-pending', previewAllowed: false, applyAllowed: false };
-    }
     if (license.status === 'inactive') {
-      return { status: 'inactive', previewAllowed: false, applyAllowed: false };
+      return {
+        status: license.type === 'individual' && license.paymentStatus === 'pending_verification'
+          ? 'payment-pending'
+          : 'inactive',
+        licenseType: license.type,
+        paymentStatus: license.paymentStatus,
+        previewAllowed: false,
+        applyAllowed: false
+      };
     }
     const configSnapshot = await db.doc('appConfig/production').get();
     const config = configSnapshot.exists ? configSnapshot.data() : {};
@@ -376,6 +383,9 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     if (access.status === 'active') {
       return {
         ...access,
+        licenseType: license.type,
+        paymentStatus: license.paymentStatus,
+        expiringSoon: expiryMs - now <= EXPIRING_SOON_MS,
         expiresAt: new Date(expiryMs).toISOString(),
         minimumVersion,
         checkedVersion: extensionVersion
@@ -384,11 +394,20 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     if (access.status === 'grace') {
       return {
         ...access,
+        licenseType: license.type,
+        paymentStatus: license.paymentStatus,
+        expiresAt: new Date(expiryMs).toISOString(),
         graceEndsAt: new Date(expiryMs + GRACE_PERIOD_MS).toISOString(),
         minimumVersion
       };
     }
-    return { ...access, minimumVersion };
+    return {
+      ...access,
+      licenseType: license.type,
+      paymentStatus: license.paymentStatus,
+      expiresAt: Number.isFinite(expiryMs) ? new Date(expiryMs).toISOString() : null,
+      minimumVersion
+    };
   } catch (error) {
     translateValidation(error);
   }
@@ -966,6 +985,83 @@ exports.addRosterEntry = onCall(callableOptions, async request => {
   }
 });
 
+exports.bulkAddRosterEntries = onCall(callableOptions, async request => {
+  try {
+    const auth = await requirePlatformAdmin(request);
+    await enforceRateLimit(auth.uid, 'bulkAddRosterEntries', 10, 60 * 60 * 1000);
+    const data = callableData(request);
+    assertKeys(data, ['organizationId', 'entries'], ['organizationId', 'entries']);
+    const organizationId = safeDocumentId(data.organizationId, 'organizationId');
+    if (!Array.isArray(data.entries) || !data.entries.length || data.entries.length > 100) {
+      fail('invalid-argument', 'entries must contain between 1 and 100 roster records');
+    }
+    const entries = data.entries.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        fail('invalid-argument', `entries[${index}] is invalid`);
+      }
+      assertKeys(entry, ['employeeCode', 'email', 'role'], ['employeeCode', 'email', 'role']);
+      const employeeCode = safeDocumentId(String(entry.employeeCode).toUpperCase(), `entries[${index}].employeeCode`);
+      return {
+        employeeCode,
+        email: normalizedEmail(entry.email),
+        role: enumValue(entry.role, `entries[${index}].role`, INVITABLE_ROLES),
+        rosterId: rosterDocumentId(organizationId, employeeCode)
+      };
+    });
+    if (new Set(entries.map(entry => entry.rosterId)).size !== entries.length) {
+      fail('invalid-argument', 'CSV contains duplicate employee codes');
+    }
+    const organization = await db.doc(`organizations/${organizationId}`).get();
+    if (!organization.exists || organization.data().status !== 'active') {
+      fail('failed-precondition', 'Organization is not active');
+    }
+    let created = 0;
+    let updated = 0;
+    await db.runTransaction(async transaction => {
+      const references = entries.map(entry => db.doc(`orgRoster/${entry.rosterId}`));
+      const snapshots = await Promise.all(references.map(reference => transaction.get(reference)));
+      snapshots.forEach((snapshot, index) => {
+        const entry = entries[index];
+        const reference = references[index];
+        if (snapshot.exists) {
+          if (snapshot.data().status !== 'available') {
+            fail('failed-precondition', `Claimed roster entry cannot be reassigned: ${entry.employeeCode}`);
+          }
+          updated += 1;
+          transaction.update(reference, {
+            email: entry.email,
+            role: entry.role,
+            updatedAt: FieldValue.serverTimestamp(),
+            updatedBy: auth.uid
+          });
+        } else {
+          created += 1;
+          transaction.create(reference, {
+            organizationId,
+            employeeCode: entry.employeeCode,
+            email: entry.email,
+            role: entry.role,
+            status: 'available',
+            claimedByUid: null,
+            claimedAt: null,
+            createdAt: FieldValue.serverTimestamp(),
+            createdBy: auth.uid
+          });
+        }
+      });
+    });
+    await recordAdminEvent(auth, 'roster.bulk_imported', 'organization', organizationId, {
+      organizationId,
+      submitted: entries.length,
+      created,
+      updated
+    });
+    return { organizationId, submitted: entries.length, created, updated };
+  } catch (error) {
+    translateValidation(error);
+  }
+});
+
 exports.removeRosterEntry = onCall(callableOptions, async request => {
   try {
     const auth = await requirePlatformAdmin(request);
@@ -1159,15 +1255,15 @@ exports.listUsers = onCall(callableOptions, async request => {
       : safeDocumentId(data.organizationId, 'organizationId');
     let query = db.collection('users');
     if (organizationId) query = query.where('organizationId', '==', organizationId);
-    const snapshot = await query.limit(ADMIN_LIST_LIMIT).get();
+    const snapshot = await query.limit(USER_LIST_LIMIT).get();
     const users = snapshot.docs
       .map(serializeUser)
       .sort((left, right) => left.email.localeCompare(right.email));
     return {
       users,
       pendingCount: users.filter(user => user.pendingApproval).length,
-      limit: ADMIN_LIST_LIMIT,
-      truncated: snapshot.size === ADMIN_LIST_LIMIT
+      limit: USER_LIST_LIMIT,
+      truncated: snapshot.size === USER_LIST_LIMIT
     };
   } catch (error) {
     translateValidation(error);
@@ -1332,9 +1428,14 @@ exports.setUserLicense = onCall(callableOptions, async request => {
           && current.paymentStatus !== 'verified' && !legacyActiveIndividual) {
         fail('failed-precondition', 'Individual payment must be verified before license activation');
       }
-      if (current.type === 'individual' && action === 'activate' && current.requestedDurationWeeks
+      if (current.type === 'individual' && action !== 'deactivate' && current.requestedDurationWeeks
           && durationWeeks !== current.requestedDurationWeeks) {
         fail('failed-precondition', 'License duration must match the verified individual plan');
+      }
+      const currentExpiryMs = timestampMillis(current.expiresAt);
+      if (current.type === 'individual' && action === 'activate' && current.status === 'active'
+          && Number.isFinite(currentExpiryMs) && currentExpiryMs > now) {
+        fail('failed-precondition', 'Use Extend license to preserve the remaining individual licence term');
       }
       let next;
       if (action === 'activate') {
@@ -1347,7 +1448,6 @@ exports.setUserLicense = onCall(callableOptions, async request => {
           expiresAt: Timestamp.fromMillis(expiresAtMs)
         };
       } else if (action === 'extend') {
-        const currentExpiryMs = timestampMillis(current.expiresAt);
         const from = Number.isFinite(currentExpiryMs) && currentExpiryMs > now ? currentExpiryMs : now;
         const expiresAtMs = computeLicenseExpiry(durationWeeks, from);
         next = {
@@ -1404,7 +1504,12 @@ exports.submitPaymentProof = onCall(callableOptions, async request => {
       if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot submit payment');
       const current = { ...DEFAULT_LICENSE, ...(user.license || {}) };
       if (current.type !== 'individual') fail('failed-precondition', 'Payment proof is only accepted for individual access');
-      if (current.paymentStatus === 'verified') fail('failed-precondition', 'Payment is already verified');
+      if (current.paymentStatus === 'pending_verification') fail('failed-precondition', 'A payment reference is already waiting for verification');
+      const currentExpiryMs = timestampMillis(current.expiresAt);
+      if (current.paymentStatus === 'verified' && current.status === 'active'
+          && Number.isFinite(currentExpiryMs) && currentExpiryMs - Date.now() > EXPIRING_SOON_MS) {
+        fail('failed-precondition', 'Renewal opens seven days before license expiry');
+      }
       if (paymentClaim.exists && paymentClaim.data().uid !== auth.uid) {
         fail('already-exists', 'Payment reference was already submitted');
       }

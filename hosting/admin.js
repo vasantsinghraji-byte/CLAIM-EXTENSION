@@ -62,6 +62,12 @@
     return Number.isNaN(date.getTime()) ? 'invalid date' : date.toLocaleString();
   }
 
+  function dateMillis(value) {
+    const seconds = value && typeof value === 'object' ? (value._seconds ?? value.seconds) : null;
+    const millis = Number.isFinite(seconds) ? seconds * 1000 : new Date(value).getTime();
+    return Number.isFinite(millis) ? millis : null;
+  }
+
   function empty(container, text) {
     container.replaceChildren(element('p', 'empty', text));
   }
@@ -280,9 +286,11 @@
   async function loadUsers() {
     const pendingContainer = byId('pendingUsersList');
     const paymentContainer = byId('pendingPaymentsList');
+    const expiringContainer = byId('expiringUsersList');
     const usersContainer = byId('usersList');
     empty(pendingContainer, 'Loading pending approvals...');
     empty(paymentContainer, 'Loading payment submissions...');
+    empty(expiringContainer, 'Loading expiry warnings...');
     empty(usersContainer, 'Loading users...');
     const result = await action('listUsers', {});
     if (!result) {
@@ -367,6 +375,13 @@
     const pendingPayments = users.filter(user => user.license?.type === 'individual'
       && user.license?.paymentStatus === 'pending_verification');
     const otherUsers = users.filter(user => !user.pendingApproval);
+    const now = Date.now();
+    const warningEnd = now + 7 * 24 * 60 * 60 * 1000;
+    const expiringUsers = users.filter(user => {
+      const expiry = dateMillis(user.license?.expiresAt);
+      return user.accountStatus === 'active' && user.license?.status === 'active'
+        && Number.isFinite(expiry) && expiry >= now && expiry <= warningEnd;
+    });
     byId('pendingCount').textContent = `${result.pendingCount ?? pendingUsers.length} pending`;
     pendingContainer.replaceChildren(...pendingUsers.map(user => userRecord(user, true)));
     paymentContainer.replaceChildren(...pendingPayments.map(user => {
@@ -382,9 +397,12 @@
       return record;
     }));
     byId('pendingPaymentCount').textContent = `${pendingPayments.length} pending`;
+    byId('expiringUserCount').textContent = `${expiringUsers.length} user${expiringUsers.length === 1 ? '' : 's'}`;
+    expiringContainer.replaceChildren(...expiringUsers.map(user => userRecord(user)));
     usersContainer.replaceChildren(...otherUsers.map(user => userRecord(user)));
     if (!pendingUsers.length) empty(pendingContainer, 'No registrations are waiting for approval.');
     if (!pendingPayments.length) empty(paymentContainer, 'No individual payments are waiting for verification.');
+    if (!expiringUsers.length) empty(expiringContainer, 'No active user licences expire within seven days.');
     if (!otherUsers.length) empty(usersContainer, 'No approved or inactive users found.');
   }
 
@@ -920,6 +938,31 @@
     if (result) {
       event.currentTarget.elements.employeeCode.value = '';
       event.currentTarget.elements.email.value = '';
+      loadRoster();
+      loadAudit();
+    }
+  });
+
+  byId('bulkRosterForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const lines = String(form.get('csv')).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (lines[0]?.toLowerCase().replace(/\s/g, '') === 'employeecode,email,role') lines.shift();
+    if (!lines.length || lines.length > 100) return message('CSV must contain between 1 and 100 data rows.', 'error');
+    const entries = [];
+    for (let index = 0; index < lines.length; index++) {
+      const columns = lines[index].split(',').map(value => value.trim());
+      if (columns.length !== 3 || !columns.every(Boolean)) {
+        return message(`CSV row ${index + 1} must contain employeeCode,email,role.`, 'error');
+      }
+      entries.push({ employeeCode: columns[0], email: columns[1].toLowerCase(), role: columns[2] });
+    }
+    const organizationId = String(form.get('organizationId')).trim();
+    const result = await action('bulkAddRosterEntries', { organizationId, entries }, 'Roster CSV imported.');
+    if (result) {
+      event.currentTarget.elements.csv.value = '';
+      byId('rosterForm').elements.organizationId.value = organizationId;
+      message(`Roster import complete: ${result.created} created, ${result.updated} updated.`, 'success');
       loadRoster();
       loadAudit();
     }
