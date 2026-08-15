@@ -928,7 +928,8 @@
 
   byId('rosterForm').addEventListener('submit', async event => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const result = await action('addRosterEntry', {
       organizationId: String(form.get('organizationId')).trim(),
       employeeCode: String(form.get('employeeCode')).trim(),
@@ -936,8 +937,8 @@
       role: String(form.get('role'))
     }, 'Roster entry added.');
     if (result) {
-      event.currentTarget.elements.employeeCode.value = '';
-      event.currentTarget.elements.email.value = '';
+      formElement.elements.employeeCode.value = '';
+      formElement.elements.email.value = '';
       loadRoster();
       loadAudit();
     }
@@ -945,7 +946,8 @@
 
   byId('bulkRosterForm').addEventListener('submit', async event => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const lines = String(form.get('csv')).split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     if (lines[0]?.toLowerCase().replace(/\s/g, '') === 'employeecode,email,role') lines.shift();
     if (!lines.length || lines.length > 100) return message('CSV must contain between 1 and 100 data rows.', 'error');
@@ -960,7 +962,7 @@
     const organizationId = String(form.get('organizationId')).trim();
     const result = await action('bulkAddRosterEntries', { organizationId, entries }, 'Roster CSV imported.');
     if (result) {
-      event.currentTarget.elements.csv.value = '';
+      formElement.elements.csv.value = '';
       byId('rosterForm').elements.organizationId.value = organizationId;
       message(`Roster import complete: ${result.created} created, ${result.updated} updated.`, 'success');
       loadRoster();
