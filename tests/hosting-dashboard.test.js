@@ -102,6 +102,21 @@ test('hosted dashboard keeps authentication session-only and renders untrusted d
   assert.match(dashboard, /control\.dataset\.armed !== 'true'/);
 });
 
+test('async roster forms retain their element before awaiting server actions', () => {
+  const dashboard = read('hosting/admin.js');
+  for (const formId of ['rosterForm', 'bulkRosterForm']) {
+    const start = dashboard.indexOf(`byId('${formId}').addEventListener('submit', async event => {`);
+    assert.notEqual(start, -1, `${formId} submit handler must exist`);
+    const end = dashboard.indexOf('\n  });', start);
+    assert.notEqual(end, -1, `${formId} submit handler must terminate`);
+    const handler = dashboard.slice(start, end);
+    const awaitOffset = handler.indexOf('await ');
+    assert.notEqual(awaitOffset, -1, `${formId} must await its server action`);
+    assert.match(handler.slice(0, awaitOffset), /const formElement = event\.currentTarget;/);
+    assert.doesNotMatch(handler.slice(awaitOffset), /event\.currentTarget/);
+  }
+});
+
 test('hosting security headers deny framing, remote scripts, sensitive browser capabilities and caching', () => {
   const firebase = JSON.parse(read('firebase.json'));
   const globalRule = firebase.hosting.headers.find(rule => rule.source === '**');
