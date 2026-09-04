@@ -19,7 +19,7 @@
         <input type="password" id="authPassword" name="authPassword" placeholder="Password" autocomplete="current-password">
         <button id="authSignInBtn" class="btn btn-primary">Sign In</button>
         <p class="auth-link"><a href="#" id="showPasswordResetLink">Forgot password?</a></p>
-        <p class="auth-link"><a href="#" id="showSignUpLink">New processor? Create an account</a></p>
+        <p class="auth-link"><a href="#" id="showSignUpLink">New user? Create an account</a></p>
       </div>
       <div id="authPasswordReset" class="auth-section" hidden>
         <p>Enter your account email. If it is registered, Firebase will send a password-reset link.</p>
@@ -32,7 +32,7 @@
         <input type="password" id="signUpPassword" name="signUpPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
         <input type="password" id="signUpConfirmPassword" name="signUpConfirmPassword" placeholder="Confirm password" autocomplete="new-password">
         <input type="text" id="signUpDisplayName" name="signUpDisplayName" placeholder="Your name">
-        <p class="auth-help">Create your processor account and verify your email. You will then choose organisation-sponsored or individual access; activation follows the approval steps for that path.</p>
+        <p class="auth-help">Create your account, verify your email once, then start using Claim Auto-Fill.</p>
         <button id="signUpBtn" class="btn btn-primary">Create Account</button>
         <p class="auth-link"><a href="#" id="showSignInLink">Already have an account? Sign in</a></p>
       </div>
@@ -69,18 +69,6 @@
         </div>
         <p class="auth-link"><a href="#" id="continueDefaultAccessLink">Continue without organisation sponsorship</a></p>
         <p class="auth-link"><a href="#" id="cancelSignUpLink4">Start over</a></p>
-      </div>
-      <div id="authCompleteOnboarding" class="auth-section" hidden>
-        <p>Your email is verified. Confirm your name to finish setup.</p>
-        <p id="completeOnboardingError" class="auth-error"></p>
-        <input type="text" id="completeOnboardingName" name="completeOnboardingName" placeholder="Your name">
-        <button id="completeOnboardingBtn" class="btn btn-primary">Finish Setup</button>
-        <p class="auth-link"><a href="#" id="cancelSignUpLink2">Start over</a></p>
-      </div>
-      <div id="authAwaitingActivation" class="auth-section" hidden>
-        <p>Email verified. Waiting for your administrator to approve your account.</p>
-        <button id="checkActivationBtn" class="btn btn-secondary btn-small">Check Status</button>
-        <p class="auth-link"><a href="#" id="cancelSignUpLink3">Start over</a></p>
       </div>
       <div id="authSignedIn" class="auth-section" hidden>
         <p id="authEmailLabel"></p>

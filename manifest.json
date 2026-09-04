@@ -6,7 +6,9 @@
   "permissions": [
     "activeTab",
     "storage",
-    "alarms"
+    "alarms",
+    "windows",
+    "tabs"
   ],
   "host_permissions": [
     "https://identitytoolkit.googleapis.com/*",

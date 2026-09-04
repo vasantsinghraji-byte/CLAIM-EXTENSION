@@ -32,7 +32,6 @@ const {
   resolveActivationTarget,
   rosterDocumentId,
   safeDocumentId,
-  selectEmailInvitation,
   tokenHash
 } = require('./lib/contracts');
 const {
@@ -319,12 +318,14 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     await enforceRateLimit(auth.uid, 'licence', 120, 60 * 60 * 1000);
     const user = await activeUser(auth.uid);
     const license = user.license;
-    if (!license || !LICENSE_TYPES.includes(license.type)) {
+    const organizationEntitlement = license?.type === 'organisation'
+      || user.role === 'platformAdmin' && Boolean(user.organizationId);
+    if ((!license || !LICENSE_TYPES.includes(license.type)) && !organizationEntitlement) {
       return { status: 'unlicensed', previewAllowed: false, applyAllowed: false };
     }
     const now = Date.now();
-    const userExpiryMs = timestampMillis(license.expiresAt);
-    if (license.status === 'inactive') {
+    const userExpiryMs = timestampMillis(license?.expiresAt);
+    if (!organizationEntitlement && license.status === 'inactive') {
       return {
         status: license.type === 'individual' && license.paymentStatus === 'pending_verification'
           ? 'payment-pending'
@@ -347,14 +348,14 @@ exports.verifyLicence = onCall(callableOptions, async request => {
       return { status: 'update-required', previewAllowed: false, applyAllowed: false, minimumVersion };
     }
     const userAccess = licenceAccessDecision({
-      status: license.status,
+      status: license?.status,
       expiryMs: userExpiryMs,
       now,
       gracePeriodMs: GRACE_PERIOD_MS
     });
     let access = userAccess;
     let expiryMs = userExpiryMs;
-    if (license.type === 'organisation') {
+    if (organizationEntitlement) {
       const [organizationSnapshot, licenceSnapshot] = await Promise.all([
         db.doc(`organizations/${user.organizationId}`).get(),
         db.doc(`licences/${user.organizationId}`).get()
@@ -373,18 +374,16 @@ exports.verifyLicence = onCall(callableOptions, async request => {
         now,
         gracePeriodMs: GRACE_PERIOD_MS
       });
-      if (!userAccess.applyAllowed || !organisationAccess.applyAllowed) {
-        access = !userAccess.previewAllowed || !organisationAccess.previewAllowed
-          ? { status: userAccess.status === 'active' ? organisationAccess.status : userAccess.status, previewAllowed: false, applyAllowed: false }
-          : { status: 'grace', previewAllowed: true, applyAllowed: false };
-      }
-      expiryMs = Math.min(userExpiryMs, organisationExpiryMs);
+      // Organisation membership is established by invitation and account approval.
+      // Do not add a second, per-user licence gate for processors or administrators.
+      access = organisationAccess;
+      expiryMs = organisationExpiryMs;
     }
     if (access.status === 'active') {
       return {
         ...access,
-        licenseType: license.type,
-        paymentStatus: license.paymentStatus,
+        licenseType: organizationEntitlement ? 'organisation' : license.type,
+        paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
         expiringSoon: expiryMs - now <= EXPIRING_SOON_MS,
         expiresAt: new Date(expiryMs).toISOString(),
         minimumVersion,
@@ -394,8 +393,8 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     if (access.status === 'grace') {
       return {
         ...access,
-        licenseType: license.type,
-        paymentStatus: license.paymentStatus,
+        licenseType: organizationEntitlement ? 'organisation' : license.type,
+        paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
         expiresAt: new Date(expiryMs).toISOString(),
         graceEndsAt: new Date(expiryMs + GRACE_PERIOD_MS).toISOString(),
         minimumVersion
@@ -403,8 +402,8 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     }
     return {
       ...access,
-      licenseType: license.type,
-      paymentStatus: license.paymentStatus,
+      licenseType: organizationEntitlement ? 'organisation' : license.type,
+      paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
       expiresAt: Number.isFinite(expiryMs) ? new Date(expiryMs).toISOString() : null,
       minimumVersion
     };
@@ -622,9 +621,9 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
   }
 });
 
-// Verified processors can register without an invitation, but remain pending
-// until a platform administrator approves them. Invitations remain
-// authoritative for users assigned a different organization or elevated role.
+// Normal sign-up is self-service after email verification. Access is still
+// enforced server-side by the active platform licence and its user limit.
+// The exported name remains for backward compatibility with installed clients.
 exports.completeInvitationOnboarding = onCall(callableOptions, async request => {
   try {
     const auth = requireVerifiedEmail(request);
@@ -633,118 +632,112 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
     assertKeys(data, ['displayName'], ['displayName']);
     const displayName = requiredString(data.displayName, 'displayName', 120);
     const authenticatedEmail = normalizedEmail(auth.token.email);
-    const invitationsSnapshot = await db.collection('invitations')
-      .where('email', '==', authenticatedEmail)
-      .limit(ADMIN_LIST_LIMIT)
-      .get();
-    const selectedInvitation = selectEmailInvitation(
-      invitationsSnapshot.docs.map(snapshot => ({
-        snapshot,
-        status: snapshot.data().status,
-        acceptedBy: snapshot.data().acceptedBy || null,
-        expiresAtMs: timestampMillis(snapshot.data().expiresAt),
-        createdAtMs: timestampMillis(snapshot.data().createdAt)
-      })),
-      auth.uid
-    );
-    const invitationSnapshot = selectedInvitation?.snapshot || null;
     const userReference = db.doc(`users/${auth.uid}`);
-    const invitationReference = invitationSnapshot?.ref || null;
+    const organizationReference = db.doc(`organizations/${SELF_SERVICE_ORGANIZATION_ID}`);
+    const licenceReference = db.doc(`licences/${SELF_SERVICE_ORGANIZATION_ID}`);
+    const activeUsersQuery = db.collection('users')
+      .where('organizationId', '==', SELF_SERVICE_ORGANIZATION_ID)
+      .where('accountStatus', '==', 'active');
     const registrationAuditReference = db.collection('auditLogs').doc();
     let onboarding;
-    let accountStatus = 'invited';
+    let role = SELF_SERVICE_ROLE;
     let alreadyAccepted = false;
 
-    function createRegistrationAudit(transaction, organizationId, onboardingSource) {
+    function createRegistrationAudit(transaction) {
       transaction.create(registrationAuditReference, {
         actorId: auth.uid,
-        actorRole: 'processor',
-        action: 'user.registration_requested',
+        actorRole: SELF_SERVICE_ROLE,
+        action: 'user.registration_completed',
         targetType: 'user',
         targetId: auth.uid,
-        details: { organizationId, onboardingSource },
+        details: { organizationId: SELF_SERVICE_ORGANIZATION_ID, onboardingSource: 'self-registration' },
         timestamp: FieldValue.serverTimestamp()
       });
     }
 
     await db.runTransaction(async transaction => {
       const userSnapshot = await transaction.get(userReference);
+      const [organizationSnapshot, licenceSnapshot, activeUsers] = await Promise.all([
+        transaction.get(organizationReference),
+        transaction.get(licenceReference),
+        transaction.get(activeUsersQuery)
+      ]);
+      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+        fail('failed-precondition', 'Organization is not active');
+      }
+      if (!licenceSnapshot.exists || licenceSnapshot.data().status !== 'active'
+          || timestampMillis(licenceSnapshot.data().expiryDate) < Date.now()) {
+        fail('failed-precondition', 'Organization licence is not active');
+      }
+      const maximumUsers = boundedInteger(licenceSnapshot.data().maximumUsers, 'maximumUsers', 1, 500);
       if (userSnapshot.exists) {
         const user = userSnapshot.data();
         if (user.email !== authenticatedEmail) {
           fail('failed-precondition', 'Existing user profile does not match authenticated email');
         }
         onboarding = user;
-        accountStatus = user.accountStatus;
-        alreadyAccepted = true;
-        return;
-      }
-      if (!invitationReference) {
-        const organizationReference = db.doc(`organizations/${SELF_SERVICE_ORGANIZATION_ID}`);
-        const organizationSnapshot = await transaction.get(organizationReference);
-        if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
-          fail('failed-precondition', 'Registration organization is not active');
+        if (user.accountStatus === 'active') {
+          alreadyAccepted = true;
+          role = user.role || SELF_SERVICE_ROLE;
+          return;
         }
-        onboarding = {
-          organizationId: SELF_SERVICE_ORGANIZATION_ID,
-          role: SELF_SERVICE_ROLE
-        };
-        transaction.create(userReference, {
-          email: authenticatedEmail,
-          displayName,
-          organizationId: SELF_SERVICE_ORGANIZATION_ID,
-          role: SELF_SERVICE_ROLE,
-          accountStatus: 'invited',
-          license: { ...DEFAULT_LICENSE },
-          onboardingSource: 'self-registration',
-          createdAt: FieldValue.serverTimestamp(),
+        if (user.organizationId !== SELF_SERVICE_ORGANIZATION_ID) {
+          fail('failed-precondition', 'Existing user profile belongs to another organization');
+        }
+        if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
+        const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
+        role = user.role || SELF_SERVICE_ROLE;
+        transaction.update(userReference, {
+          accountStatus: 'active',
+          license: {
+            ...DEFAULT_LICENSE,
+            ...(user.license || {}),
+            type: 'organisation',
+            status: 'active',
+            organizationId: SELF_SERVICE_ORGANIZATION_ID,
+            expiresAt: licenceSnapshot.data().expiryDate,
+            durationWeeks: Math.max(1, Math.ceil((expiryMs - Date.now()) / (7 * 24 * 60 * 60 * 1000))),
+            paymentStatus: 'not_required'
+          },
           updatedAt: FieldValue.serverTimestamp()
         });
-        createRegistrationAudit(transaction, SELF_SERVICE_ORGANIZATION_ID, 'self-registration');
         return;
       }
-      const currentInvitationSnapshot = await transaction.get(invitationReference);
-      if (!currentInvitationSnapshot.exists) fail('not-found', 'Invitation not found');
-      const invitation = currentInvitationSnapshot.data();
-      const acceptedForSameCaller = invitation.status === 'accepted'
-        && invitation.acceptedBy === auth.uid
-        && invitation.email === authenticatedEmail;
-      if (!acceptedForSameCaller) {
-        if (invitation.status !== 'pending') fail('failed-precondition', 'Invitation is no longer active');
-        if (timestampMillis(invitation.expiresAt) < Date.now()) fail('deadline-exceeded', 'Invitation expired');
-        if (invitation.email !== authenticatedEmail) fail('permission-denied', 'Invitation email does not match');
-      } else {
-        alreadyAccepted = true;
-      }
-      onboarding = invitation;
+      if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
+      const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
+      onboarding = {
+        organizationId: SELF_SERVICE_ORGANIZATION_ID,
+        role: SELF_SERVICE_ROLE
+      };
       transaction.create(userReference, {
         email: authenticatedEmail,
         displayName,
-        organizationId: invitation.organizationId,
-        role: invitation.role,
-        accountStatus: 'invited',
-        license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId: invitation.organizationId },
+        organizationId: SELF_SERVICE_ORGANIZATION_ID,
+        role: SELF_SERVICE_ROLE,
+        accountStatus: 'active',
+        license: {
+          ...DEFAULT_LICENSE,
+          type: 'organisation',
+          status: 'active',
+          organizationId: SELF_SERVICE_ORGANIZATION_ID,
+          expiresAt: licenceSnapshot.data().expiryDate,
+          durationWeeks: Math.max(1, Math.ceil((expiryMs - Date.now()) / (7 * 24 * 60 * 60 * 1000))),
+          paymentStatus: 'not_required'
+        },
+        onboardingSource: 'self-registration',
         createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-        ...(acceptedForSameCaller ? { recoveredAt: FieldValue.serverTimestamp() } : {})
+        updatedAt: FieldValue.serverTimestamp()
       });
-      createRegistrationAudit(transaction, invitation.organizationId, 'invitation');
-      if (!acceptedForSameCaller) {
-        transaction.update(invitationReference, {
-          status: 'accepted',
-          acceptedAt: FieldValue.serverTimestamp(),
-          acceptedBy: auth.uid
-        });
-      }
+      createRegistrationAudit(transaction);
     });
     await getAuth().setCustomUserClaims(auth.uid, {
       organizationId: onboarding.organizationId,
-      role: onboarding.role,
-      accountStatus
+      role,
+      accountStatus: 'active'
     });
     return {
-      status: accountStatus === 'active' ? 'active' : 'accepted',
-      activationRequired: accountStatus !== 'active',
+      status: 'active',
+      activationRequired: false,
       alreadyAccepted
     };
   } catch (error) {

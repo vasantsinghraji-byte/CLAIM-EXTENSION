@@ -5,8 +5,6 @@ const authPasswordReset = document.getElementById('authPasswordReset');
 const authSignUpPanel = document.getElementById('authSignUpPanel');
 const authVerifyEmail = document.getElementById('authVerifyEmail');
 const authChoosePath = document.getElementById('authChoosePath');
-const authCompleteOnboarding = document.getElementById('authCompleteOnboarding');
-const authAwaitingActivation = document.getElementById('authAwaitingActivation');
 const authSignedIn = document.getElementById('authSignedIn');
 const authEmailInput = document.getElementById('authEmail');
 const authPasswordInput = document.getElementById('authPassword');
@@ -77,14 +75,8 @@ const individualPlan = document.getElementById('individualPlan');
 const individualPaymentReference = document.getElementById('individualPaymentReference');
 const submitPaymentReferenceBtn = document.getElementById('submitPaymentReferenceBtn');
 const continueDefaultAccessLink = document.getElementById('continueDefaultAccessLink');
-const completeOnboardingError = document.getElementById('completeOnboardingError');
-const completeOnboardingNameInput = document.getElementById('completeOnboardingName');
-const completeOnboardingBtn = document.getElementById('completeOnboardingBtn');
-const checkActivationBtn = document.getElementById('checkActivationBtn');
 const cancelSignUpLinks = [
   document.getElementById('cancelSignUpLink1'),
-  document.getElementById('cancelSignUpLink2'),
-  document.getElementById('cancelSignUpLink3'),
   document.getElementById('cancelSignUpLink4')
 ];
 let showingSignUp = false;
@@ -146,10 +138,10 @@ const authErrorMessages = {
 };
 
 const onboardingErrorMessages = {
-  NOT_FOUND: 'No active invitation was found for this email. Ask your administrator to invite this exact address.',
-  FAILED_PRECONDITION: 'This invitation is no longer active. Ask your administrator to create a new invitation.',
-  DEADLINE_EXCEEDED: 'This invitation has expired. Ask your administrator to create a new invitation.',
-  PERMISSION_DENIED: 'The signed-in email does not match the invited email.',
+  NOT_FOUND: 'Account setup could not be completed. Please try again.',
+  FAILED_PRECONDITION: 'Account setup is unavailable because the service licence is not active.',
+  DEADLINE_EXCEEDED: 'Account setup took too long. Please try again.',
+  PERMISSION_DENIED: 'Account setup could not be authorized. Please sign in again.',
   DISPLAY_NAME_REQUIRED: 'Enter your name to finish setup.'
 };
 
@@ -188,8 +180,8 @@ function describeLicenceStatus(state) {
 }
 
 function renderAuthState(authSession, licenceState, pendingAuth) {
-  const pendingStage = pendingAuth?.stage === 'accept-invitation'
-    ? 'complete-onboarding'
+  const pendingStage = ['accept-invitation', 'complete-onboarding', 'awaiting-activation'].includes(pendingAuth?.stage)
+    ? 'verify-email'
     : pendingAuth?.stage;
   const stage = authSession
     ? 'signed-in'
@@ -201,9 +193,7 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   authPasswordReset.hidden = stage !== 'password-reset';
   authSignUpPanel.hidden = stage !== 'sign-up';
   authVerifyEmail.hidden = stage !== 'verify-email';
-  authChoosePath.hidden = stage !== 'choose-access-path';
-  authCompleteOnboarding.hidden = stage !== 'complete-onboarding';
-  authAwaitingActivation.hidden = stage !== 'awaiting-activation';
+  authChoosePath.hidden = true;
   authSignedIn.hidden = stage !== 'signed-in';
   adminPanel.hidden = stage !== 'signed-in' || authSession?.role !== 'platformAdmin';
 
@@ -221,12 +211,6 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   }
   if (stage === 'verify-email') {
     verifyEmailLabel.textContent = pendingAuth.email || '';
-  }
-  if (stage === 'complete-onboarding') {
-    completeOnboardingNameInput.value = pendingAuth.displayName || '';
-    completeOnboardingError.textContent = pendingAuth.lastError
-      ? (onboardingErrorMessages[pendingAuth.lastError] || 'Unable to finish setup. Contact your administrator.')
-      : '';
   }
 }
 
@@ -352,7 +336,7 @@ checkVerifiedBtn.addEventListener('click', () => {
     showStatus(
       response.error
         ? 'Email verified, but setup needs attention.'
-        : (response.stage === 'choose-access-path' ? 'Email verified. Choose your access path.' : 'Email verified. Account ready.'),
+        : 'Email verified. Your account is ready.',
       response.error ? 'warning' : 'success'
     );
     loadAuthState();
@@ -425,49 +409,6 @@ continueDefaultAccessLink.addEventListener('click', event => {
       return;
     }
     showStatus('Setup complete. Waiting for administrator approval.', 'success');
-    loadAuthState();
-  });
-});
-
-completeOnboardingBtn.addEventListener('click', () => {
-  const displayName = completeOnboardingNameInput.value.trim();
-  if (!displayName) {
-    showStatus('Enter your name to finish setup', 'warning');
-    return;
-  }
-  completeOnboardingBtn.disabled = true;
-  chrome.runtime.sendMessage({ action: 'authCompleteOnboarding', displayName }, response => {
-    completeOnboardingBtn.disabled = false;
-    if (!response?.success) {
-      showStatus('Unable to finish setup right now', 'error');
-      return;
-    }
-    showStatus(
-      response.stage === 'active'
-        ? 'Setup complete. Signed in.'
-        : (response.stage === 'awaiting-activation' ? 'Setup complete. Waiting for administrator approval.' : 'Unable to finish setup'),
-      ['active', 'awaiting-activation'].includes(response.stage) ? 'success' : 'error'
-    );
-    loadAuthState();
-  });
-});
-
-checkActivationBtn.addEventListener('click', () => {
-  checkActivationBtn.disabled = true;
-  checkActivationBtn.textContent = 'Checking...';
-  chrome.runtime.sendMessage({ action: 'authCheckActivation' }, response => {
-    checkActivationBtn.disabled = false;
-    checkActivationBtn.textContent = 'Check Status';
-    if (!response?.success) {
-      showStatus('Unable to check activation status right now', 'error');
-      return;
-    }
-    showStatus(
-      response.active
-        ? 'Account approved. Signed in.'
-        : (response.rejected ? 'Registration rejected. Contact your administrator.' : 'Still waiting for your administrator to approve your account.'),
-      response.active ? 'success' : (response.rejected ? 'error' : 'info')
-    );
     loadAuthState();
   });
 });

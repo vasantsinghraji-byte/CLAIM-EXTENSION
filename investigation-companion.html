@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Investigation Checklist</title>
+  <style>
+    body { margin: 0; padding: 18px; background: #f8fafc; color: #134e4a; font: 14px/1.45 system-ui, sans-serif; }
+    h1 { margin: 0 0 6px; font-size: 18px; } p { margin: 0 0 14px; color: #475569; }
+    .item { display: grid; grid-template-columns: 1fr 75px; gap: 8px; align-items: center; margin-top: 8px; padding: 9px; border: 1px solid #99f6e4; border-radius: 8px; background: #f0fdfa; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #5eead4; border-radius: 6px; padding: 5px; font: inherit; }
+    .empty { padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; color: #475569; background: white; }
+    #actions { display:flex; gap:8px; margin-top:14px; } button { border:1px solid #0f766e; border-radius:7px; padding:7px 9px; background:#fff; color:#115e59; cursor:pointer; font-weight:700; } button:disabled { opacity:.55; cursor:not-allowed; } #status { min-height:20px; font-size:12px; color:#475569; } footer { margin-top:16px; font-size:12px; color:#64748b; }
+  </style>
+</head>
+<body>
+  <h1>Investigation checklist</h1>
+  <p>Keep this window beside the Investigation PDF while verifying reports.</p>
+  <main id="items" aria-live="polite"></main>
+  <div id="actions" hidden><button id="preview" type="button">Preview verified quantities</button><button id="apply" type="button" disabled>Apply to process sheet</button><button id="copy" type="button">Copy review summary</button><button id="discard" type="button">Discard saved counts</button></div>
+  <p id="status" role="status"></p><button id="reconnect" type="button" hidden>Refresh matching process sheet</button>
+  <footer>Applying changes updates only the matching open process sheet after an explicit preview.</footer>
+  <script src="investigation-companion.js"></script>
+</body>
+</html>
