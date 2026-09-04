@@ -170,7 +170,7 @@ async function testIndividualLifecycle(auth, db, adminToken) {
   await db.doc(`users/${individual.uid}`).set({
     email: individual.email,
     displayName: 'Individual Processor',
-    organizationId: null,
+    organizationId: 'platform',
     role: 'processor',
     accountStatus: 'active',
     onboardingSource: 'acceptance-test-existing-individual',
