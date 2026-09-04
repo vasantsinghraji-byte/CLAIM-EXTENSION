@@ -27,7 +27,9 @@ const browserGlobals = {
   FormData: 'readonly',
   URLSearchParams: 'readonly',
   importScripts: 'readonly',
-  TextEncoder: 'readonly'
+  TextEncoder: 'readonly',
+  requestAnimationFrame: 'readonly',
+  getComputedStyle: 'readonly'
 };
 
 const nodeGlobals = {
@@ -76,7 +78,7 @@ module.exports = [
   },
   {
     files: [
-      'content.js', 'popup.js', 'options.js', 'background.js',
+      'content.js', 'popup.js', 'options.js', 'background.js', 'investigation-companion.js',
       'floating-widget.js', 'claim-core.js', 'audit-core.js', 'auth-core.js', 'review-core.js',
       'processing-rules.js',
       'scripts/live-browser-smoke.js', 'hosting/**/*.js'
