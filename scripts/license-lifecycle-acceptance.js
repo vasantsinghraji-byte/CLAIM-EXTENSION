@@ -153,12 +153,14 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   const reactivated = (await db.doc(`users/${sponsored.uid}`).get()).data();
   assert.equal(reactivated.accountStatus, 'active');
   assert.equal(reactivated.license.status, 'inactive',
-    'account reactivation must preserve an independent per-user licence deactivation');
+    'account reactivation must not silently rewrite historical per-user licence state');
   const reactivatedAccess = await callFunction(
     'verifyLicence', sponsoredToken, { extensionVersion: '1.11.1' }
   );
-  assert.equal(reactivatedAccess.status, 'inactive');
-  assert.equal(reactivatedAccess.applyAllowed, false);
+  assert.equal(reactivatedAccess.status, 'active',
+    'active organisation members inherit the organisation licence');
+  assert.equal(reactivatedAccess.licenseType, 'organisation');
+  assert.equal(reactivatedAccess.applyAllowed, true);
 }
 
 async function testIndividualLifecycle(auth, db, adminToken) {
