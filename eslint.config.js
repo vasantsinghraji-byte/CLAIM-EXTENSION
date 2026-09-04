@@ -53,6 +53,8 @@ module.exports = [
       'hosting-build/**',
       'node_modules/**',
       '.chromium-activation/**',
+      '.chrome-profile-*/**',
+      'chrome-profile-*/**',
       '.tools/**',
       'privacy-site/**',
       'functions/node_modules/**'
@@ -86,6 +88,8 @@ module.exports = [
       'build.js',
       'tools/check-no-secrets.js',
       'tools/setup-git-hooks.js',
+      'tools/repository-health.js',
+      'tools/repository-policy.js',
       'tools/bootstrap-production-admin.js',
       'scripts/release.js',
       'scripts/verify-artifact.js',

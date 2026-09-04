@@ -18,6 +18,11 @@ The setup script configures the repository-local hooks and marks them
 executable on platforms that require it. Verify the setup with
 `git config --get core.hooksPath`; it should print `.githooks`.
 
+Run `npm run repo:health` at the start and end of a work session. It reports
+the active branch, dirty paths, hook configuration, package/lockfile version
+drift, and merged local branches that may be stale. It never deletes or
+rewrites work.
+
 ## Branching model — GitHub Flow
 
 `main` is always releasable. **Never commit directly to `main`.**
@@ -39,7 +44,8 @@ executable on platforms that require it. Verify the setup with
 
 ## Commits — Conventional Commits, enforced
 
-The `commit-msg` hook rejects messages that don't match:
+The `commit-msg` hook rejects messages that don't match, and CI validates the
+entire pull-request commit range so `--no-verify` cannot bypass the policy:
 
 ```
 <type>(<scope>)?: <subject ≤ 72 chars>
@@ -73,10 +79,11 @@ so an unverified commit just fails later and louder.
 - Anything touching deduction behavior (`planAuditActions`, allowlists,
   safety caps) needs explicit reviewer sign-off in the PR conversation.
 
-Repository administrators should protect `main` in GitHub: require a pull
+Repository administrators must protect `main` in GitHub: require a pull
 request with at least one approval, dismiss stale approvals after new commits,
 require conversation resolution and the `validate` CI check, and block force
-pushes and branch deletion. These server-side rules are authoritative; local
+pushes and branch deletion. Also enable "Automatically delete head branches"
+in the repository settings. These server-side rules are authoritative; local
 hooks are an early feedback layer and can be bypassed with `--no-verify`.
 
 ## Generated & special files
