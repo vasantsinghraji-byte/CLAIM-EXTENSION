@@ -166,7 +166,18 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
 async function testIndividualLifecycle(auth, db, adminToken) {
   const individual = await createVerifiedUser(auth, 'acceptance-individual@claim-spark.local', 'Individual Processor');
   const individualToken = await signIn(individual.email);
-  await callFunction('completeInvitationOnboarding', individualToken, { displayName: 'Individual Processor' });
+  const now = Date.now();
+  await db.doc(`users/${individual.uid}`).set({
+    email: individual.email,
+    displayName: 'Individual Processor',
+    organizationId: null,
+    role: 'processor',
+    accountStatus: 'active',
+    onboardingSource: 'acceptance-test-existing-individual',
+    license: defaultLicense(),
+    createdAt: Timestamp.fromMillis(now),
+    updatedAt: Timestamp.fromMillis(now)
+  });
   const payment = await callFunction('submitPaymentProof', individualToken, {
     paymentReference: 'ACCEPTANCE-UPI-UTR-0001', durationWeeks: 4
   });
