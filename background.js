@@ -277,17 +277,19 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         : { success: true, requiresProfileRecovery: true, error: afterCompletion.lastError };
     }
     if (profile?.accountStatus === 'invited') {
-      await storageWriter.setPendingAuth({
+      const activated = await attemptCompleteOnboarding({
         ...localSession,
         displayName: profile.displayName || '',
-        stage: 'awaiting-activation',
+        stage: 'complete-onboarding',
         lastError: null
       });
+      if (activated.stage === 'active') return { success: true };
+      await storageWriter.setPendingAuth(activated);
       await Promise.all([
         storageWriter.clearAuthSession(),
         storageWriter.setLicenceState(null)
       ]);
-      return { success: true, awaitingActivation: true };
+      return { success: true, awaitingActivation: true, error: activated.lastError };
     }
     await storageWriter.setAuthSession(localSession);
     await storageWriter.clearPendingAuth();
@@ -341,8 +343,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     refreshProcessingRules().catch(() => undefined);
   }
 
-  // Registers a verified processor for administrator approval. An explicit
-  // invitation remains authoritative when one assigns another role or tenant.
+  // Completes normal self-service registration after email verification.
   async function attemptCompleteOnboarding(pending) {
     try {
       const onboarding = await AuthCore.callFunction({
@@ -404,8 +405,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  // Email verification precedes the access-path choice. No account profile is
-  // created until the user chooses organisation sponsorship or the default path.
+  // The normal production path is self-service: verified users are activated
+  // against the server-side platform licence and user limit.
   async function handleCheckEmailVerified() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -430,18 +431,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       expiresAt: refreshed.expiresAt
     };
     await storageWriter.setPendingAuth(pending);
-    const afterCompletion = {
+    const afterVerification = {
       ...pending,
       displayName: pending.displayName || info.displayName || '',
-      stage: 'choose-access-path',
+      stage: 'complete-onboarding',
       lastError: null
     };
-    await storageWriter.setPendingAuth(afterCompletion);
+    const completed = await attemptCompleteOnboarding(afterVerification);
     return {
-      success: true,
+      success: !completed.lastError,
       emailVerified: true,
-      stage: afterCompletion.stage,
-      error: afterCompletion.lastError
+      stage: completed.stage,
+      error: completed.lastError
     };
   }
 

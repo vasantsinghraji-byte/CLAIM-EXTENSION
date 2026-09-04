@@ -263,7 +263,7 @@ test('background wires auth-core, the three auth message actions, and the licenc
 
 test('background wires verified-email invitation matching and the activation-check chain', () => {
   const background = fs.readFileSync(path.join(__dirname, '..', 'background.js'), 'utf8');
-  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCompleteOnboarding', 'authCheckActivation', 'authCancelSignUp']) {
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCancelSignUp']) {
     assert.match(background, new RegExp(`request\\?\\.action === '${action}'`));
   }
   assert.match(background, /AuthCore\.signUp\(/);
@@ -280,15 +280,15 @@ test('background wires verified-email invitation matching and the activation-che
   assert.doesNotMatch(background, /invitationToken:\s*String/);
 });
 
-test('email verification refreshes the ID token before the access-path choice', () => {
+test('email verification refreshes the ID token before invitation onboarding', () => {
   const background = read('background.js');
   const start = background.indexOf('async function handleCheckEmailVerified');
   const end = background.indexOf('async function handleCompleteOnboarding', start);
   const flow = background.slice(start, end);
   const lookup = flow.indexOf('AuthCore.accountInfo');
   const refresh = flow.indexOf('AuthCore.refreshIdToken');
-  const choice = flow.indexOf("stage: 'choose-access-path'");
-  assert.ok(lookup >= 0 && refresh > lookup && choice > refresh);
+  const completion = flow.indexOf('attemptCompleteOnboarding');
+  assert.ok(lookup >= 0 && refresh > lookup && completion > refresh);
   assert.match(flow, /refreshToken: pending\.refreshToken/);
 });
 
@@ -335,14 +335,16 @@ test('accepted invitations are retry-safe for the same authenticated user', () =
 test('popup uses email-based signup without an invitation-token field', () => {
   const popup = fs.readFileSync(path.join(__dirname, '..', 'popup.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'popup.html'), 'utf8');
-  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCompleteOnboarding', 'authCheckActivation', 'authCancelSignUp']) {
+  for (const action of ['authSignUp', 'authResendVerification', 'authCheckEmailVerified', 'authCancelSignUp']) {
     assert.match(popup, new RegExp(`action: '${action}'`));
   }
   assert.match(popup, /password !== confirmPassword/);
   assert.match(popup, /onboardingErrorMessages/);
   assert.doesNotMatch(html, /signUpInvitationToken/);
   assert.doesNotMatch(html, /acceptInvitationToken/);
-  assert.match(html, /choose organisation-sponsored or individual access/i);
+  assert.match(html, /Create your account, verify your email once/i);
+  assert.doesNotMatch(html, /id="authCompleteOnboarding"/);
+  assert.doesNotMatch(html, /id="authAwaitingActivation"/);
   assert.doesNotMatch(popup, /Enter your invited email, name, and password/);
 });
 
@@ -366,17 +368,16 @@ test('signed-in individual users can renew and manage their password', () => {
   assert.match(auth, /returnSecureToken: true/);
 });
 
-test('server registers verified processors for manual approval while retaining invitation compatibility', () => {
+test('server activates verified self-service registrations under the platform licence', () => {
   const functions = read('functions/index.js');
   assert.match(functions, /exports\.completeInvitationOnboarding = onCall/);
-  assert.match(functions, /\.where\('email', '==', authenticatedEmail\)/);
   assert.match(functions, /requireVerifiedEmail\(request\)/);
   assert.match(functions, /SELF_SERVICE_ORGANIZATION_ID = 'platform'/);
-  assert.match(functions, /license: \{ \.\.\.DEFAULT_LICENSE \}/);
+  assert.match(functions, /organizationId: SELF_SERVICE_ORGANIZATION_ID/);
   assert.match(functions, /SELF_SERVICE_ROLE = 'processor'/);
-  assert.match(functions, /accountStatus: 'invited'/);
+  assert.match(functions, /accountStatus: 'active'/);
   assert.match(functions, /onboardingSource: 'self-registration'/);
-  assert.match(functions, /exports\.acceptInvitation = onCall/);
+  assert.match(functions, /activeUsers\.size >= maximumUsers/);
 });
 
 test('active onboarding responses can establish the signed-in session immediately', () => {
@@ -385,8 +386,8 @@ test('active onboarding responses can establish the signed-in session immediatel
   assert.match(background, /if \(!onboarding\.activationRequired\)/);
   assert.match(background, /stage: 'active'/);
   assert.match(background, /establishActiveSession\(pending, profile\)/);
-  assert.match(popup, /Email verified\. Account ready\./);
-  assert.match(popup, /Setup complete\. Signed in\./);
+  assert.match(popup, /Email verified\. Your account is ready\./);
+  assert.match(popup, /Email verified\. Your account is ready\./);
 });
 
 test('all popup authentication fields use the full-width accessible input style', () => {
@@ -428,11 +429,12 @@ test('platform administrators get licence, invitation, and user activation contr
   assert.doesNotMatch(background, /invitationToken:\s*result/);
 });
 
-test('per-user license controls are server-enforced independently from account approval', () => {
+test('individual licence controls remain server-enforced while organisation access inherits its licence', () => {
   const functions = read('functions/index.js');
   assert.match(functions, /exports\.setUserLicense = onCall/);
   assert.match(functions, /user\.license_updated/);
-  assert.match(functions, /license\.type === 'organisation'/);
+  assert.match(functions, /const organizationEntitlement = license\?\.type === 'organisation'/);
+  assert.match(functions, /access = organisationAccess/);
   assert.match(functions, /license\.status === 'inactive'/);
   assert.match(functions, /latestUser\.data\(\)\.accountStatus === 'invited'/);
 });
