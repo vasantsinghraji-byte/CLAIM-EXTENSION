@@ -21,9 +21,9 @@ Editable extension files live at the repository root. Generated files live in `d
 - `claim-core.js`: pure calculation, matching, row-planning, and debounce helpers
 - `review-core.js`: deterministic preview fingerprints, reconciliation, expiry, and high-risk Apply gates
 - `custom-rules.js`: validation, schema normalization, templates, and safe runtime merging for profile-local rules
-- `content.js`: RGHS DOM integration, dynamic-row observation, and undo state
+- `content.js`: claim portal DOM integration, dynamic-row observation, and undo state
 - `popup.html`, `popup.css`, `popup.js`: preview/apply/undo interface
-- `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from RGHS styles
+- `floating-widget.js`: Shadow DOM on-page mascot controls, isolated from claim portal styles
 
 Claim Spark supports the verified `/RGHS/processSheetSearch/`,
 `/RGHS/tpaOPD*`, and `/RGHS/tpaPharmacy*` workflows. It starts hidden until the stored claim-tools
@@ -46,8 +46,8 @@ Per-built-in-rule remark overrides live in the same object under
 `builtInRemarkOverrides`; they alter only presentation and never rule matching,
 eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
-`tests/fixtures/rghs-process-sheet.html` mirrors the live RGHS hidden-leading/trailing-cell structure. Its integration test covers mapping, normal and medicine proposals, selective reconciliation, Apply validation, and stale-preview detection without requiring a network session.
-- `manifest.json`: permissions and official RGHS origin scope
+`tests/fixtures/rghs-process-sheet.html` mirrors the live claim portal hidden-leading/trailing-cell structure. Its integration test covers mapping, normal and medicine proposals, selective reconciliation, Apply validation, and stale-preview detection without requiring a network session.
+- `manifest.json`: permissions and official claim portal origin scope
 - `tests/`: dependency-free Node.js regression tests
 - `test-page.html`: manual browser fixture
 
@@ -59,7 +59,7 @@ eligibility, deduction calculations, or the generated `audit-rules.js` source.
    before a release.
 4. Run `npm run build`.
 5. Load or reload `dist/` at `chrome://extensions/`.
-6. Refresh the RGHS claim page or local `test-page.html` fixture.
+6. Refresh the claim page or local `test-page.html` fixture.
 
 The build fails when a required production file is missing. It produces a deterministic `claim-autofill-extension.zip` without another dependency.
 
@@ -67,13 +67,13 @@ The build fails when a required production file is missing. It produces a determ
 
 `npm test` covers normal claims, medicine deduction and whole-rupee rounding, existing approvals, existing remarks, malformed amounts, Indian currency formatting, and debounced dynamic-row processing.
 
-RGHS process sheets have hidden leading and trailing data cells that do not align one-for-one with their visible headers. Hospital row mapping therefore anchors to `name="packageFinalAmounts"` / `id="packageFinalAmount_*"` and `id="packageremarks_*"`. Pharmacy row mapping anchors to `name="tpaapprovedAmount"` / `id="tpaapprovedAmount_*"` and `id="itemremarks_*"`. Generic header mapping remains available for other supported tables.
+The currently supported process sheets have hidden leading and trailing data cells that do not align one-for-one with their visible headers. Hospital row mapping therefore anchors to `name="packageFinalAmounts"` / `id="packageFinalAmount_*"` and `id="packageremarks_*"`. Pharmacy row mapping anchors to `name="tpaapprovedAmount"` / `id="tpaapprovedAmount_*"` and `id="itemremarks_*"`. Generic header mapping remains available for other supported tables.
 
 Pharmacy approvals use the lower of Claim Total and P25 multiplied by Quantity. When the P25 multiplied by Quantity cap is lower, the item remark records `Approved As per prevailing market price.` A lower Claim Total is approved without that market-price remark. Existing Pharmacy approvals are recalculated because the portal initially pre-populates them from the claim total; hospital approvals retain their existing preserve-nonzero behavior.
 
 Pharmacy validation highlights only the drug-name prefix through `TAB` when a `Tab 1×1` instruction is present; non-tablet dosage forms are excluded. Patient names are compared locally between the active Patient Data row and the same-origin invoice HTML. Case, punctuation, accents, and repeated whitespace are normalized. Mismatches highlight both name locations and the invoice View link; patient names are never persisted or logged.
 
-For a release, also verify in a clean RGHS session that controlled inputs accept the `input` and `change` events, preview counts match visible fields, undo restores them, and dynamically inserted rows are filled once.
+For a release, also verify in a clean claim portal session that controlled inputs accept the `input` and `change` events, preview counts match visible fields, undo restores them, and dynamically inserted rows are filled once.
 
 ## Security scope
 

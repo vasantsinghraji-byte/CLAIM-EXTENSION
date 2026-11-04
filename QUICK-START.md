@@ -21,7 +21,7 @@ not implemented.
 5. Continue until the invitation is accepted.
 6. Ask the administrator to activate the account.
 7. Select **Check Status**.
-8. Use Preview, explicit Apply, and Undo on an authorized RGHS process sheet.
+8. Use Preview, explicit Apply, and Undo on an authorized claim process sheet.
 
 If an account exists but its onboarding profile is missing, sign in normally.
 The extension will request the matching invitation token once and recover only

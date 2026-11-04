@@ -3,13 +3,21 @@ const assert = require('node:assert/strict');
 const {
   DEDUCTION_REMARK,
   PHARMACY_MARKET_PRICE_REMARK,
+  LAMA_DAMA_SURGICAL_REMARK,
   parseAmount,
   calculateMedicineApprovedAmount,
   planRowUpdate,
   planPharmacyRowUpdate,
+  isLamaDamaDischarge,
+  isSurgicalPackage,
+  planLamaDamaSurgicalPackageUpdate,
+  calculateCompleted24HourIntervals,
+  planIncompleteFinalDayUpdate,
+  planMultipleSurgicalPackageUpdates,
   getTabletOneByOneDrugName,
   normalizePatientName,
   patientNamesMatch,
+  hasPatientNameMismatch,
   resolveRowColumnIndices,
   createDebouncedProcessor,
   validatePortalLayoutDescriptor,
@@ -42,6 +50,11 @@ test('Pharmacy claims are supported and require a fully mapped claim table', () 
     ...valid,
     tables: [{ ...valid.tables[0], mappedApprovedControls: 4, invalidMappings: 1 }]
   }).reason, 'unmapped-claim-controls');
+});
+
+test('IPD main claim pages are supported for passive extension tools', () => {
+  assert.equal(isSupportedClaimPage('/RGHS/tpaClaimDischarge'), true);
+  assert.equal(isSupportedClaimPage('/RGHS/tpaClaimSettle/123'), true);
 });
 
 test('live Pharmacy hidden cells map from TPA controls to Claim Total', () => {
@@ -134,8 +147,72 @@ test('patient-name comparison ignores case, spacing, punctuation and accents', (
   assert.equal(normalizePatientName('  José   Kumar '), 'jose kumar');
   assert.equal(patientNamesMatch('REKHA  SHARMA', 'Rekha Sharma'), true);
   assert.equal(patientNamesMatch('A. K. Sharma', 'a k sharma'), true);
+  assert.equal(patientNamesMatch('Smt. Rekha Sharma', 'Patient Name: Rekha Sharma'), true);
+  assert.equal(patientNamesMatch('Harish Kumar Paliwal', 'Harish Kumar Paliwal-69686006627'), true);
   assert.equal(patientNamesMatch('Rekha Sharma', 'Rekha Verma'), false);
   assert.equal(patientNamesMatch('', ''), false);
+});
+
+test('patient-name highlighting requires every invoice name to differ', () => {
+  assert.equal(hasPatientNameMismatch('Rekha Sharma', ['Patient: Rekha Sharma', 'Rekha Sharma']), false);
+  assert.equal(hasPatientNameMismatch('Rekha Sharma', ['Patient Name: Rekha Sharma']), false);
+  assert.equal(hasPatientNameMismatch('Rekha Sharma', ['Rekha Verma', 'Rekha Sharma']), false);
+  assert.equal(hasPatientNameMismatch('Rekha Sharma', ['Rekha Verma']), true);
+});
+
+test('LAMA/DAMA surgical packages are limited to 75 percent', () => {
+  assert.equal(isLamaDamaDischarge('LAMA / DAMA'), true);
+  assert.equal(isSurgicalPackage('Surgical Package', 'IPD package'), true);
+  assert.equal(isSurgicalPackage('Investigation', 'CBC'), false);
+  assert.deepEqual(planLamaDamaSurgicalPackageUpdate({
+    claimValue: '10000', approvedValue: '10000', particularText: 'Surgical Package', packageText: 'Procedure',
+    dischargeStatus: 'LAMA', remarksValue: ''
+  }), {
+    approvedValue: '7500', remarksValue: LAMA_DAMA_SURGICAL_REMARK, reason: 'lama-dama-surgical'
+  });
+  assert.equal(planLamaDamaSurgicalPackageUpdate({
+    claimValue: '10000', approvedValue: '', particularText: 'Investigation', packageText: 'CBC',
+    dischargeStatus: 'DAMA', remarksValue: ''
+  }).reason, 'not-lama-dama-surgical');
+});
+
+test('incomplete final IPD day is proposed only for daily IPD packages', () => {
+  assert.equal(calculateCompleted24HourIntervals({
+    admissionDate: '01/08/2026', admissionTime: '10:00', dischargeDate: '03/08/2026', dischargeTime: '09:59'
+  }), 1);
+  assert.deepEqual(planIncompleteFinalDayUpdate({
+    claimValue: '2000', rateValue: '1000', unitValue: '2', approvedValue: '2000',
+    particularText: 'Medical Management', packageText: 'CM-001', admissionType: 'IPD',
+    completed24HourIntervals: 1, remarksValue: ''
+  }), {
+    approvedValue: '1000',
+    remarksValue: 'Final incomplete IPD day deducted; 1 completed 24-hour interval(s) admissible.',
+    reason: 'incomplete-daily-ipd'
+  });
+  assert.equal(planIncompleteFinalDayUpdate({
+    claimValue: '2000', rateValue: '1000', unitValue: '2', approvedValue: '',
+    particularText: 'Medical Management', packageText: 'CM-001', admissionType: 'Day Care',
+    completed24HourIntervals: 1, remarksValue: ''
+  }).reason, 'not-incomplete-daily-ipd');
+  assert.equal(planIncompleteFinalDayUpdate({
+    claimValue: '10000', rateValue: '1000', unitValue: '11', approvedValue: '10000',
+    particularText: 'Medical Management', packageText: 'CM-001', admissionType: 'IPD',
+    completed24HourIntervals: 10, remarksValue: ''
+  }).reason, 'not-incomplete-daily-ipd');
+});
+
+test('multiple surgical packages use the highest claimed portal-confirmed procedure and preserve implant/add-on packages', () => {
+  const plans = planMultipleSurgicalPackageUpdates({
+    finalPackageCodes: ['SURG-1', 'SURG-2', 'SURG-3', 'IMPLANT-1'],
+    lines: [
+      { index: 1, packageText: 'SURG-1 First surgery', particularText: 'Procedure', claimValue: '1000', approvedValue: '', remarksValue: '' },
+      { index: 2, packageText: 'SURG-2 Higher surgery', particularText: 'Procedure', claimValue: '1800', approvedValue: '', remarksValue: '' },
+      { index: 3, packageText: 'SURG-3 Third surgery', particularText: 'Procedure', claimValue: '400', approvedValue: '', remarksValue: '' },
+      { index: 4, packageText: 'IMPLANT-1 Add On', particularText: 'Procedure', claimValue: '600', approvedValue: '', remarksValue: '' }
+    ]
+  });
+  assert.deepEqual(plans.map(plan => [plan.index, plan.percent, plan.approvedValue]), [[2, 100, '1800'], [1, 50, '500'], [3, 25, '100'], [4, 100, '600']]);
+  assert.deepEqual(plans.map(plan => plan.decisionRole), ['main', 'second procedure (50%)', 'third/subsequent procedure (25%)', 'implant/add-on (100%)']);
 });
 
 test('normal row writes a normalized portal-safe amount', () => {

@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { createBuildEntries, createStoredZip, readBuildConfig } = require('../build');
 
 const root = path.join(__dirname, '..');
 
@@ -18,6 +19,13 @@ function verifyArtifact(baseDir = root) {
   const artifact = fs.readFileSync(path.join(baseDir, release.artifact));
   const sha256 = crypto.createHash('sha256').update(artifact).digest('hex').toUpperCase();
   if (sha256 !== release.sha256) throw new Error(`Artifact checksum mismatch: expected ${release.sha256}, received ${sha256}`);
+  // The release builder emits stored ZIPs. Match every packaged byte against
+  // current production source/configuration, including the embedded manifest.
+  if (path.resolve(baseDir) === path.resolve(root)) {
+    const config = readBuildConfig();
+    const expected = createStoredZip(createBuildEntries(config.production));
+    if (!artifact.equals(expected)) throw new Error('Artifact does not match the current production source and configuration; rebuild it');
+  }
   return { version: release.version, sha256 };
 }
 

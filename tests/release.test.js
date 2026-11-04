@@ -22,6 +22,8 @@ test('local releases require browser and emulator lifecycle gates', () => {
 
   assert.match(release, /\[npmCli, 'run', 'test:browser'\]/);
   assert.match(release, /\[npmCli, 'run', 'test:lifecycle'\]/);
+  assert.match(release, /\[npmCli, 'run', 'lint'\]/);
+  assert.match(release, /\[npmCli, 'run', 'test:functions'\]/);
   assert.match(release, /assertCleanWorktree\(\)/);
   assert.match(release, /lock\.packages\[''\]\.version = version/);
 });

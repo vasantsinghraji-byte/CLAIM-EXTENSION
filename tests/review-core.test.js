@@ -68,7 +68,23 @@ test('related findings become one decision group with calculated safe and overri
     acknowledgementRequired: true
   });
   assert.deepEqual(decisionForGroup(group, 'main-only').approvedOverrides, { ptca: 97865, cag: 0 });
+  assert.deepEqual(decisionForGroup(group, 'approve-selected', ['cag']), {
+    selectedKeys: ['cag'],
+    approvedOverrides: { cag: 6325 },
+    remarkDispositions: { cag: 'approved' },
+    acknowledgementRequired: true
+  });
   assert.deepEqual(decisionForGroup(group, 'hold').selectedKeys, []);
+});
+
+test('policy-required acknowledgement applies to a recommended high-risk decision', () => {
+  const group = {
+    proposals: [{
+      key: 'lama-row', claimAmount: 10000, recommendedApproved: 7500,
+      requiresAcknowledgement: true
+    }]
+  };
+  assert.equal(decisionForGroup(group, 'recommended').acknowledgementRequired, true);
 });
 
 test('fixed-deduction recommendations cannot combine package and component deductions', () => {

@@ -8,17 +8,27 @@ documented in [`docs/LOCAL_EMULATOR_TESTING.md`](docs/LOCAL_EMULATOR_TESTING.md)
 Non-production Firebase deployment and browser acceptance are documented in
 [`docs/STAGING_DEPLOYMENT_CHECKLIST.md`](docs/STAGING_DEPLOYMENT_CHECKLIST.md).
 
-An authenticated Chrome extension that locally previews RGHS approved-amount
+An authenticated Chrome extension that locally previews claim approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Paid-feature entitlement is represented separately from account approval by a
-per-user license record. Organisation-sponsored onboarding uses a single-use
+Product wording is scheme-neutral. Portal support remains limited to the
+validated integration included in the package. Additional portals require
+explicit site access, field mapping, claim-policy configuration and browser
+acceptance before Apply is enabled; removing a scheme name does not enable
+unvalidated sites. See [portal compatibility](docs/PORTAL_COMPATIBILITY.md).
+
+Individual paid entitlement is represented separately from account approval by a
+per-user license record. Organisation access follows its organisation licence;
+organisation-sponsored onboarding uses a single-use
 roster code and automatically activates the user's licence when an administrator
 approves the account. Individual users pay against an administrator-supplied
 UPI QR code and submit the resulting UPI transaction ID (UTR) for verification.
 
-Current release: **1.11.0**. Phase 4 adds production-isolated packaging and a
+Chrome Web Store release: **1.11.1** (August 6, 2026). The local release candidate
+is **1.12.0**; see [review and validation evidence](docs/RELEASE_1.12.0_REVIEW.md).
+Source, candidate packaging, backend deployment and Store publication are tracked
+separately. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
 organizations, account deletion and audit-event viewing. The Firebase-hosted
 dashboard is the primary production interface; the popup panel is retained as
@@ -42,8 +52,11 @@ directly in the default browser.
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
-- **Controlled Processor Signup**: A processor creates an account and verifies
-  the email once, chooses an access path, and waits for administrator approval
+- **Verified Self-Service Signup**: Default platform registration activates after
+  email verification when the platform licence and capacity allow it; suspended,
+  rejected and deleted profiles still require administrator action
+- **Investigation Review**: Verify report counts beside the PDF, review amount and
+  remark proposals, acknowledge reductions, and Apply with recovery and Undo
 - **Organisation Roster Access**: Platform administrators maintain single-use
   employee codes; sponsored licence activation is automatic on user approval
 - **Individual Paid Access**: Users submit only a UPI transaction ID (UTR)
@@ -65,7 +78,7 @@ directly in the default browser.
 ## Installation
 
 ### Method 1: Install from Chrome Web Store
-Version 1.11.0 is publicly published in India through the Chrome Web Store.
+Version 1.11.1 is the recorded public Chrome Web Store release in India.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
@@ -98,7 +111,7 @@ Version 1.11.0 is publicly published in India through the Chrome Web Store.
    - Use the exact invited and activated email account
 
 2. **Navigate to Your Claim Form**
-   - Open an authorized RGHS process sheet
+   - Open an authorized claim process sheet
 
 3. **Safe Manual Filling**
    - Opening or updating a process sheet never modifies approved amounts
@@ -182,7 +195,7 @@ Preview, selection, stale-data, or acknowledgement gates.
 
 ## Calculation Rule
 
-Medicine rows matching the configured RGHS descriptions receive a 12% deduction. The extension calculates 88% of the parsed claim and rounds to the nearest whole rupee using `Math.round`, because approved amounts are entered as whole rupees. Malformed, negative, empty, and zero claims are ignored.
+Medicine rows matching the configured claim-policy descriptions receive a 12% deduction. The extension calculates 88% of the parsed claim and rounds to the nearest whole rupee using `Math.round`, because approved amounts are entered as whole rupees. Malformed, negative, empty, and zero claims are ignored.
 
 ## Privacy & Security
 
@@ -264,17 +277,17 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 
 ### Safety and release controls
 
-- Real RGHS process sheets must match the supported header and input mapping before Preview or Apply is allowed.
+- Real claim process sheets must match the supported header and input mapping before Preview or Apply is allowed.
 - If Claim Extension is turned off after Preview, Apply returns an explicit `autofill-disabled` block and performs no portal writes.
 - On compatible non-table layouts, claim/approved name and ID matching emits ordinary low-risk review proposals with stable keys; it never bypasses Preview, selection, Apply, Undo, or recovery.
 - Table scanning assigns nested markup to one owning table and enumerates only direct rows and cells, preventing duplicate proposals or writes against the same nested DOM controls.
 - Approved money fields receive normalized numeric text from the validated amount (`1,23,450.00` becomes `123450`), avoiding grouped-digit ambiguity in portal validation and server parsing.
-- Activity, audit, feedback, and recovery appends are serialized by the background service worker with a queue per storage key, preventing concurrent RGHS tabs from overwriting one another's entries.
+- Activity, audit, feedback, and recovery appends are serialized by the background service worker with a queue per storage key, preventing concurrent claim tabs from overwriting one another's entries.
 - Saved recovery snapshots are removed only after every saved control is restored. Zero-field and partial restores retain the snapshot so an SPA can finish rendering before another recovery attempt.
 - TID detection retries after early SPA misses and caches only a successfully detected identifier, preserving TID-based audit and recovery matching when claim details render late.
 - Passive audit passes reuse entity regexes through an object-identity cache, suppress scan logs unless `CLAIM_EXTENSION_DEBUG` is enabled, and send badge updates only when the finding count changes.
 - Auto-deduct override edits are serialized through the service worker, merged against current profile-local storage, and reflected in every open options page. A one-time migration copies legacy synced overrides locally and then removes the legacy sync key; adjudication policy no longer propagates to other Chrome profiles.
-- Content scripts deliberately use `all_frames: false`: RGHS process sheets are currently supported only in the top-level portal document, avoiding unnecessary iframe access. A future iframe portal layout requires an explicit compatibility review before enabling frame injection.
+- Content scripts deliberately use `all_frames: false`: claim process sheets are currently supported only in the top-level portal document, avoiding unnecessary iframe access. A future iframe portal layout requires an explicit compatibility review before enabling frame injection.
 - Audit rules carry `schemaVersion`, `version`, and `effectiveDate`; invalid or duplicate rule definitions block claim processing.
 - Fixed unbundling findings reserve both the main package and every separately billed component from ordinary autofill; only the configured target can receive a deduction after explicit high-risk review.
 - `tools/matrix-coverage.json` maps every one of the 47 workbook Risk Matrix rows to executable rules. The build fails if a workbook row, title, or rule mapping drifts.
@@ -322,7 +335,7 @@ The same page provides decision-specific remark templates for approved,
 deducted, rejected, and held rows. Approved Amount controls remain numeric-only;
 templates are written only to portal Remarks. A blank deducted or hold template
 keeps the specialized built-in wording. Configuration is stored in
-`chrome.storage.local`, applies to open RGHS tabs, and can be exported/imported
+`chrome.storage.local`, applies to open claim tabs, and can be exported/imported
 as schema-versioned JSON without claim or patient data. Built-in generated rules
 remain immutable and the editor can reset all custom configuration safely.
 

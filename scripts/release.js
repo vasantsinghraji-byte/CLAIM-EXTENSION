@@ -54,6 +54,8 @@ function main(args = process.argv.slice(2)) {
   const version = nextVersion(manifest.version, releaseType);
 
   run(process.execPath, [npmCli, 'run', 'check']);
+  run(process.execPath, [npmCli, 'run', 'lint']);
+  run(process.execPath, [npmCli, 'run', 'test:functions']);
   run(process.execPath, [npmCli, 'run', 'test:browser']);
   run(process.execPath, [npmCli, 'run', 'test:lifecycle']);
   try {

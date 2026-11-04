@@ -17,6 +17,7 @@
       proposedRemarks: proposal.proposedRemarks === null ? null : String(proposal.proposedRemarks),
       risk: RISK_ORDER[proposal.risk] === undefined ? 'high' : proposal.risk,
       reason: String(proposal.reason || ''),
+      requiresAcknowledgement: proposal.requiresAcknowledgement === true,
       enforcement: String(proposal.enforcement || 'advisory'),
       mandatory: proposal.mandatory === true,
       targetRemarks: proposal.targetRemarks && typeof proposal.targetRemarks === 'object'
@@ -84,7 +85,7 @@
     return [...groups.values()];
   }
 
-  function decisionForGroup(group, mode) {
+  function decisionForGroup(group, mode, individuallySelectedKeys = []) {
     const proposals = group?.proposals || [];
     if (mode === 'hold') return { selectedKeys: [], approvedOverrides: {}, acknowledgementRequired: false };
     const approvedOverrides = {};
@@ -131,6 +132,11 @@
           invalidReason: 'recommended-deduction-exceeds-cap'
         };
       }
+    } else if (mode === 'approve-selected') {
+      const selectedKeySet = new Set(individuallySelectedKeys);
+      selected = proposals.filter(proposal => selectedKeySet.has(proposal.key));
+      if (!selected.length) return { selectedKeys: [], approvedOverrides: {}, acknowledgementRequired: false, invalidReason: 'no-individual-selection' };
+      for (const proposal of selected) approvedOverrides[proposal.key] = Number(proposal.claimAmount) || 0;
     } else if (mode === 'approve-all') {
       for (const proposal of proposals) approvedOverrides[proposal.key] = Number(proposal.claimAmount) || 0;
     } else if (mode === 'main-only') {
@@ -151,7 +157,7 @@
       selectedKeys: selected.map(proposal => proposal.key),
       approvedOverrides,
       remarkDispositions,
-      acknowledgementRequired: mode === 'approve-all'
+      acknowledgementRequired: mode === 'approve-all' || mode === 'approve-selected' || proposals.some(proposal => proposal.requiresAcknowledgement === true)
     };
   }
 

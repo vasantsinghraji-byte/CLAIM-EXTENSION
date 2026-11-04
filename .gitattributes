@@ -1,0 +1,22 @@
+* text=auto
+.gitattributes text eol=lf
+
+# Keep source and governance files stable across Windows and CI.
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+.githooks/* text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.py text eol=lf
+
+# Binary assets must never be line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.xlsx binary
+*.zip binary
