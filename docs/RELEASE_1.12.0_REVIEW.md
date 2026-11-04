@@ -2,7 +2,7 @@
 
 Date: 2026-11-04 (America/Los_Angeles).
 Base: PR #40 (`6260656`) plus repository workflow commit `ad62118`.
-Status: local release candidate; production deployment and Store publication are separate actions.
+Status: PR #41 open; staging deployed and checked; production deployment and Store submission await independent review.
 
 ## Review findings resolved
 
@@ -78,12 +78,28 @@ and release manifest together. The Functions package has its own version.
 The ZIP is built from local production configuration, never CI placeholders.
 
 Final production package SHA-256:
-`C24E99EB658718BFD2A711BF6E4DD78B513AE06C4B3BCB76EB108433E9A161A5`.
+`2D11D44F96DA95B9DC37AC1D4AEF9A9E8BCD31F77FEF6AE62ECE83593E950039`.
 The versioned copy is `artifacts/claim-autofill-extension-1.12.0.zip`.
 
 Before production rollout, review the self-service activation behavior and deploy
 compatible Firestore rules, Functions and Hosting in the documented order. Keep
 central bundled fallback enabled until rule parity is established. Upload only
 the versioned ZIP whose SHA-256 matches `release-manifest.json`; use deferred
-Store publication and review the new tabs/windows permissions. No remote branch
-merge, production deployment or Chrome Web Store submission is part of preparation.
+Store publication and review the new tabs permission. The release branch is pushed as PR #41. GitHub requires approval from someone
+other than the last pusher before merge. Production deployment and Store submission
+remain pending; the public Store package is still 1.11.1.
+
+## Rollout preparation follow-up
+
+- Removed the unnecessary `windows` manifest permission; the documented `tabs`
+  permission supports companion tab/window metadata. The Store draft requires its
+  explicit permission justification.
+- Staging `claimextension`: Firestore, all 45 Functions and Hosting deployed
+  successfully. Six public routes, security headers, project isolation and four
+  unauthenticated callable boundaries passed. Administrator sign-in was not
+  exercised against staging.
+- Production preflight: billing enabled, 37 existing Functions, minimum supported
+  version 1.9.1, maintenance off, no active central rule-state document, and a daily
+  backup schedule retaining 14 days. Preserve existing rollout configuration.
+- Store draft upload 1.12.0 accepted; published package remains 1.11.1. Submission
+  and deferred-publication confirmation remain pending production deployment.

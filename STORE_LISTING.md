@@ -132,7 +132,7 @@ external server.
 Used to schedule a bounded licence recheck. The alarm never reads or changes
 RGHS portal fields and never initiates Preview, Apply, Undo, or submission.
 
-### Permission justification: tabs and windows
+### Permission justification: tabs
 
 Used to locate the matching open RGHS process sheet, connect it to the separate
 investigation checklist window, and open same-origin claim documents when the
