@@ -1,6 +1,8 @@
 # Chrome Web Store listing pack
 
-Prepared from the controlled Manifest V3 release candidate for version 1.11.0.
+Listing draft for the controlled Manifest V3 release candidate **1.12.0**.
+The recorded public Store version remains **1.11.1** until this update is approved
+and explicitly published. This file does not change the live Store listing.
 The package targets the isolated production Firebase project; Web Store upload
 remains blocked until the Phase 4 human-controlled activation gates pass.
 
@@ -43,11 +45,15 @@ Key features:
 - Flag bundled services, repeated packages, and configured review risks.
 - Undo the latest applied changes or restore a locally saved recovery snapshot.
 - Export local audit and activity records for the reviewer.
-- Configure review-only custom findings and remark templates.
-- Require a final acknowledgement after extension-applied changes before the
-  portal claim can be submitted.
-- Require invite-only, verified and administrator-activated accounts with an
-  active organization licence.
+- Use centrally administered processing rules with validation, version history
+  and rollback; processor-side rule configuration is read-only.
+- Verify investigation report counts beside the PDF, preview amount and remark
+  changes, acknowledge reductions and Apply with recovery and Undo.
+- Show claim history, e-card summaries and document-review helpers on supported
+  RGHS pages. Claim submission remains the reviewer's native portal action.
+- Require verified, licensed accounts. Default platform registration activates
+  only when the platform organisation/licence is active and user capacity remains;
+  sponsored and individual-payment paths retain their applicable approvals.
 
 Privacy and security:
 
@@ -116,8 +122,8 @@ tabs or browsing history.
 ### Permission justification: storage
 
 Used to store extension settings and profile-local operational data, including
-the enabled state, audit mode, rule settings, remark templates, custom
-review-only rules, widget position, audit feedback, audit/activity records, and
+the enabled state, audit mode, centrally published rule data, widget position,
+investigation review state, audit feedback, audit/activity records, and
 short-lived recovery snapshots. Claim data is not sent to the developer or an
 external server.
 
@@ -125,6 +131,13 @@ external server.
 
 Used to schedule a bounded licence recheck. The alarm never reads or changes
 RGHS portal fields and never initiates Preview, Apply, Undo, or submission.
+
+### Permission justification: tabs and windows
+
+Used to locate the matching open RGHS process sheet, connect it to the separate
+investigation checklist window, and open same-origin claim documents when the
+reviewer requests them. Unrelated tab contents and browsing history are not read
+or uploaded. The checklist window remains bound to its own claim identifier.
 
 ### Host access justification: Firebase authentication and Functions
 
@@ -253,7 +266,7 @@ patient or claim data.
 - [ ] Upload `store-assets/small-promo-tile.png` as the 440x280 small promo
       tile.
 - [x] Public homepage, support, and privacy-policy URLs are deployed.
-- [ ] Verify that listing claims match version 1.9.1 behavior.
+- [ ] Verify that listing claims match version 1.12.0 behavior.
 
 ### Privacy practices
 
@@ -268,11 +281,11 @@ patient or claim data.
 
 ### Distribution and submission
 
-- [x] Select **Public**, **India**, and **Free** for version 1.11.0.
+- [ ] Confirm **Public**, **India**, and **Free** for version 1.12.0.
 - [ ] Keep automatic publishing off for the first review.
 - [ ] Confirm the publisher contact email is verified and monitored.
 - [ ] Confirm all dashboard tabs show no blocking errors.
-- [x] Submit for review and publish version 1.11.0 publicly in India.
+- [ ] Submit version 1.12.0 for review with publication deferred.
 - [ ] After approval, perform one clean-profile installation and an RGHS
       process-sheet smoke test with synthetic or authorized test data.
 - [ ] Verify Preview is read-only, Apply requires explicit review, Undo/recovery

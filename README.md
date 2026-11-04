@@ -12,13 +12,17 @@ An authenticated Chrome extension that locally previews RGHS approved-amount
 proposals and applies only the rows explicitly selected by an authorized
 reviewer.
 
-Paid-feature entitlement is represented separately from account approval by a
-per-user license record. Organisation-sponsored onboarding uses a single-use
+Individual paid entitlement is represented separately from account approval by a
+per-user license record. Organisation access follows its organisation licence;
+organisation-sponsored onboarding uses a single-use
 roster code and automatically activates the user's licence when an administrator
 approves the account. Individual users pay against an administrator-supplied
 UPI QR code and submit the resulting UPI transaction ID (UTR) for verification.
 
-Current release: **1.11.0**. Phase 4 adds production-isolated packaging and a
+Chrome Web Store release: **1.11.1** (August 6, 2026). The local release candidate
+is **1.12.0**; see [review and validation evidence](docs/RELEASE_1.12.0_REVIEW.md).
+Source, candidate packaging, backend deployment and Store publication are tracked
+separately. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
 organizations, account deletion and audit-event viewing. The Firebase-hosted
 dashboard is the primary production interface; the popup panel is retained as
@@ -42,8 +46,11 @@ directly in the default browser.
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
-- **Controlled Processor Signup**: A processor creates an account and verifies
-  the email once, chooses an access path, and waits for administrator approval
+- **Verified Self-Service Signup**: Default platform registration activates after
+  email verification when the platform licence and capacity allow it; suspended,
+  rejected and deleted profiles still require administrator action
+- **Investigation Review**: Verify report counts beside the PDF, review amount and
+  remark proposals, acknowledge reductions, and Apply with recovery and Undo
 - **Organisation Roster Access**: Platform administrators maintain single-use
   employee codes; sponsored licence activation is automatic on user approval
 - **Individual Paid Access**: Users submit only a UPI transaction ID (UTR)
@@ -65,7 +72,7 @@ directly in the default browser.
 ## Installation
 
 ### Method 1: Install from Chrome Web Store
-Version 1.11.0 is publicly published in India through the Chrome Web Store.
+Version 1.11.1 is the recorded public Chrome Web Store release in India.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
