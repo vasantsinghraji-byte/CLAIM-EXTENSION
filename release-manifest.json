@@ -1,8 +1,8 @@
 {
-  "version": "1.11.1",
-  "builtAt": "2026-08-06T12:05:04.4360811Z",
+  "version": "1.12.0",
+  "builtAt": "2026-11-04T11:40:37.615Z",
   "artifact": "claim-autofill-extension.zip",
-  "sha256": "3385B4F3EB39C187FE1853EBA08ABB9A771C93F906768A068C9F1AD298473F0C",
+  "sha256": "C24E99EB658718BFD2A711BF6E4DD78B513AE06C4B3BCB76EB108433E9A161A5",
   "ruleSchemaVersion": 1,
   "ruleSetVersion": "2026-07-24"
 }

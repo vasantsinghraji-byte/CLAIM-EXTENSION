@@ -181,3 +181,7 @@
 ## 1.11.1 - 2026-08-06
 
 - Add invitation-free verified processor registration with mandatory dashboard approval, pending counts, approve/reject controls, lifecycle audit events, and direct dashboard launchers.
+
+## 1.12.0 - 2026-11-04
+
+- Add governed processing, investigation review, verified platform access, and reviewed safety safeguards.

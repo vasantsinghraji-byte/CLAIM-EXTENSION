@@ -61,6 +61,10 @@ patient data, field snapshots or documents are recorded in this report.
   recovery saved; Undo exactly restored every captured control.
 - Claim submission: never performed.
 
+The authenticated Apply/Undo sequence was repeated successfully after loading
+the final **1.12.0** build. Both the six-field general write and two-field
+investigation write were restored exactly; acknowledgement blocking also passed.
+
 This is one live process-sheet integration check. It does not establish coverage
 of every portal layout or every IPD clinical/policy combination. Overlapping IPD
 adjustments deliberately require manual review rather than an inferred precedence.
@@ -72,6 +76,10 @@ Functions were not modified for that test.
 Version 1.12.0 advances the extension manifest, root package/lockfile, changelog
 and release manifest together. The Functions package has its own version.
 The ZIP is built from local production configuration, never CI placeholders.
+
+Final production package SHA-256:
+`C24E99EB658718BFD2A711BF6E4DD78B513AE06C4B3BCB76EB108433E9A161A5`.
+The versioned copy is `artifacts/claim-autofill-extension-1.12.0.zip`.
 
 Before production rollout, review the self-service activation behavior and deploy
 compatible Firestore rules, Functions and Hosting in the documented order. Keep
