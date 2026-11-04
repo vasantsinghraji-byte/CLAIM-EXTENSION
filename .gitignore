@@ -37,6 +37,7 @@ chrome-profile-*/
 
 # Build artifact (reproducible via npm run build)
 claim-autofill-extension.zip
+artifacts/
 
 # Separately versioned and deployed privacy/support website checkout
 /privacy-site/

@@ -213,10 +213,16 @@ function createRemoteBuildEntries(config, manifestFactory) {
     } else if (relativePath === 'runtime-config.js') {
       data = Buffer.from(runtimeConfigSource(config));
     } else {
-      data = fs.readFileSync(source);
+      data = normalizePackagedFile(relativePath, fs.readFileSync(source));
     }
     return { name: relativePath, data };
   });
+}
+
+function normalizePackagedFile(name, data) {
+  return /\.(?:js|json|html|css)$/i.test(name)
+    ? Buffer.from(data.toString('utf8').replace(/\r\n/g, '\n'))
+    : data;
 }
 
 function createBuildEntries(productionConfig = readBuildConfig().production) {
@@ -317,6 +323,7 @@ module.exports = {
   createProductionManifest,
   createStoredZip,
   emulatorConfig,
+  normalizePackagedFile,
   readBuildConfig,
   runtimeConfigSource,
   validateEnvironmentConfig
