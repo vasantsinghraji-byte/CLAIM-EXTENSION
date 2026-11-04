@@ -977,6 +977,7 @@ function blockedMessage(reason) {
     'processing-rule-blocked': 'A centrally governed package rule blocks this claim.',
     'processing-validation-required': 'A centrally required validation must be completed before processing.',
     'processing-rule-target-missing': 'A configured rule target column is unavailable on this sheet.',
+    'overlapping-ipd-rules': 'Different IPD adjustments propose conflicting amounts. Ask your administrator to review the applicable policy.',
     'mandatory-action-required': 'All centrally mandatory actions must be applied together.',
     'mandatory-action-override': 'Centrally mandatory deductions and remarks cannot be overridden.',
     'signed-out': 'Sign in to Claim Spark to apply changes.',

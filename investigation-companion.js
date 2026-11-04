@@ -8,8 +8,12 @@ const copyButton = document.getElementById('copy');
 const discardButton = document.getElementById('discard');
 const status = document.getElementById('status');
 const reconnectButton = document.getElementById('reconnect');
+const previewDetails = document.getElementById('preview-details');
+const acknowledgement = document.getElementById('acknowledgement');
+const acknowledge = document.getElementById('acknowledge');
 let companionTid = '';
 let previewToken = '';
+let acknowledgementRequired = false;
 let processPort = null;
 let requestSequence = 0;
 const pendingRequests = new Map();
@@ -70,7 +74,13 @@ function requestProcessSheet(action, payload = {}) {
 
 async function connectProcessSheet() {
   const tabs = await queryTabs();
-  const sheet = tabs.find(tab => tab.url?.includes(`/RGHS/processSheetSearch/${companionTid}/`));
+  const sheet = tabs.find(tab => {
+    try {
+      const url = new URL(tab.url);
+      return url.origin === 'https://rghs.rajasthan.gov.in'
+        && url.pathname.startsWith(`/RGHS/processSheetSearch/${encodeURIComponent(companionTid)}/`);
+    } catch { return false; }
+  });
   if (!sheet?.id) throw new Error('Matching process sheet is unavailable. Open the matching process sheet first.');
   processPort = chrome.tabs.connect(sheet.id, { name: 'investigation-checklist' });
   processPort.onDisconnect.addListener(() => {
@@ -120,6 +130,8 @@ async function renderItems(items) {
     input.addEventListener('input', () => {
       previewToken = '';
       applyButton.disabled = true;
+      previewDetails.replaceChildren();
+      acknowledge.checked = false;
       saveCounts();
     });
     row.append(label, input);
@@ -135,7 +147,8 @@ function showConnectionError(error) {
 }
 
 chrome.storage.session.get('investigationCompanion', ({ investigationCompanion }) => {
-  companionTid = String(investigationCompanion?.tid || '');
+  // A window keeps its own claim binding when another companion is opened.
+  companionTid = new URLSearchParams(location.search).get('tid') || String(investigationCompanion?.tid || '');
   if (!companionTid) return showConnectionError('Claim identifier is unavailable. Reopen the Investigation Report from the IPD main page.');
   connectProcessSheet().then(result => renderItems(result.items || [])).catch(showConnectionError);
 });
@@ -144,12 +157,23 @@ previewButton.addEventListener('click', async () => {
   const verifiedCounts = [...container.querySelectorAll('input')]
     .map(input => ({ index: Number(input.dataset.index), found: input.value }));
   previewButton.disabled = true;
+  previewToken = '';
+  applyButton.disabled = true;
+  acknowledge.checked = false;
+  previewDetails.replaceChildren();
   status.textContent = 'Preparing process-sheet changes…';
   try {
     const result = await requestProcessSheet('preview', { verifiedCounts });
     if (!result.proposals?.length) throw new Error('Enter valid report counts before previewing.');
     previewToken = result.token;
-    applyButton.disabled = false;
+    acknowledgementRequired = result.proposals.some(proposal => proposal.risk === 'high');
+    acknowledgement.hidden = !acknowledgementRequired;
+    applyButton.disabled = acknowledgementRequired;
+    for (const proposal of result.proposals) {
+      const summary = document.createElement('p');
+      summary.textContent = `${proposal.reason}. Approved amount: ${proposal.beforeApproved} → ${proposal.proposedApproved}. Remark: ${proposal.proposedRemarks}`;
+      previewDetails.appendChild(summary);
+    }
     status.textContent = `${result.proposals.length} investigation row(s) prepared. Click Apply to update the process sheet.`;
   } catch (error) {
     showConnectionError(error);
@@ -158,19 +182,24 @@ previewButton.addEventListener('click', async () => {
   }
 });
 
+acknowledge.addEventListener('change', () => {
+  applyButton.disabled = !previewToken || acknowledgementRequired && !acknowledge.checked;
+});
+
 applyButton.addEventListener('click', async () => {
   if (!previewToken) return;
   applyButton.disabled = true;
   status.textContent = 'Applying verified quantities to the process sheet…';
   try {
-    const result = await requestProcessSheet('apply', { token: previewToken });
-    if (result.blocked) throw new Error('The verification became stale. Preview again.');
+    const result = await requestProcessSheet('apply', { token: previewToken, acknowledgedHighRisk: acknowledge.checked });
+    if (result.blocked) throw new Error(`Apply blocked (${result.blockReason}). Review the process sheet and preview again.`);
     previewToken = '';
     await clearSavedCounts();
     status.textContent = `Applied ${result.changedFieldCount || 0} process-sheet field change(s).`;
   } catch (error) {
     showConnectionError(error);
-    applyButton.disabled = false;
+    previewToken = '';
+    applyButton.disabled = true;
   }
 });
 

@@ -187,7 +187,7 @@ test('each high-risk decision row can be individually selected and jumped to', (
 test('companion-verified investigations are removed from the active general preview', () => {
   const content = read('content.js');
   assert.match(content, /claim-autofill:investigations-verified/);
-  assert.match(content, /rowIndexes: preview\.entries\.map\(entry => entry\.row\.index\)/);
+  assert.match(content, /rowIndexes: current\.entries\.map\(entry => entry\.row\.index\)/);
   assert.match(source, /function removeVerifiedInvestigationsFromPreview\(detail\)/);
   assert.match(source, /claim-autofill:investigations-verified', event => \{/);
   assert.match(source, /investigationChecklist\.dataset\.verified = 'true'/);

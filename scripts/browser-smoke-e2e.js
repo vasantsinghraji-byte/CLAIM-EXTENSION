@@ -84,28 +84,122 @@ function fixtureHtml() {
 </body></html>`;
 }
 
+function investigationFixtureHtml() {
+  const dependencies = ['audit-rules.js', 'custom-rules.js', 'processing-rules.js', 'audit-core.js', 'claim-core.js', 'review-core.js'];
+  return `<!doctype html><html><body>
+    <input id="transid" value="SYNTHETIC-TEST">
+    <table id="processSheetTable"><tr><th>Particular</th><th>Package Code(Package Name)</th><th>Rate</th><th>Unit/Hours/Days</th><th>Claim Amount(Rs.)</th><th>Approved Amount(Rs.)</th><th>Deductions</th><th>Remarks</th><th hidden></th></tr>
+      <tr><td hidden>1</td><td id="packageName_0">Investigation</td><td id="packageCode_0">INV-TEST</td><td id="packageRate_0">100</td><td id="packageDays_0">4</td><td id="packageAmount_0">400</td><td><input id="packageFinalAmount_0" name="packageFinalAmounts" type="number" value="400"></td><td>0</td><td><textarea id="packageremarks_0">Existing remark</textarea></td><td hidden>1</td></tr>
+    </table><pre id="out">RUNNING</pre>
+    <script>
+      window.recoveryAllowed = true;
+      const chrome = window.chrome = {
+        storage: { sync: { get() {} }, local: { get(keys, callback) { callback({}); } }, onChanged: { addListener() {} } },
+        runtime: {
+          getManifest: () => ({ version: '1.12.0' }),
+          onMessage: { addListener() {} }, onConnect: { addListener() {} },
+          sendMessage(request, callback) {
+            if (request.action === 'ensureRuleOverridesMigration') return;
+            if (request.action === 'refreshProcessingRules') return callback({ success: false });
+            callback?.({ success: window.recoveryAllowed });
+          }
+        }
+      };
+    </script>
+    ${dependencies.map(file => `<script>${inlineScript(file)}</script>`).join('')}
+    <script>${inlineScript('content.js')}</script>
+    <script>
+      (async () => {
+        const assert = (condition, message) => { if (!condition) throw new Error(message); };
+        const approved = document.getElementById('packageFinalAmount_0');
+        const remarks = document.getElementById('packageremarks_0');
+        const actions = ClaimAutoFillActions;
+        licenceState = { status: 'active', previewAllowed: true, applyAllowed: true };
+        const counts = [{ index: 0, found: '3' }];
+        let preview = actions.previewInvestigationVerification(counts);
+        assert(preview.proposals.length === 1, 'Actual DOM did not map the investigation');
+        assert((await actions.applyInvestigationVerification(preview.token)).blockReason === 'high-risk-unacknowledged', 'Missing acknowledgement was accepted');
+        approved.value = '350';
+        assert((await actions.applyInvestigationVerification(preview.token, { acknowledgedHighRisk: true })).blocked, 'Changed approval was accepted');
+        approved.value = '400';
+        preview = actions.previewInvestigationVerification(counts);
+        const applied = await actions.applyInvestigationVerification(preview.token, { acknowledgedHighRisk: true });
+        assert(!applied.blocked && applied.recoverySaved && approved.value === '300', 'Investigation Apply failed');
+        assert(remarks.value.includes('3 of 4'), 'Verification remark was not applied');
+        assert(actions.undo().count === 2 && approved.value === '400' && remarks.value === 'Existing remark', 'Undo did not restore both real controls');
+        assert(!approved.dataset.claimExtensionInvestigationVerified, 'Undo left the verified marker');
+        window.recoveryAllowed = false;
+        preview = actions.previewInvestigationVerification(counts);
+        const failed = await actions.applyInvestigationVerification(preview.token, { acknowledgedHighRisk: true });
+        assert(failed.blockReason === 'recovery-save-failed' && approved.value === '400' && remarks.value === 'Existing remark', 'Storage failure did not roll back real controls');
+        window.recoveryAllowed = true;
+        document.getElementById('packageName_0').textContent = 'Surgical procedure';
+        document.getElementById('packageCode_0').textContent = 'SURG-TEST';
+        approved.value = '0';
+        ipdClaimDetailContext = { tid: 'SYNTHETIC-TEST', dischargeStatus: 'LAMA', finalPackageCodes: [] };
+        processingRuleSet = { mode: 'remote-required', versionId: 'synthetic-policy', rules: [], bundledFallbackEnabled: false };
+        const governed = actions.preview();
+        assert(!governed.blocked && governed.proposals.some(item => item.proposedApproved === 400), 'Central fallback disable was not respected');
+        assert(!governed.proposals.some(item => item.ruleIds?.includes('RGHS-IPD-LAMA-DAMA-75')), 'Bundled LAMA adjustment bypassed central policy');
+        processingRuleSet = { mode: 'bundled', rules: [] };
+        const reviewed = actions.preview();
+        const surgical = reviewed.proposals.find(item => item.ruleIds?.includes('RGHS-IPD-LAMA-DAMA-75'));
+        assert(surgical && surgical.proposedApproved === 300, 'Surgical review proposal is unavailable');
+        const override = await actions.apply({
+          token: reviewed.token, selectedRowKeys: [surgical.key], acknowledgedHighRisk: true,
+          approvedOverrides: { [surgical.key]: 400 },
+          remarkOverrides: { [surgical.key]: 'Processor approved full amount after review.' }
+        });
+        assert(!override.blocked && approved.value === '400' && remarks.value === 'Processor approved full amount after review.', 'Reviewed amount/remark overrides were ignored');
+        actions.undo();
+        assert(approved.value === '0' && remarks.value === 'Existing remark', 'Surgical override Undo was incomplete');
+        const secondRow = document.getElementById('packageName_0').closest('tr').cloneNode(true);
+        for (const element of secondRow.querySelectorAll('[id]')) element.id = element.id.replace(/_0$/, '_1');
+        secondRow.querySelector('#packageCode_1').textContent = 'SURG-SECOND';
+        secondRow.querySelector('#packageAmount_1').textContent = '200';
+        document.getElementById('processSheetTable').appendChild(secondRow);
+        processingRuleSet = { mode: 'bundled', rules: [] };
+        ipdClaimDetailContext.finalPackageCodes = ['SURG-TEST', 'SURG-SECOND'];
+        const conflicting = actions.preview();
+        assert(conflicting.blockReason === 'overlapping-ipd-rules', 'Conflicting IPD adjustments: ' + JSON.stringify({ blocked: conflicting.blockReason, rules: conflicting.proposals.map(item => item.ruleIds), values: conflicting.proposals.map(item => item.proposedApproved) }));
+        assert(approved.value === '0', 'Conflicting IPD preview changed a control');
+        const out = document.getElementById('out');
+        out.dataset.passed = 'true';
+        out.textContent = 'PASS: actual content-script investigation Apply, acknowledgement, stale values, Undo, recovery rollback, reviewed overrides, central fallback disable and IPD conflict blocking';
+      })().catch(error => {
+        const out = document.getElementById('out');
+        out.dataset.passed = 'false';
+        out.textContent = String(error.stack || error);
+      });
+    </script></body></html>`;
+}
+
 function main() {
   const chrome = findChrome();
   if (!chrome) throw new Error('Chrome/Chromium was not found. Set CHROME_PATH to run the browser smoke test.');
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'claim-browser-smoke-'));
   try {
-    const fixture = path.join(temporary, 'fixture.html');
-    fs.writeFileSync(fixture, fixtureHtml());
-    const result = spawnSync(chrome, [
-      '--headless=new',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      `--user-data-dir=${path.join(temporary, 'profile')}`,
-      '--dump-dom',
-      pathToFileURL(fixture).href
-    ], { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`Browser exited ${result.status}: ${result.stderr}`);
-    if (!/id="out" data-passed="true"/.test(result.stdout)) {
-      throw new Error(`Browser smoke failed: ${result.stdout || result.stderr}`);
+    for (const [name, html] of [['standard', fixtureHtml()], ['investigation', investigationFixtureHtml()]]) {
+      const fixture = path.join(temporary, `${name}.html`);
+      fs.writeFileSync(fixture, html);
+      const result = spawnSync(chrome, [
+        '--headless=new',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--virtual-time-budget=10000',
+        `--user-data-dir=${path.join(temporary, 'profile')}`,
+        '--dump-dom',
+        pathToFileURL(fixture).href
+      ], { encoding: 'utf8', timeout: 60000, maxBuffer: 4 * 1024 * 1024 });
+      if (result.error) throw result.error;
+      if (result.status !== 0) throw new Error(`Browser exited ${result.status}: ${result.stderr}`);
+      if (!/id="out" data-passed="true"/.test(result.stdout)) {
+        const diagnostic = result.stdout.match(/<pre id="out"[^>]*>([\s\S]*?)<\/pre>/)?.[1] || result.stderr || 'Missing browser result';
+        throw new Error(`${name} browser smoke failed: ${diagnostic.slice(0, 2000)}`);
+      }
+      console.log(`PASS: ${name} real-browser content and exact undo/recovery restoration.`);
     }
-    console.log('PASS: real-browser preview, async apply, and exact undo restoration.');
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }
@@ -113,4 +207,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { findChrome, fixtureHtml };
+module.exports = { findChrome, fixtureHtml, investigationFixtureHtml };
