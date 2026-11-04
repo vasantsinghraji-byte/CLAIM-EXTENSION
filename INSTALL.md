@@ -23,7 +23,7 @@ extracted folder after installation.
 
 ## Safe usage
 
-Opening an RGHS page never changes portal fields. On a supported process sheet:
+Opening a supported claim page never changes portal fields. On a supported process sheet:
 
 1. Select **Preview Fill**.
 2. Review every proposal and audit finding.
@@ -38,7 +38,7 @@ The extension never submits the claim.
 1. Replace the extracted release folder with the newly supplied release.
 2. Open `chrome://extensions`.
 3. Select **Reload** for Claim Amount Auto-Fill.
-4. Refresh any open RGHS page.
+4. Refresh any open claim page.
 
 For development builds, run `npm run build` and load the generated `dist`
 folder. See `DEVELOPMENT.md`.

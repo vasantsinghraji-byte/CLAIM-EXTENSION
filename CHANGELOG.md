@@ -185,3 +185,4 @@
 ## 1.12.0 - 2026-11-04
 
 - Add governed processing, investigation review, verified platform access, and reviewed safety safeguards.
+- Use generic claim wording across the interface, proposed remarks, website and Store materials; retain existing integration and saved-data compatibility.

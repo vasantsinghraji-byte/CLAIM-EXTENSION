@@ -3,8 +3,9 @@
 Listing draft for the controlled Manifest V3 release candidate **1.12.0**.
 The recorded public Store version remains **1.11.1** until this update is approved
 and explicitly published. This file does not change the live Store listing.
-The package targets the isolated production Firebase project; Web Store upload
-remains blocked until the Phase 4 human-controlled activation gates pass.
+The package targets the isolated production Firebase project. The package can
+be saved as a Store draft; submission awaits the required source review and
+compatible production deployment, with automatic publication disabled.
 
 Production policy and support URLs after Hosting deployment:
 
@@ -21,18 +22,18 @@ Claim Amount Auto-Fill
 
 ### Summary
 
-Preview, review, and apply approved RGHS claim amounts with local checks for unbundling and duplicate billing.
+Preview, review, and fill approved claim amounts with checks for unbundling and duplicate billing.
 
-The summary is 110 characters and is suitable for the manifest `description`
-field as well as the store summary.
+The summary is 98 characters and matches the manifest description.
 
 ### Detailed description
 
-Claim Amount Auto-Fill helps authorized RGHS claim reviewers prepare approved
+Claim Amount Auto-Fill helps authorized claim reviewers prepare approved
 amounts while keeping every change under the reviewer's control.
 
-The extension works only on the official Rajasthan Government Health Scheme
-(RGHS) portal. It reads the current process sheet in the browser, proposes
+The extension works on supported claim portals. Site access is limited to the
+portal integration included in this package; other portals require a validated
+integration. It reads the current process sheet in the browser, proposes
 approved amounts, and checks configured package combinations for possible
 unbundling, duplicate billing, and documentation-dependent review risks.
 
@@ -50,7 +51,7 @@ Key features:
 - Verify investigation report counts beside the PDF, preview amount and remark
   changes, acknowledge reductions and Apply with recovery and Undo.
 - Show claim history, e-card summaries and document-review helpers on supported
-  RGHS pages. Claim submission remains the reviewer's native portal action.
+  claim pages. Claim submission remains the reviewer's native portal action.
 - Require verified, licensed accounts. Default platform registration activates
   only when the platform organisation/licence is active and user capacity remains;
   sponsored and individual-payment paths retain their applicable approvals.
@@ -61,7 +62,7 @@ Privacy and security:
 - Firebase receives account, organization, licence, rate-limit, extension
   version, and privacy-safe access metadata. Claim, patient, clinical, amount,
   URL, document, and free-text remark content is not sent to Firebase.
-- Local audit records can contain claim identifiers, RGHS page URLs, package
+- Local audit records can contain claim identifiers, claim-page URLs, package
   and amount details, rule results, and reviewer actions.
 - Recovery snapshots can temporarily contain the prior and replacement values
   of fields changed by the extension.
@@ -108,8 +109,8 @@ YouTube walkthrough is available.
 
 ### Single purpose
 
-Help authorized RGHS claim reviewers locally preview, audit, and apply approved
-amounts and remarks on RGHS process sheets, with explicit review, recovery, and
+Help authorized claim reviewers locally preview, audit, and apply approved
+amounts and remarks on claim process sheets, with explicit review, recovery, and
 submission-safety controls.
 
 ### Permission justification: activeTab
@@ -130,11 +131,11 @@ external server.
 ### Permission justification: alarms
 
 Used to schedule a bounded licence recheck. The alarm never reads or changes
-RGHS portal fields and never initiates Preview, Apply, Undo, or submission.
+claim portal fields and never initiates Preview, Apply, Undo, or submission.
 
 ### Permission justification: tabs
 
-Used to locate the matching open RGHS process sheet, connect it to the separate
+Used to locate the matching open claim process sheet, connect it to the separate
 investigation checklist window, and open same-origin claim documents when the
 reviewer requests them. Unrelated tab contents and browsing history are not read
 or uploaded. The checklist window remains bound to its own claim identifier.
@@ -149,7 +150,7 @@ patient content is not included in these requests.
 
 ### Host access justification: https://rghs.rajasthan.gov.in/*
 
-Required to run the extension only on the official RGHS portal. The content
+Required to run the extension on the supported claim portal declared in the package. The content
 script reads the visible process-sheet fields needed to propose approved
 amounts and audit package combinations, writes only changes explicitly applied
 by the reviewer, and adds the on-page Claim Spark review interface. No other
@@ -189,9 +190,9 @@ Do not select:
 
 Explanation for the selected types:
 
-The extension locally reads RGHS process-sheet website content, which may
+The extension locally reads claim process-sheet website content, which may
 contain claim identifiers, medical/package information, and monetary claim and
-approved amounts. It records the current RGHS URL, rule results, and reviewer
+approved amounts. It records the current claim portal URL, rule results, and reviewer
 actions locally to support audit history, feedback, recovery, and safety
 controls. It does not send claim content to the developer or third parties.
 For individual paid access, the Firebase service stores the UPI transaction ID
@@ -286,7 +287,7 @@ patient or claim data.
 - [ ] Confirm the publisher contact email is verified and monitored.
 - [ ] Confirm all dashboard tabs show no blocking errors.
 - [ ] Submit version 1.12.0 for review with publication deferred.
-- [ ] After approval, perform one clean-profile installation and an RGHS
+- [ ] After approval, perform one clean-profile installation and a supported claim
       process-sheet smoke test with synthetic or authorized test data.
 - [ ] Verify Preview is read-only, Apply requires explicit review, Undo/recovery
       works, and the extension never submits the portal form.

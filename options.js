@@ -31,7 +31,7 @@ function render(statsByRule, processingRuleSet) {
     ? ` Central version ${processingRuleSet.versionId} is ${processingRuleSet.mode}.`
     : ' No central version has been cached in this profile.';
   rulesMeta.textContent =
-    `Bundled safety rules ${Rules.version} from ${Rules.source}.${centralVersion} ` +
+    `Bundled safety rules ${Rules.version} from the healthcare coding audit matrix.${centralVersion} ` +
     'All processing behavior is read-only for processors.';
 
   for (const rule of listBuiltInRules()) {

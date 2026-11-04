@@ -78,7 +78,7 @@ and release manifest together. The Functions package has its own version.
 The ZIP is built from local production configuration, never CI placeholders.
 
 Final production package SHA-256:
-`2D11D44F96DA95B9DC37AC1D4AEF9A9E8BCD31F77FEF6AE62ECE83593E950039`.
+`F3CA999F8EC2D1EE8C94E4D4514CC2378BD87A85A72AF24621A51BCB58B82EB0`.
 The versioned copy is `artifacts/claim-autofill-extension-1.12.0.zip`.
 
 Before production rollout, review the self-service activation behavior and deploy
@@ -90,6 +90,14 @@ other than the last pusher before merge. Production deployment and Store submiss
 remain pending; the public Store package is still 1.11.1.
 
 ## Rollout preparation follow-up
+
+- Generic claim branding replaces scheme-specific wording in interface messages,
+  proposed medicine/IPD remarks, audit export filenames, Hosting pages, Store
+  description and synthetic screenshots. Portal URLs, policy calculations, rule
+  identifiers and historical saved-data keys retain compatibility. Additional
+  portals require separate field mapping and policy validation; no new site
+  access is claimed by this wording change. This copy revision follows the live
+  validation recorded above and is checked with the existing browser fixtures.
 
 - Removed the unnecessary `windows` manifest permission; the documented `tabs`
   permission supports companion tab/window metadata. The Store draft requires its

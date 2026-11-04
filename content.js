@@ -1577,7 +1577,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             auditLogEntries.push(Audit.buildAuditEntry(action, { ...context, amountBefore: record.approvedValue }));
           }
         }
-        debugLog(`[RGHS-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
+        debugLog(`[Claim-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
       }
     }
 
@@ -1693,7 +1693,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             ? proposedApproved : undefined,
           decisionRole: plan.decisionRole || undefined,
           reason: plan.reason === 'medicine'
-            ? `${Core.DEDUCTION_PERCENT}% RGHS medicine deduction; rounded to nearest whole rupee`
+            ? `${Core.DEDUCTION_PERCENT}% medicine deduction under the configured claim policy; rounded to nearest whole rupee`
             : plan.reason === 'lama-dama-surgical'
               ? `${Core.LAMA_DAMA_SURGICAL_PERCENT}% of the surgical package for LAMA/DAMA discharge`
               : plan.reason === 'incomplete-daily-ipd'

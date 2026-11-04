@@ -144,7 +144,7 @@ test('Apply reports a missing preview or selection instead of failing silently',
 
 test('Preview returns the widget to its refreshed result summary', () => {
   assert.match(source, /renderPreview\(await \(actions\.previewFresh \? actions\.previewFresh\(\) : actions\.preview\(\)\)\);\s*setSectionCollapsed\(ipdContext, 'ipd-context', true\);\s*setSectionCollapsed\(cardHistory, 'card-history', true\);/);
-  assert.match(source, /Unable to prepare this sheet for preview\. Refresh the RGHS page and try again\./);
+  assert.match(source, /Unable to prepare this sheet for preview\. Refresh the claim page and try again\./);
 });
 
 test('widget supports layout reset, collapsible context, and task focus', () => {

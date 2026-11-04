@@ -4,9 +4,9 @@
 2. Open `chrome://extensions`.
 3. Find **Claim Amount Auto-Fill**.
 4. Select **Reload**.
-5. Refresh every open RGHS tab.
+5. Refresh every open claim portal tab.
 
-If Chrome reports **Extension context invalidated**, the RGHS tab still holds
+If Chrome reports **Extension context invalidated**, the claim portal tab still holds
 the old content-script context. Refreshing that tab is required.
 
 For a distributed ZIP, extract the new package over a dedicated release folder

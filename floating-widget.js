@@ -439,7 +439,7 @@
           open.addEventListener('click', () => {
             const url = new URL(entry.transactionUrl, location.origin);
             if (url.origin !== location.origin) {
-              showStatus('The portal record link is not available on this RGHS page.', 'error');
+              showStatus('The portal record link is not available on this claim page.', 'error');
               return;
             }
             url.hash = entry.transactionId || '';
@@ -597,7 +597,7 @@
     cardHistory.hidden = false;
     cardHistory.replaceChildren();
     const title = document.createElement('strong');
-    title.textContent = `RGHS case history (${history.cases.length})`;
+    title.textContent = `Claim case history (${history.cases.length})`;
     cardHistory.appendChild(title);
     if (history.cases.length) {
       const list = document.createElement('ul');
@@ -684,7 +684,7 @@
       });
       cardHistory.append(blockedInvestigations, historyResults);
     }
-    makeSectionCollapsible(cardHistory, 'card-history', `RGHS case history (${history.cases.length})`);
+    makeSectionCollapsible(cardHistory, 'card-history', `Claim case history (${history.cases.length})`);
   }
 
   function renderInvestigationChecklist() {
@@ -985,7 +985,7 @@
       applyButton.disabled = true;
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
-        'unsupported-layout': 'BLOCKED: The RGHS process-sheet layout is not compatible with this extension version.',
+        'unsupported-layout': 'BLOCKED: The claim process-sheet layout is not compatible with this extension version.',
         'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.',
         'invalid-processing-rule-set': 'BLOCKED: The published processing rules failed validation. Contact an administrator.',
         'processing-rules-unavailable': 'BLOCKED: The latest processing rules could not be verified. Try again when connected.',
@@ -1312,7 +1312,7 @@
       requestAnimationFrame(() => reviewList.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     } catch (_) {
       if (!hasValidExtensionContext()) return invalidateStaleWidget();
-      showStatus('Unable to prepare this sheet for preview. Refresh the RGHS page and try again.', 'error');
+      showStatus('Unable to prepare this sheet for preview. Refresh the claim page and try again.', 'error');
     }
   });
   pendingButton.addEventListener('click', () => {

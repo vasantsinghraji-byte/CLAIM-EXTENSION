@@ -11,11 +11,11 @@
     'medicine charges during hospitalization period',
     'final rate for medicine on discharge'
   ];
-  const DEDUCTION_REMARK = '12% DEDUCTED AS PER RGHS GUIDELINES';
+  const DEDUCTION_REMARK = '12% DEDUCTED AS PER CONFIGURED CLAIM POLICY';
   const DEDUCTION_PERCENT = 12;
   const PHARMACY_MARKET_PRICE_REMARK = 'Approved As per prevailing market price.';
   const LAMA_DAMA_SURGICAL_PERCENT = 75;
-  const LAMA_DAMA_SURGICAL_REMARK = '75% approved for surgical package on LAMA/DAMA discharge as per RGHS SOP.';
+  const LAMA_DAMA_SURGICAL_REMARK = '75% approved for surgical package on LAMA/DAMA discharge under the configured claim policy.';
 
   // RGHS claim workflows this extension actively assists with. Passive
   // features (floating widget and passive audit highlights)
