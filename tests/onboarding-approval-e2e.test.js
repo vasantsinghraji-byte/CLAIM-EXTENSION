@@ -8,7 +8,7 @@ const test = require('node:test');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('verified registration is pending until an audited administrator approval', () => {
+test('verified registration activates immediately under an audited platform licence check', () => {
   const functions = read('functions/index.js');
   const dashboard = read('hosting/admin.js');
   const background = read('background.js');
@@ -17,8 +17,11 @@ test('verified registration is pending until an audited administrator approval',
     functions.indexOf('exports.completeInvitationOnboarding'),
     functions.indexOf('async function resolveUid')
   );
-  assert.match(registration, /accountStatus: 'invited'/);
-  assert.match(registration, /user\.registration_requested/);
+  assert.match(registration, /accountStatus: 'active'/);
+  assert.match(registration, /user\.registration_completed/);
+  assert.match(registration, /transaction\.get\(activeUsersQuery\)/);
+  assert.match(registration, /activeUsers\.size >= maximumUsers/);
+  assert.match(registration, /Organization licence is not active/);
 
   const approval = functions.slice(
     functions.indexOf('exports.activateUser'),
@@ -45,7 +48,6 @@ test('verified registration is pending until an audited administrator approval',
 test('administrator rejection disables the pending identity and is audited end to end', () => {
   const functions = read('functions/index.js');
   const dashboard = read('hosting/admin.js');
-  const popup = read('popup.js');
 
   const rejection = functions.slice(
     functions.indexOf('exports.rejectUserRegistration'),
@@ -58,7 +60,6 @@ test('administrator rejection disables the pending identity and is audited end t
 
   assert.match(dashboard, /Confirm reject/);
   assert.match(dashboard, /action\('rejectUserRegistration', \{ uid \}, 'Registration rejected\.'\)/);
-  assert.match(popup, /Registration rejected\. Contact your administrator\./);
 });
 
 test('sponsored roster claims are single-use and activate a matching user license on approval', () => {

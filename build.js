@@ -22,6 +22,8 @@ const files = [
   'review-core.js',
   'content.js',
   'floating-widget.js',
+  'investigation-companion.html',
+  'investigation-companion.js',
   'popup.html',
   'popup.css',
   'popup.js',

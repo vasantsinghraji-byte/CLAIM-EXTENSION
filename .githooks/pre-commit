@@ -3,16 +3,11 @@
 #   matrix coverage + syntax checks + unit tests, then ESLint.
 # Bypass in an emergency with: git commit --no-verify (CI still enforces).
 
-branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-case "$branch" in
-  main|master|develop)
-    echo "" >&2
-    echo "pre-commit: direct commits to '$branch' are blocked." >&2
-    echo "Create a focused branch first (for example: git switch -c feat/<slug>)." >&2
-    echo "Use --no-verify only for a documented emergency." >&2
-    exit 1
-    ;;
-esac
+node tools/repository-policy.js current-branch || {
+  echo "Create a focused branch first (for example: git switch -c feat/<slug>)." >&2
+  echo "Use --no-verify only for a documented emergency." >&2
+  exit 1
+}
 
 echo "pre-commit: npm run check"
 npm run check || {

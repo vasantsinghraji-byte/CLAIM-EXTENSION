@@ -27,7 +27,9 @@ const browserGlobals = {
   FormData: 'readonly',
   URLSearchParams: 'readonly',
   importScripts: 'readonly',
-  TextEncoder: 'readonly'
+  TextEncoder: 'readonly',
+  requestAnimationFrame: 'readonly',
+  getComputedStyle: 'readonly'
 };
 
 const nodeGlobals = {
@@ -53,6 +55,8 @@ module.exports = [
       'hosting-build/**',
       'node_modules/**',
       '.chromium-activation/**',
+      '.chrome-profile-*/**',
+      'chrome-profile-*/**',
       '.tools/**',
       'privacy-site/**',
       'functions/node_modules/**'
@@ -74,7 +78,7 @@ module.exports = [
   },
   {
     files: [
-      'content.js', 'popup.js', 'options.js', 'background.js',
+      'content.js', 'popup.js', 'options.js', 'background.js', 'investigation-companion.js',
       'floating-widget.js', 'claim-core.js', 'audit-core.js', 'auth-core.js', 'review-core.js',
       'processing-rules.js',
       'scripts/live-browser-smoke.js', 'hosting/**/*.js'
@@ -86,6 +90,8 @@ module.exports = [
       'build.js',
       'tools/check-no-secrets.js',
       'tools/setup-git-hooks.js',
+      'tools/repository-health.js',
+      'tools/repository-policy.js',
       'tools/bootstrap-production-admin.js',
       'scripts/release.js',
       'scripts/verify-artifact.js',

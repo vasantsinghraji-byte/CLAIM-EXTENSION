@@ -15,6 +15,9 @@ const FIREBASE_WEB_API_KEY = globalThis.ClaimSparkRuntimeConfig?.firebaseApiKey 
 const FUNCTIONS_BASE_URL = globalThis.ClaimSparkRuntimeConfig?.functionsBaseUrl || '';
 const LICENCE_RECHECK_ALARM = 'claimExtensionLicenceRecheck';
 const PROCESSING_RULE_SCHEMA_VERSION = 2;
+function investigationSheetStorageKey(tid) {
+  return `investigationSheet:${String(tid || '')}`;
+}
 // How long Apply keeps trusting the last successful licence check if the
 // backend is simply unreachable (not an expired/suspended licence - a
 // network failure). Matches the ID token lifetime.
@@ -274,17 +277,19 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         : { success: true, requiresProfileRecovery: true, error: afterCompletion.lastError };
     }
     if (profile?.accountStatus === 'invited') {
-      await storageWriter.setPendingAuth({
+      const activated = await attemptCompleteOnboarding({
         ...localSession,
         displayName: profile.displayName || '',
-        stage: 'awaiting-activation',
+        stage: 'complete-onboarding',
         lastError: null
       });
+      if (activated.stage === 'active') return { success: true };
+      await storageWriter.setPendingAuth(activated);
       await Promise.all([
         storageWriter.clearAuthSession(),
         storageWriter.setLicenceState(null)
       ]);
-      return { success: true, awaitingActivation: true };
+      return { success: true, awaitingActivation: true, error: activated.lastError };
     }
     await storageWriter.setAuthSession(localSession);
     await storageWriter.clearPendingAuth();
@@ -338,8 +343,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     refreshProcessingRules().catch(() => undefined);
   }
 
-  // Registers a verified processor for administrator approval. An explicit
-  // invitation remains authoritative when one assigns another role or tenant.
+  // Completes normal self-service registration after email verification.
   async function attemptCompleteOnboarding(pending) {
     try {
       const onboarding = await AuthCore.callFunction({
@@ -401,8 +405,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  // Email verification precedes the access-path choice. No account profile is
-  // created until the user chooses organisation sponsorship or the default path.
+  // The normal production path is self-service: verified users are activated
+  // against the server-side platform licence and user limit.
   async function handleCheckEmailVerified() {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
@@ -427,18 +431,18 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       expiresAt: refreshed.expiresAt
     };
     await storageWriter.setPendingAuth(pending);
-    const afterCompletion = {
+    const afterVerification = {
       ...pending,
       displayName: pending.displayName || info.displayName || '',
-      stage: 'choose-access-path',
+      stage: 'complete-onboarding',
       lastError: null
     };
-    await storageWriter.setPendingAuth(afterCompletion);
+    const completed = await attemptCompleteOnboarding(afterVerification);
     return {
-      success: true,
+      success: !completed.lastError,
       emailVerified: true,
-      stage: afterCompletion.stage,
-      error: afterCompletion.lastError
+      stage: completed.stage,
+      error: completed.lastError
     };
   }
 
@@ -793,6 +797,118 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   }
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request?.action === 'registerInvestigationChecklist' && sender.tab?.id !== undefined && request.tid) {
+      chrome.storage.session.set({ [investigationSheetStorageKey(request.tid)]: {
+        tabId: sender.tab.id,
+        items: Array.isArray(request.items) ? request.items.slice(0, 100) : [],
+        registeredAt: Date.now()
+      } }, () => { void chrome.runtime.lastError; });
+      return undefined;
+    }
+    if (request?.action === 'openInvestigationCompanion') {
+      const tid = String(request.tid || '');
+      chrome.storage.session.get(investigationSheetStorageKey(tid), saved => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        const sheet = saved[investigationSheetStorageKey(tid)];
+        chrome.storage.session.set({
+          investigationCompanion: {
+            tid,
+            items: (sheet?.items?.length ? sheet.items : Array.isArray(request.items) ? request.items : []).slice(0, 100),
+            createdAt: Date.now()
+          }
+        }, () => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          chrome.windows.create({
+            url: chrome.runtime.getURL('investigation-companion.html'),
+            type: 'popup',
+            width: 400,
+            height: 620
+          }, () => sendResponse(chrome.runtime.lastError
+            ? { success: false, error: chrome.runtime.lastError.message }
+            : { success: true }));
+        });
+      });
+      return true;
+    }
+    if (request?.action === 'openReviewDocuments') {
+      const senderUrl = sender.tab?.url || '';
+      let origin = '';
+      try { origin = new URL(senderUrl).origin; } catch (_) { origin = ''; }
+      const urls = [...new Set((Array.isArray(request.documents) ? request.documents : [])
+        .map(item => String(item?.url || item || '').trim())
+        .filter(url => {
+          try {
+            const parsed = new URL(url);
+            return parsed.origin === origin && /^https?:$/i.test(parsed.protocol);
+          } catch (_) { return false; }
+        }))].slice(0, 20);
+      if (!urls.length) {
+        sendResponse({ success: false, count: 0, error: 'No eligible portal document links were found.' });
+        return undefined;
+      }
+      let remaining = urls.length;
+      let opened = 0;
+      for (const url of urls) {
+        chrome.tabs.create({ url, active: false }, () => {
+          if (!chrome.runtime.lastError) opened++;
+          remaining--;
+          if (!remaining) sendResponse({ success: opened > 0, count: opened });
+        });
+      }
+      return true;
+    }
+    if (request?.action === 'investigationCompanionPreview' || request?.action === 'investigationCompanionApply') {
+      const tid = String(request.tid || '');
+      chrome.storage.session.get(investigationSheetStorageKey(tid), saved => {
+        const sheet = saved[investigationSheetStorageKey(tid)];
+        if (!sheet?.tabId) {
+          sendResponse({ success: false, error: 'Matching process sheet is unavailable. Refresh the process sheet and reopen the Investigation Report.' });
+          return;
+        }
+        const action = request.action === 'investigationCompanionPreview'
+          ? 'previewInvestigationVerification'
+          : 'applyInvestigationVerification';
+        const payload = request.action === 'investigationCompanionPreview'
+          ? { action, verifiedCounts: request.verifiedCounts }
+          : { action, token: request.token };
+        chrome.tabs.sendMessage(sheet.tabId, payload, response => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ success: false, error: 'Matching process sheet is unavailable. Refresh it and reopen the Investigation Report.' });
+            return;
+          }
+          sendResponse(response || { success: false, error: 'The process sheet did not respond.' });
+        });
+      });
+      return true;
+    }
+    if (request?.action === 'reloadInvestigationProcessSheet') {
+      const tid = String(request.tid || '').trim();
+      if (!tid) {
+        sendResponse({ success: false, error: 'Claim identifier is unavailable. Reopen the Investigation Report from the IPD main page.' });
+        return undefined;
+      }
+      chrome.tabs.query({}, tabs => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        const sheet = tabs.find(tab => tab.url?.includes(`/RGHS/processSheetSearch/${tid}/`));
+        if (!sheet?.id) {
+          sendResponse({ success: false, error: 'Matching process sheet tab was not found.' });
+          return;
+        }
+        chrome.tabs.reload(sheet.id, () => sendResponse(chrome.runtime.lastError
+          ? { success: false, error: chrome.runtime.lastError.message }
+          : { success: true }));
+      });
+      return true;
+    }
     if (request && request.action === 'setAuditBadge' && sender.tab && sender.tab.id !== undefined) {
       setTabBadge(sender.tab.id, request.count > 0 ? String(request.count) : '', '#c0392b');
       return undefined;

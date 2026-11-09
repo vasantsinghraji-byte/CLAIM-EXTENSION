@@ -22,6 +22,11 @@ const ruleSetValidation = Audit && AuditRules && Audit.validateRuleSet
 const DEBUG = globalThis.CLAIM_EXTENSION_DEBUG === true;
 let lastAuditBadgeCount = null;
 let invoicePatientValidation = { key: '', names: [], loading: false };
+let ipdClaimDetailContext = { tid: '', loading: false, loaded: false, dischargeStatus: '' };
+let cardTrackerContext = { tid: '', cardNumber: '', patientName: '', loading: false, loaded: false, cases: [] };
+let investigationChecklistPreview = null;
+let lastPublishedInvestigationChecklist = '';
+const historicalPreauthDetailsCache = new Map();
 const APPROVED_CONTROL_SELECTOR = [
   '[name="packageFinalAmounts"]',
   '[id^="packageFinalAmount_"]',
@@ -32,8 +37,17 @@ const REMARKS_CONTROL_SELECTOR = '[id^="packageremarks_"], [id^="itemremarks_"]'
 
 function processingAreaForPage() {
   if (location.pathname.startsWith('/RGHS/tpaPharmacy')) return 'PHARMACY';
-  if (/\/RGHS\/tpaOPD/i.test(location.pathname)) return 'OPD';
+  if (isOpdClaimPage()) return 'OPD';
   return 'IPD';
+}
+
+function isOpdClaimPage() {
+  return /\/RGHS\/tpa(?:pre.?auth)?OPD/i.test(location.pathname)
+    || /\/RGHS\/tpaOPD(?:pre.?auth)?/i.test(location.pathname);
+}
+
+function isMainIpdClaimPage() {
+  return /^\/RGHS\/tpaClaim(?:Discharge|Settle)/i.test(location.pathname);
 }
 
 function configuredColumnKey(headerText) {
@@ -43,6 +57,644 @@ function configuredColumnKey(headerText) {
   if (text.includes('validation') && text.includes('remark')) return 'validationRemarks';
   if (text === 'remark' || text === 'remarks') return 'remarks';
   return null;
+}
+
+function extractIpdClaimDetailContext(html) {
+  const parsed = new globalThis.DOMParser().parseFromString(String(html || ''), 'text/html');
+  const fields = new Map();
+  for (const group of parsed.querySelectorAll('#tpaClaimContentDetails .form-group, .form-group')) {
+    const label = group.querySelector('label')?.textContent?.replace(/\s+/g, ' ').trim();
+    const value = group.querySelector('input, select, textarea')?.value?.trim();
+    if (label && value) fields.set(label, value);
+  }
+  return {
+    admissionType: fields.get('Admission Type') || '',
+    dischargeStatus: fields.get('Patient Discharge Status') || '',
+    admissionDate: fields.get('Date of Admission') || '',
+    admissionTime: fields.get('Time of Admission') || '',
+    dischargeDate: fields.get('Date of Discharge') || '',
+    dischargeTime: fields.get('Time of Discharge') || '',
+    rghsCardNumber: fields.get('RGHS Card No.') || '',
+    finalPackageCodes: [...parsed.querySelectorAll('#finalPackageTablebody tr')]
+      .map(row => row.cells[0]?.textContent?.trim() || '')
+      .filter(Boolean)
+  };
+}
+
+function dispatchIpdContextUpdate() {
+  const context = ipdClaimDetailContext;
+  const completed24HourIntervals = Core.calculateCompleted24HourIntervals(context);
+  window.dispatchEvent(new CustomEvent('claim-autofill:ipd-context', {
+    detail: {
+      loaded: context.loaded === true,
+      admissionType: context.admissionType || '',
+      dischargeStatus: context.dischargeStatus || '',
+      admissionDate: context.admissionDate || '',
+      admissionTime: context.admissionTime || '',
+      dischargeDate: context.dischargeDate || '',
+      dischargeTime: context.dischargeTime || '',
+      completed24HourIntervals
+    }
+  }));
+}
+
+function extractCardTrackerCases(html) {
+  const parsed = new globalThis.DOMParser().parseFromString(String(html || ''), 'text/html');
+  const table = parsed.getElementById('CardTrackerTable');
+  if (!table) return [];
+  const headers = [...table.querySelectorAll('thead th, tr:first-child th')]
+    .map(cell => cell.textContent.replace(/\s+/g, ' ').trim());
+  const pickCell = (row, labels) => {
+    const index = headers.findIndex(header => labels.some(label => header.toLowerCase() === label || header.toLowerCase().includes(label)));
+    return index >= 0 ? row.cells[index] : null;
+  };
+  const pick = (row, labels) => {
+    return pickCell(row, labels)?.textContent?.replace(/\s+/g, ' ').trim() || '';
+  };
+  return [...table.querySelectorAll('tbody tr')].map(row => {
+    const transactionLabels = ['transaction id/ reimbursement id', 'transaction id', 'reimbursement id'];
+    const transactionCell = pickCell(row, transactionLabels);
+    return {
+    transactionId: pick(row, transactionLabels),
+    transactionUrl: transactionCell?.querySelector('a[href]')?.href || '',
+    patientName: pick(row, ['patient name', 'beneficiary name', 'member name']),
+    claimStatus: pick(row, ['claim status', 'status']),
+    caseDate: pick(row, ['tid/rem id creation date', 'creation date']),
+    admissionDate: pick(row, ['admission date']),
+    dischargeDate: pick(row, ['discharge date']),
+    dischargeStatus: pick(row, ['discharge status']),
+    claimType: pick(row, ['claim type', 'claim category', 'case type']),
+    finalPackages: pick(row, ['final used packages code', 'final package']),
+    preauthPackages: pick(row, ['preauth packages code', 'preauth package']),
+    approvedAmount: pick(row, ['tpa approved amount', 'cu/jd approved amount'])
+    };
+  }).filter(item => item.transactionId);
+}
+
+function dispatchCardTrackerUpdate() {
+  window.dispatchEvent(new CustomEvent('claim-autofill:card-history', {
+    detail: { loaded: cardTrackerContext.loaded === true, cases: cardTrackerContext.cases || [] }
+  }));
+}
+
+function findLabeledPageValue(labelPattern) {
+  for (const group of document.querySelectorAll('.form-group, tr, .row')) {
+    const label = group.querySelector('label, th, td:first-child')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    if (!labelPattern.test(label)) continue;
+    const control = group.querySelector('input, select, textarea');
+    const value = control?.value?.trim() || [...group.querySelectorAll('td')].at(-1)?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    if (value && value !== label) return value;
+  }
+  return '';
+}
+
+function findTabularCardIdentity(currentTid) {
+  for (const table of document.querySelectorAll('table')) {
+    const headerRow = [...table.querySelectorAll('tr')].find(row => {
+      const labels = [...row.querySelectorAll(':scope > th, :scope > td')]
+        .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+      return labels.some(label => /(?:patient\s*)?rghs\s*card\s*(?:no|number)?/.test(label))
+        && labels.some(label => /patient\s*name|beneficiary\s*name|member\s*name/.test(label));
+    });
+    if (!headerRow) continue;
+    const headers = [...headerRow.querySelectorAll(':scope > th, :scope > td')]
+      .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+    const transactionIndex = headers.findIndex(header => /transaction\s*id|\btid\b/.test(header));
+    const patientIndex = headers.findIndex(header => /patient\s*name|beneficiary\s*name|member\s*name/.test(header));
+    const cardIndex = headers.findIndex(header => /(?:patient\s*)?rghs\s*card\s*(?:no|number)?/.test(header));
+    if (cardIndex < 0 || patientIndex < 0) continue;
+    const rows = [...table.querySelectorAll('tbody tr, tr')].filter(row => row !== headerRow);
+    const row = rows.find(candidate => {
+      const cells = candidate.querySelectorAll(':scope > td');
+      return cells.length > 0 && (transactionIndex < 0 || !currentTid || cells[transactionIndex]?.textContent?.replace(/\s+/g, '').includes(currentTid));
+    });
+    const cells = row?.querySelectorAll(':scope > td');
+    const cardNumber = cells?.[cardIndex]?.textContent?.trim() || '';
+    const patientName = cells?.[patientIndex]?.textContent?.trim() || '';
+    if (cardNumber || patientName) return { cardNumber, patientName };
+  }
+  return { cardNumber: '', patientName: '' };
+}
+
+function getCurrentCardIdentity() {
+  const detailTable = document.getElementById('patiendetailtable');
+  const headerCells = detailTable ? [...detailTable.querySelectorAll('tr')].find(row => row.querySelectorAll('th').length > 0)?.querySelectorAll('th') : [];
+  const headers = [...headerCells].map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+  const currentTid = findTid();
+  const tabularIdentity = findTabularCardIdentity(currentTid);
+  const transactionIndex = headers.findIndex(header => header === 'transaction id');
+  const patientIndex = headers.findIndex(header => header === 'patient name');
+  const cardIndex = headers.findIndex(header => /patient\s+rghs\s+card\s+no/i.test(header));
+  const currentRow = detailTable ? [...detailTable.querySelectorAll('tbody tr, tr')].find(row => {
+    const cells = row.querySelectorAll(':scope > td');
+    return cells.length > 0 && (transactionIndex < 0 || cells[transactionIndex]?.textContent?.replace(/\s+/g, '').includes(currentTid));
+  }) : null;
+  const tableCardNumber = cardIndex >= 0 ? currentRow?.querySelectorAll(':scope > td')[cardIndex]?.textContent?.trim() || '' : '';
+  const tablePatientName = patientIndex >= 0 ? currentRow?.querySelectorAll(':scope > td')[patientIndex]?.textContent?.trim() || '' : '';
+  const cardNumber = ipdClaimDetailContext.rghsCardNumber
+    || tableCardNumber
+    || tabularIdentity.cardNumber
+    || findLabeledPageValue(/(?:rghs\s*)?card\s*(?:no|number)?/i)
+    || document.querySelector('[id*="card" i][value], [name*="card" i][value]')?.value?.trim()
+    || '';
+  const patientName = tablePatientName
+    || tabularIdentity.patientName
+    || findLabeledPageValue(/(?:patient|beneficiary|member)\s*name/i)
+    || document.querySelector('[id*="patientName" i][value], [name*="patientName" i][value]')?.value?.trim()
+    || '';
+  return { tid: currentTid, cardNumber, patientName };
+}
+
+function ensureCardTrackerContext() {
+  const { tid, cardNumber, patientName } = getCurrentCardIdentity();
+  if (!tid || !cardNumber || cardTrackerContext.tid === tid
+      && (cardTrackerContext.loading || cardTrackerContext.loaded)) return;
+  cardTrackerContext = { tid, cardNumber, patientName, loading: true, loaded: false, cases: [] };
+  fetch(`/RGHS/tpaCardTracker/${encodeURIComponent(cardNumber)}`, { credentials: 'same-origin' })
+    .then(response => response.ok ? response.text() : Promise.reject(new Error('card-tracker-request-failed')))
+    .then(html => {
+      if (cardTrackerContext.tid !== tid) return;
+      cardTrackerContext = { tid, cardNumber, patientName, loading: false, loaded: true, cases: extractCardTrackerCases(html) };
+      dispatchCardTrackerUpdate();
+    })
+    .catch(() => {
+      if (cardTrackerContext.tid === tid) {
+        cardTrackerContext = { tid, cardNumber, patientName, loading: false, loaded: true, cases: [] };
+        dispatchCardTrackerUpdate();
+      }
+    });
+}
+
+function isInvestigationProposal(proposal) {
+  return /\binvestigation\b/i.test(`${proposal?.label || ''} ${proposal?.packageText || ''}`);
+}
+
+function packageCodeAppearsInText(code, text) {
+  const escaped = String(code || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return Boolean(escaped && new RegExp(`(?:^|[^A-Z0-9])${escaped}(?:$|[^A-Z0-9])`, 'i').test(String(text || '')));
+}
+
+function extractPreauthPackageRows(root) {
+  const table = root?.getElementById?.('packageDetailTpa') || root?.querySelector?.('#packageDetailTpa');
+  if (table) return [...table.querySelectorAll('tbody tr')].flatMap((row, index) => {
+    const cells = [...row.querySelectorAll(':scope > td')];
+    const code = Core.extractPackageCode(row.querySelector('#packageid')?.textContent || '');
+    const label = row.querySelector('#packagename')?.textContent?.trim() || `Package ${index + 1}`;
+    const requested = Core.parseAmount(cells[4]?.textContent);
+    const approved = Core.parseAmount(row.querySelector('input[type="number"]')?.value);
+    return code && requested !== null && approved !== null ? [{ code, label, requested, approved }] : [];
+  });
+  const tables = [...(root?.querySelectorAll?.('table') || [])];
+  const fallbackTable = tables.find(candidate => {
+    const headers = [...candidate.querySelectorAll('thead th, tr:first-child th, tr:first-child td')]
+      .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+    return headers.some(header => /package.*(?:code|id)/i.test(header))
+      && headers.some(header => /(?:requested|claim|no\.?\s*of|number of).*?(?:unit|quantity|day)/i.test(header))
+      && headers.some(header => /approved.*?(?:unit|quantity|day)/i.test(header));
+  });
+  if (!fallbackTable) return [];
+  const headers = [...fallbackTable.querySelectorAll('thead th, tr:first-child th, tr:first-child td')]
+    .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+  const codeIndex = headers.findIndex(header => /package.*(?:code|id)/i.test(header));
+  const labelIndex = headers.findIndex(header => /package.*name|particular/i.test(header));
+  const requestedIndex = headers.findIndex(header => /(?:requested|claim|no\.?\s*of|number of).*?(?:unit|quantity|day)/i.test(header));
+  const approvedIndex = headers.findIndex(header => /approved.*?(?:unit|quantity|day)/i.test(header));
+  return [...fallbackTable.querySelectorAll('tbody tr')].flatMap((row, index) => {
+    const cells = [...row.querySelectorAll(':scope > td')];
+    const code = Core.extractPackageCode(getCellValue(cells[codeIndex]));
+    const label = getCellValue(cells[labelIndex]) || `Package ${index + 1}`;
+    const requested = Core.parseAmount(getCellValue(cells[requestedIndex]));
+    const approved = Core.parseAmount(getCellValue(cells[approvedIndex]));
+    return code && requested !== null && approved !== null ? [{ code, label, requested, approved }] : [];
+  });
+}
+
+function extractCurrentOpdPackageRows(root) {
+  const rowsByCode = new Map();
+  for (const table of root?.querySelectorAll?.('table') || []) {
+    const tableRows = [...table.querySelectorAll('tr')];
+    const headerIndex = tableRows.findIndex(row => {
+      const headers = [...row.querySelectorAll(':scope > th, :scope > td')]
+        .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+      return headers.some(header => /(?:pre.?auth\s*)?package\s*(?:code|id)/i.test(header));
+    });
+    if (headerIndex < 0) continue;
+    const headers = [...tableRows[headerIndex].querySelectorAll(':scope > th, :scope > td')]
+      .map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+    const codeIndex = headers.findIndex(header => /(?:pre.?auth\s*)?package\s*(?:code|id)/i.test(header));
+    const labelIndex = headers.findIndex(header => /package\s*name|particular(?:s)?|description/i.test(header));
+    if (codeIndex < 0) continue;
+    for (const row of tableRows.slice(headerIndex + 1)) {
+      const cells = [...row.querySelectorAll(':scope > td')];
+      if (cells.length <= codeIndex) continue;
+      const codeText = getCellValue(cells[codeIndex]);
+      const label = labelIndex >= 0 && cells[labelIndex]
+        ? getCellValue(cells[labelIndex]).trim()
+        : '';
+      // Some OPD layouts put a comma-separated list in a single package-code cell.
+      for (const value of codeText.split(',')) {
+        const code = Core.extractPackageCode(value);
+        if (code && !rowsByCode.has(code)) {
+          rowsByCode.set(code, { code, label: label || `Package ${code}` });
+        }
+      }
+    }
+  }
+  for (const codeCell of root?.querySelectorAll?.('[id="packageid"], [id^="packageid_"], [name="packageid"], [name^="packageid_"]') || []) {
+    const code = Core.extractPackageCode(getCellValue(codeCell));
+    if (!code || rowsByCode.has(code)) continue;
+    const row = codeCell.closest('tr');
+    const label = row?.querySelector('[id="packagename"], [id^="packagename_"], [name="packagename"], [name^="packagename_"]');
+    rowsByCode.set(code, { code, label: getCellValue(label).trim() || `Package ${code}` });
+  }
+  return [...rowsByCode.values()];
+}
+
+async function getHistoricalPreauthPackageDetails(tid) {
+  if (historicalPreauthDetailsCache.has(tid)) return historicalPreauthDetailsCache.get(tid);
+  const request = fetch('/RGHS/tpaPreAuthDataByTidOpd', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+    body: new URLSearchParams({ tid })
+  })
+    .then(response => response.ok ? response.text() : Promise.reject(new Error('historical-preauth-request-failed')))
+    .then(html => extractPreauthPackageRows(new globalThis.DOMParser().parseFromString(html, 'text/html')))
+    .catch(() => null);
+  historicalPreauthDetailsCache.set(tid, request);
+  return request;
+}
+
+async function getBlockedInvestigationHistory() {
+  const identity = getCurrentCardIdentity();
+  if (!isOpdClaimPage()) {
+    return { available: false, reason: 'not-opd', matches: [] };
+  }
+  if (!identity.patientName) return { available: false, reason: 'patient-name-unavailable', matches: [] };
+  if (cardTrackerContext.tid !== identity.tid || !cardTrackerContext.loaded) {
+    ensureCardTrackerContext();
+    return { available: false, reason: 'history-loading', matches: [] };
+  }
+  const current = fillAllApprovedAmounts({ apply: false });
+  // OPD and pre-auth pages can provide package codes without a process-sheet preview.
+  // A preview may legitimately be unavailable on these layouts, so use it only as
+  // a last-resort source of audit findings rather than a gate for history matching.
+  const auditBlockedInvestigations = (current.blocked ? [] : current.proposals)
+    .filter(proposal => proposal.risk === 'high' && isInvestigationProposal(proposal))
+    .map(proposal => ({ label: proposal.label, code: Core.extractPackageCode(proposal.packageText), ruleIds: proposal.ruleIds || [] }))
+    .filter(item => item.code);
+  const currentPreauthPackages = extractPreauthPackageRows(document)
+    .map(pkg => ({ label: pkg.label, code: pkg.code, ruleIds: [], currentlyBlocked: pkg.approved < pkg.requested }))
+    .filter(item => item.code);
+  const currentPreauthByCode = new Map(currentPreauthPackages.map(item => [item.code, item]));
+  const currentOpdPackages = extractCurrentOpdPackageRows(document)
+    .map(pkg => ({
+      ...pkg,
+      ruleIds: [],
+      currentlyBlocked: currentPreauthByCode.get(pkg.code)?.currentlyBlocked === true
+    }));
+  const preauthBlockedInvestigations = getPreauthBlockedInvestigations();
+  const currentInvestigations = [...new Map((currentOpdPackages.length ? currentOpdPackages
+    : currentPreauthPackages.length ? currentPreauthPackages
+    : preauthBlockedInvestigations.length ? preauthBlockedInvestigations.map(item => ({ ...item, currentlyBlocked: true }))
+      : auditBlockedInvestigations.map(item => ({ ...item, currentlyBlocked: true }))
+  ).map(item => [item.code, item])).values()];
+  const currentBlockedInvestigations = currentInvestigations.filter(item => item.currentlyBlocked);
+  const priorCases = cardTrackerContext.cases.filter(item =>
+    item.transactionId !== identity.tid
+    && item.patientName
+    && Core.patientNamesMatch(identity.patientName, item.patientName)
+  );
+  const candidateCases = priorCases.filter(item => currentInvestigations.some(investigation =>
+    packageCodeAppearsInText(investigation.code, `${item.preauthPackages} ${item.finalPackages}`)));
+  const detailResults = await Promise.all(candidateCases.map(async item => ({
+    item,
+    packages: await getHistoricalPreauthPackageDetails(item.transactionId)
+  })));
+  const historicalDetailsByTid = new Map(detailResults.map(({ item, packages }) => [item.transactionId, packages]));
+  const trackerMatches = candidateCases.flatMap(item => currentInvestigations
+    .filter(investigation => packageCodeAppearsInText(investigation.code, `${item.preauthPackages} ${item.finalPackages}`))
+    .map(investigation => {
+      const historicalPackage = historicalDetailsByTid.get(item.transactionId)?.find(pkg => pkg.code === investigation.code);
+      return {
+        ...investigation,
+        transactionId: item.transactionId,
+        transactionUrl: item.transactionUrl,
+        claimStatus: item.claimStatus,
+        caseDate: item.caseDate || item.admissionDate || item.dischargeDate,
+        historicalRequestedUnits: historicalPackage?.requested,
+        historicalApprovedUnits: historicalPackage?.approved
+      };
+    }));
+  const matches = detailResults.flatMap(({ item, packages }) => {
+    if (!Array.isArray(packages)) return [];
+    const historicallyBlocked = packages.filter(pkg => pkg.approved < pkg.requested);
+    return currentBlockedInvestigations.flatMap(investigation => historicallyBlocked
+      .filter(pkg => pkg.code === investigation.code)
+      .map(pkg => ({
+        ...investigation,
+        historicalRequestedUnits: pkg.requested,
+        historicalApprovedUnits: pkg.approved,
+        transactionId: item.transactionId,
+        transactionUrl: item.transactionUrl,
+        claimStatus: item.claimStatus,
+        caseDate: item.caseDate || item.admissionDate || item.dischargeDate
+      })));
+  });
+  const packageMatches = [...matches.reduce((byCode, match) => {
+    if (!byCode.has(match.code)) byCode.set(match.code, { ...match, history: [] });
+    byCode.get(match.code).history.push({
+      transactionId: match.transactionId,
+      transactionUrl: match.transactionUrl,
+      claimStatus: match.claimStatus,
+      caseDate: match.caseDate,
+      historicalRequestedUnits: match.historicalRequestedUnits,
+      historicalApprovedUnits: match.historicalApprovedUnits
+    });
+    return byCode;
+  }, new Map()).values()];
+  const similarPackageHistory = [...trackerMatches.reduce((byCode, match) => {
+    if (!byCode.has(match.code)) byCode.set(match.code, { ...match, history: [] });
+    byCode.get(match.code).history.push({
+      transactionId: match.transactionId,
+      transactionUrl: match.transactionUrl,
+      claimStatus: match.claimStatus,
+      caseDate: match.caseDate,
+      historicalRequestedUnits: match.historicalRequestedUnits,
+      historicalApprovedUnits: match.historicalApprovedUnits
+    });
+    return byCode;
+  }, new Map()).values()];
+  return {
+    available: true,
+    currentCount: currentInvestigations.length,
+    currentBlockedCount: currentBlockedInvestigations.length,
+    repeatedPackageCount: packageMatches.length,
+    packageMatches,
+    similarPackageCount: similarPackageHistory.length,
+    similarPackageHistory,
+    matches,
+    checkedHistoricalCaseCount: candidateCases.length,
+    unavailableHistoricalCaseCount: detailResults.filter(item => item.packages === null).length
+  };
+}
+
+function getInvestigationChecklist() {
+  const rows = [];
+  for (const row of document.querySelectorAll('#processSheetTable tr')) {
+    const nameCell = row.querySelector('[id^="packageName_"]');
+    if (!nameCell || !/^investigation$/i.test(nameCell.textContent.trim())) continue;
+    const index = nameCell.id.match(/_(\d+)$/)?.[1];
+    const expected = Core.parseAmount(row.querySelector(`#packageDays_${index}`)?.textContent);
+    const rate = Core.parseAmount(row.querySelector(`#packageRate_${index}`)?.textContent);
+    const approvedCell = row.querySelector(`#packageFinalAmount_${index}`);
+    const remarksCell = row.querySelector(`#packageremarks_${index}`);
+    if (!index || expected === null || rate === null || !approvedCell || !remarksCell) continue;
+    rows.push({
+      index: Number(index),
+      label: row.querySelector(`#packageCode_${index}`)?.textContent?.trim() || `Investigation ${index}`,
+      expected,
+      rate,
+      approvedCell,
+      remarksCell,
+      rowEl: row
+    });
+  }
+  return rows;
+}
+
+function publishInvestigationChecklist() {
+  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  const tid = findTid();
+  const items = getInvestigationChecklist()
+    .map(({ index, label, expected }) => ({ index, label, expected }));
+  if (!tid || !items.length) return;
+  const signature = `${tid}:${JSON.stringify(items)}`;
+  if (signature === lastPublishedInvestigationChecklist) return;
+  lastPublishedInvestigationChecklist = signature;
+  chrome.runtime.sendMessage({ action: 'registerInvestigationChecklist', tid, items }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+function getMainClaimInvestigationChecklist() {
+  const table = document.getElementById('packageDetailTpa');
+  if (!table) return [];
+  const headers = [...table.querySelectorAll('tr')].find(row => row.querySelectorAll('th').length > 0)
+    ?.querySelectorAll('th') || [];
+  const names = [...headers].map(cell => cell.textContent.replace(/\s+/g, ' ').trim().toLowerCase());
+  const codeIndex = names.findIndex(name => name.includes('package code'));
+  const nameIndex = names.findIndex(name => name.includes('package name'));
+  const unitIndex = names.findIndex(name => name === 'number of units');
+  if (unitIndex < 0) return [];
+  return [...table.querySelectorAll('tbody tr')].map((row, index) => {
+    const cells = row.querySelectorAll(':scope > td');
+    const offset = Math.max(0, cells.length - headers.length);
+    const expected = Core.parseAmount(getCellValue(cells[unitIndex + offset]));
+    if (cells.length === 0 || expected === null) return null;
+    const code = codeIndex >= 0 ? getCellValue(cells[codeIndex + offset]) : '';
+    const name = nameIndex >= 0 ? getCellValue(cells[nameIndex + offset]) : '';
+    return { index: `main-${index}`, label: [code, name].filter(Boolean).join(' — ') || `Package ${index + 1}`, expected, writable: false };
+  }).filter(Boolean);
+}
+
+function getPreauthBlockedInvestigations() {
+  if (!isOpdClaimPage()) return [];
+  return extractPreauthPackageRows(document)
+    .filter(pkg => pkg.approved < pkg.requested)
+    .map(pkg => ({ label: pkg.label, code: pkg.code, ruleIds: [] }));
+}
+
+function previewInvestigationVerification(verifiedCounts) {
+  const supplied = new Map((Array.isArray(verifiedCounts) ? verifiedCounts : [])
+    .map(item => [Number(item.index), Core.parseAmount(item.found)]));
+  const rows = getInvestigationChecklist().filter(row => row.approvedCell && row.remarksCell);
+  const entries = rows.flatMap(row => {
+    const found = supplied.get(row.index);
+    if (found === null || found === undefined || found < 0 || found > row.expected) return [];
+    const approvedAmount = Math.round(row.rate * found * 100) / 100;
+    const existingRemarks = getCellValue(row.remarksCell).trim();
+    const remark = `Investigation verification: ${found} of ${row.expected} report(s) confirmed by processor.`;
+    return [{
+      key: `investigation-${row.index}`,
+      row,
+      found,
+      approvedAmount,
+      proposal: {
+        key: `investigation-${row.index}`,
+        label: row.label,
+        claimAmount: row.rate * row.expected,
+        beforeApproved: Core.parseAmount(getCellValue(row.approvedCell)) || 0,
+        proposedApproved: approvedAmount,
+        beforeRemarks: getCellValue(row.remarksCell),
+        proposedRemarks: existingRemarks.includes('Investigation verification:') ? existingRemarks : `${existingRemarks}${existingRemarks ? '; ' : ''}${remark}`,
+        risk: found < row.expected ? 'high' : 'low',
+        reason: `Processor verified ${found} of ${row.expected} investigation report(s)`
+      }
+    }];
+  });
+  const proposals = entries.map(entry => entry.proposal);
+  const token = Review.fingerprint(proposals);
+  investigationChecklistPreview = { token, entries, tid: findTid(), createdAt: Date.now() };
+  return { token, proposals };
+}
+
+async function applyInvestigationVerification(token) {
+  const preview = investigationChecklistPreview;
+  if (!preview || preview.token !== token || preview.tid !== findTid() || Date.now() - preview.createdAt > 10 * 60 * 1000) {
+    return { blocked: true, blockReason: 'stale', count: 0 };
+  }
+  const batch = [];
+  for (const entry of preview.entries) {
+    setCellValue(entry.row.approvedCell, String(entry.approvedAmount), batch);
+    entry.row.approvedCell.dataset.claimExtensionInvestigationVerified = 'true';
+  }
+  investigationChecklistPreview = null;
+  undoBatch = batch;
+  window.dispatchEvent(new CustomEvent('claim-autofill:investigations-verified', {
+    detail: { rowIndexes: preview.entries.map(entry => entry.row.index) }
+  }));
+  const result = {
+    blocked: false,
+    count: batch.length,
+    changedFieldCount: batch.length,
+    hasUndo: batch.length > 0
+  };
+  const recoverySaved = await persistRecoverySnapshot(batch);
+  if (recoverySaved) {
+    appendClaimActivity('apply', { fieldCount: batch.length, rowCount: preview.entries.length, ruleIds: ['RGHS-INVESTIGATION-VERIFICATION'] });
+  }
+  return { ...result, recoverySaved };
+}
+
+function findIpdActionSelect() {
+  return [...document.querySelectorAll('select')].find(select => {
+    const group = select.closest('.form-group, tr, .row') || select.parentElement;
+    const label = group?.querySelector('label, th, td:first-child')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    const options = [...select.options].map(option => option.textContent.replace(/\s+/g, ' ').trim()).join(' ');
+    return /(?:select\s*)?action|action\s*taken/i.test(label) || /query.*approve.*reject|approve.*query.*reject/i.test(options);
+  }) || null;
+}
+
+function selectedIpdAction() {
+  const select = findIpdActionSelect();
+  const value = select?.selectedOptions?.[0]?.textContent || select?.value || '';
+  if (/\bquery\b/i.test(value)) return 'query';
+  if (/\breject/i.test(value)) return 'reject';
+  if (/\bapprove/i.test(value)) return 'approve';
+  return '';
+}
+
+function findIpdActionTextBox(action) {
+  if (selectedIpdAction() !== action) return null;
+  const selectors = action === 'query'
+    ? ['textarea[id*="query" i]', 'textarea[name*="query" i]', 'input[type="text"][id*="query" i]', 'input[type="text"][name*="query" i]']
+    : ['textarea[id*="remark" i]', 'textarea[name*="remark" i]', 'input[type="text"][id*="remark" i]', 'input[type="text"][name*="remark" i]'];
+  const direct = document.querySelector(selectors.join(', '));
+  if (direct) return direct;
+  const labelPattern = action === 'query' ? /\bquery\b/i : /\bremarks?\b/i;
+  for (const group of document.querySelectorAll('.form-group, tr, .row')) {
+    const label = group.querySelector('label, th, td:first-child')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    if (!labelPattern.test(label)) continue;
+    const control = group.querySelector('textarea, input[type="text"], input:not([type])');
+    if (control) return control;
+  }
+  return null;
+}
+
+function appendIpdActionRemarks(action, remarks) {
+  if (!isMainIpdClaimPage()) return { ok: false, addedCount: 0 };
+  if (!['approve', 'query', 'reject'].includes(action)) return { ok: false, addedCount: 0 };
+  const targetBox = findIpdActionTextBox(action);
+  if (!targetBox) return { ok: false, addedCount: 0 };
+  const existing = getElementValue(targetBox).trim();
+  const additions = [...new Set((Array.isArray(remarks) ? remarks : [])
+    .map(remark => String(remark || '').trim())
+    .filter(remark => remark && !existing.includes(remark)))];
+  if (additions.length) setElementValue(targetBox, [existing, ...additions].filter(Boolean).join('\n'));
+  return { ok: true, addedCount: additions.length };
+}
+
+function getReviewDocuments() {
+  if (!isMainIpdClaimPage()) return [];
+  const headers = [...document.querySelectorAll('a, button, h1, h2, h3, h4, h5, div, span')]
+    .filter(element => element.textContent?.replace(/\s+/g, ' ').trim() === 'Mandatory Claim Documents');
+  const header = headers[0];
+  if (!header) return [];
+  const laterSectionHeader = [...document.querySelectorAll('a, button, h1, h2, h3, h4, h5, div, span')]
+    .find(element => {
+      const label = element.textContent?.replace(/\s+/g, ' ').trim() || '';
+      return /^(?:PreAuth Documents|Documents for Extended Stay)$/i.test(label)
+        && Boolean(header.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+  const documents = new Map();
+  for (const link of document.querySelectorAll('a[href]')) {
+    if (!(header.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+    if (laterSectionHeader && !(link.compareDocumentPosition(laterSectionHeader) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+    const href = link.getAttribute('href')?.trim() || '';
+    if (!href || href.startsWith('#') || /^javascript:/i.test(href)) continue;
+    const label = [link.textContent, link.getAttribute('title'), link.getAttribute('aria-label')]
+      .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    let url;
+    try { url = new URL(href, location.href); } catch (_) { continue; }
+    if (url.origin !== location.origin || !/^https?:$/i.test(url.protocol)) continue;
+    documents.set(url.href, { url: url.href, label: label || 'Claim document' });
+    if (documents.size >= 20) break;
+  }
+  return [...documents.values()];
+}
+
+function extractECardSummary(html, patientName = '') {
+  const parsed = new globalThis.DOMParser().parseFromString(String(html || ''), 'text/html');
+  const entries = [];
+  for (const row of parsed.querySelectorAll('tr')) {
+    const cells = [...row.querySelectorAll(':scope > th, :scope > td')];
+    if (cells.length < 2) continue;
+    const label = cells[0].textContent.replace(/\s+/g, ' ').trim();
+    const value = cells[1].textContent.replace(/\s+/g, ' ').trim();
+    if (/card|limit|balance|status|valid/i.test(label) && value) entries.push({ label, value });
+  }
+  const parseGroup = group => [...group.querySelectorAll('p > b, p > strong')].map(label => {
+    const labelText = label.textContent.replace(/\s+/g, ' ').trim();
+    const fullText = label.parentElement?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    return { label: labelText, value: fullText.slice(labelText.length).replace(/^\s*[:-]\s*/, '').trim() };
+  }).filter(item => item.value);
+  const groups = [...parsed.querySelectorAll('.ecard-details, .ecard-details-member-details')]
+    .map(parseGroup).filter(group => group.length);
+  const matchedGroup = groups.find(group => group.some(item => /name of (?:the )?(?:beneficiary|member)/i.test(item.label)
+    && Core.patientNamesMatch(patientName, item.value)));
+  for (const item of matchedGroup || groups[0] || []) {
+    if (/card|limit|balance|status|valid|beneficiary|category|relation/i.test(item.label)) entries.push(item);
+  }
+  return [...new Map(entries.map(item => [`${item.label}:${item.value}`, item])).values()].slice(0, 8);
+}
+
+function ensureIpdClaimDetailContext() {
+  if (!location.pathname.startsWith('/RGHS/processSheetSearch/')) return;
+  const tid = document.getElementById('transactionId')?.value?.trim() || findTid();
+  if (!tid || ipdClaimDetailContext.tid === tid && (ipdClaimDetailContext.loading || ipdClaimDetailContext.loaded)) return;
+
+  ipdClaimDetailContext = { tid, loading: true, loaded: false, dischargeStatus: '' };
+  fetch('/RGHS/tpaClaimSettleTidDetails', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+    body: new URLSearchParams({ transactionId: tid })
+  })
+    .then(response => response.ok ? response.text() : Promise.reject(new Error('claim-detail-request-failed')))
+    .then(html => {
+      if (ipdClaimDetailContext.tid !== tid) return;
+      ipdClaimDetailContext = { tid, loading: false, loaded: true, ...extractIpdClaimDetailContext(html) };
+      dispatchIpdContextUpdate();
+      ensureCardTrackerContext();
+      schedulePassiveAudit([document]);
+    })
+    .catch(() => {
+      if (ipdClaimDetailContext.tid === tid) {
+        ipdClaimDetailContext = { tid, loading: false, loaded: true, dischargeStatus: '' };
+        dispatchIpdContextUpdate();
+      }
+    });
 }
 
 function debugLog(...args) {
@@ -138,8 +790,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     hasPersistentRecovery(hasRecovery => {
       sendResponse({ enabled: isAutoFillEnabled, auditMode, hasUndo: undoBatch.length > 0, hasRecovery });
     });
+  } else if (request.action === 'previewInvestigationVerification') {
+    const result = previewInvestigationVerification(request.verifiedCounts);
+    sendResponse({ success: true, ...result });
+  } else if (request.action === 'applyInvestigationVerification') {
+    respond(applyInvestigationVerification(request.token));
   }
   return true;
+});
+
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== 'investigation-checklist') return;
+  port.onMessage.addListener(message => {
+    const respond = result => port.postMessage({ id: message?.id, success: true, ...result });
+    if (message?.action === 'getChecklist') {
+      respond({ items: getInvestigationChecklist().map(({ index, label, expected }) => ({ index, label, expected })) });
+    } else if (message?.action === 'preview') {
+      respond(previewInvestigationVerification(message.verifiedCounts));
+    } else if (message?.action === 'apply') {
+      applyInvestigationVerification(message.token)
+        .then(result => respond(result))
+        .catch(error => port.postMessage({ id: message.id, success: false, error: String(error?.message || error) }));
+    }
+  });
 });
 
 function refreshProcessingRules() {
@@ -181,6 +854,10 @@ async function applyFreshPreview(options) {
 // Helper to find any editable element inside a cell
 function findEditableElement(cell) {
   if (!cell) return null;
+
+  if (cell.matches?.('input[type="text"], input[type="number"], input:not([type]), textarea, select, [contenteditable="true"], [contenteditable=""]')) {
+    return cell;
+  }
 
   const input = cell.querySelector('input[type="text"], input[type="number"], input:not([type])');
   if (input) return input;
@@ -357,7 +1034,28 @@ function inspectPortalLayout() {
       invalidMappings
     };
   });
-  return Core.validatePortalLayoutDescriptor({ pathname: location.pathname, tables });
+  return { ...Core.validatePortalLayoutDescriptor({ pathname: location.pathname, tables }), tables };
+}
+
+function getPortalCompatibilityDetails() {
+  const layout = inspectPortalLayout();
+  const compatibleTables = layout.tables.filter(table => table.hasRequiredHeaders && table.approvedControls > 0).length;
+  const pageType = location.pathname.startsWith('/RGHS/processSheetSearch/') ? 'Process sheet'
+    : location.pathname.startsWith('/RGHS/tpaPharmacy') ? 'Pharmacy claim'
+      : isOpdClaimPage() ? 'OPD claim' : 'IPD claim';
+  const reasons = {
+    'expected-one-claim-table': 'Exactly one mapped claim table is required.',
+    'missing-claim-rows': 'The mapped claim table has no writable claim rows.',
+    'unmapped-claim-controls': 'One or more approved-amount controls could not be mapped safely.'
+  };
+  return {
+    pageType,
+    compatible: layout.ok,
+    message: layout.ok ? `${pageType}: compatible (${compatibleTables} mapped claim table).`
+      : `${pageType}: not compatible — ${reasons[layout.reason] || 'Required claim fields are unavailable.'}`,
+    tableCount: layout.tables.length,
+    compatibleTables
+  };
 }
 
 // Preview stays local-first: a fresh install or signed-out session (state
@@ -590,6 +1288,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
         targetCells,
         claimValue: getCellValue(claimCell),
         approvedValue: getCellValue(approvedCell),
+        investigationVerificationApplied: approvedCell.dataset.claimExtensionInvestigationVerified === 'true',
         particularText,
         packageText,
         rateValue,
@@ -825,11 +1524,54 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       }
     }
 
+    const ipdContext = !isPharmacyPage && ipdClaimDetailContext.tid === findTid()
+      ? ipdClaimDetailContext : null;
+    const completed24HourIntervals = ipdContext
+      ? Core.calculateCompleted24HourIntervals(ipdContext) : null;
+    const multipleSurgicalPlans = new Map(Core.planMultipleSurgicalPackageUpdates({
+      lines: records,
+      finalPackageCodes: ipdContext?.finalPackageCodes || []
+    }).map(plan => [plan.index, plan]));
+
     // Third pass: normal auto-fill, never touching audited rows
     for (const record of records) {
       if (auditedRows.has(record.index)) continue;
+      // A processor-confirmed investigation count is authoritative for this open
+      // process sheet, including a verified zero. Do not replace it with the
+      // claimed amount during a later general preview.
+      if (record.investigationVerificationApplied) continue;
 
-      const plan = !bundledFallbackEnabled
+      const lamaDamaPlan = ipdContext
+        ? Core.planLamaDamaSurgicalPackageUpdate({
+            claimValue: record.claimValue,
+            approvedValue: record.approvedValue,
+            particularText: record.particularText,
+            packageText: record.packageText,
+            dischargeStatus: ipdContext.dischargeStatus,
+            remarksValue: record.remarksValue
+          })
+        : null;
+      const incompleteDailyPlan = ipdContext
+        ? Core.planIncompleteFinalDayUpdate({
+            claimValue: record.claimValue,
+            rateValue: record.rateValue,
+            unitValue: record.unitValue,
+            approvedValue: record.approvedValue,
+            particularText: record.particularText,
+            packageText: record.packageText,
+            admissionType: ipdContext.admissionType,
+            completed24HourIntervals,
+            remarksValue: record.remarksValue
+          })
+        : null;
+      const multipleSurgicalPlan = multipleSurgicalPlans.get(record.index) || null;
+      const plan = lamaDamaPlan?.reason === 'lama-dama-surgical'
+        ? lamaDamaPlan
+        : incompleteDailyPlan?.reason === 'incomplete-daily-ipd'
+          ? incompleteDailyPlan
+          : multipleSurgicalPlan?.reason === 'multiple-surgical-package'
+            ? multipleSurgicalPlan
+        : !bundledFallbackEnabled
         ? Core.planRowUpdate({
             claimValue: record.claimValue,
             approvedValue: record.approvedValue,
@@ -868,15 +1610,36 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           proposedApproved,
           beforeRemarks: record.remarksValue,
           proposedRemarks: plan.remarksValue,
-          risk: plan.reason === 'medicine' || plan.reason === 'pharmacy-market-cap' ? 'medium' : 'low',
+          risk: ['lama-dama-surgical', 'incomplete-daily-ipd', 'multiple-surgical-package'].includes(plan.reason) ? 'high'
+            : plan.reason === 'medicine' || plan.reason === 'pharmacy-market-cap' ? 'medium' : 'low',
+          policyBadge: plan.reason === 'lama-dama-surgical'
+            ? `LAMA/DAMA detected · Source: Patient Discharge Status · ${Core.LAMA_DAMA_SURGICAL_PERCENT}% SOP`
+            : plan.reason === 'incomplete-daily-ipd'
+              ? `Incomplete final IPD day · ${completed24HourIntervals} completed 24-hour interval(s)`
+              : plan.reason === 'multiple-surgical-package'
+                ? `Multiple surgical packages · Portal-confirmed package set · Main (highest claimed): ${plan.mainPackageCode || 'unavailable'} · ${plan.decisionRole}`
+                : '',
+          requiresAcknowledgement: ['lama-dama-surgical', 'incomplete-daily-ipd', 'multiple-surgical-package'].includes(plan.reason),
+          recommendedApproved: ['lama-dama-surgical', 'incomplete-daily-ipd', 'multiple-surgical-package'].includes(plan.reason)
+            ? proposedApproved : undefined,
+          decisionRole: plan.decisionRole || undefined,
           reason: plan.reason === 'medicine'
             ? `${Core.DEDUCTION_PERCENT}% RGHS medicine deduction; rounded to nearest whole rupee`
+            : plan.reason === 'lama-dama-surgical'
+              ? `${Core.LAMA_DAMA_SURGICAL_PERCENT}% of the surgical package for LAMA/DAMA discharge`
+              : plan.reason === 'incomplete-daily-ipd'
+                ? `Deduct incomplete final IPD day after ${completed24HourIntervals} completed 24-hour interval(s)`
+                : plan.reason === 'multiple-surgical-package'
+                  ? `Multiple surgical package rule: ${plan.decisionRole}; approved at ${plan.percent}%`
             : plan.reason === 'pharmacy-market-cap'
               ? 'Limit the approved amount to P25 multiplied by quantity'
               : plan.reason === 'pharmacy-claim-below-market'
                 ? 'Approve the lower Claim Total at the prevailing market price'
                 : 'Copy eligible claim amount into the empty approved amount',
-          ruleIds: plan.reason === 'medicine' ? ['RGHS-MEDICINE-12'] : []
+          ruleIds: plan.reason === 'medicine' ? ['RGHS-MEDICINE-12']
+            : plan.reason === 'lama-dama-surgical' ? ['RGHS-IPD-LAMA-DAMA-75']
+              : plan.reason === 'incomplete-daily-ipd' ? ['RGHS-IPD-INCOMPLETE-FINAL-DAY']
+                : plan.reason === 'multiple-surgical-package' ? ['RGHS-IPD-MULTIPLE-SURGICAL'] : []
         });
         rowElements.set(key, record.rowEl);
         if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
@@ -1225,8 +1988,8 @@ function findInvoiceValidationDescriptor() {
 
 function extractInvoicePatientEntries(root) {
   if (!root?.querySelectorAll) return [];
-  return [...root.querySelectorAll('td.header-col-3-left')].flatMap(cell => {
-    const match = cell.textContent.match(/^\s*patient\s*:\s*(.+?)\s*$/i);
+  return [...root.querySelectorAll('td.header-col-3-left, td, div, p')].flatMap(cell => {
+    const match = cell.textContent.match(/^\s*patient(?:\s+name)?\s*:\s*([^\r\n]+?)\s*$/i);
     return match?.[1]?.trim() ? [{ cell, value: match[1].trim() }] : [];
   });
 }
@@ -1245,7 +2008,8 @@ function applyPatientNameValidation(descriptor) {
   if (!patient || !descriptor || invoicePatientValidation.key !== descriptor.key
       || invoicePatientValidation.names.length === 0) return;
 
-  const mismatch = invoicePatientValidation.names.some(name => !Core.patientNamesMatch(patient.value, name));
+  clearPatientMismatchHighlights();
+  const mismatch = Core.hasPatientNameMismatch(patient.value, invoicePatientValidation.names);
   if (!mismatch) {
     clearPatientMismatchHighlights();
     return;
@@ -1321,7 +2085,12 @@ function refreshPharmacyValidations() {
 
 function refreshPassiveAuditHighlights() {
   if (!Core.isSupportedClaimPage(location.pathname)) return;
+  ensureIpdClaimDetailContext();
+  if (location.pathname.startsWith('/RGHS/processSheetSearch/') || isOpdClaimPage()) {
+    ensureCardTrackerContext();
+  }
   refreshPharmacyValidations();
+  publishInvestigationChecklist();
   for (const row of document.querySelectorAll('tr.rghs-audit-passive')) {
     row.classList.remove('rghs-audit-passive');
   }
@@ -1366,6 +2135,8 @@ function findTid() {
   // a previously opened claim cannot be reused for the next one.
   const pharmacyTid = document.getElementById?.('transid')?.value?.trim();
   if (pharmacyTid) return pharmacyTid;
+  const processSheetTid = String(globalThis.location?.pathname || '').match(/^\/RGHS\/processSheetSearch\/([^/?#]+)/i)?.[1];
+  if (processSheetTid) return processSheetTid;
   const text = `${document.title} ${(document.body ? document.body.textContent : '').slice(0, 30000)}`;
   // Process sheets label the claim "TID: <code>"; tpaOPD labels it
   // "transaction id [OPD] :-<code>" instead - both need to resolve to a
@@ -1631,6 +2402,59 @@ globalThis.ClaimAutoFillActions = {
   status() {
     return { enabled: isAutoFillEnabled, hasUndo: undoBatch.length > 0 };
   },
+  getIpdContext() {
+    const context = ipdClaimDetailContext;
+    return {
+      loaded: context.loaded === true,
+      admissionType: context.admissionType || '',
+      dischargeStatus: context.dischargeStatus || '',
+      admissionDate: context.admissionDate || '',
+      admissionTime: context.admissionTime || '',
+      dischargeDate: context.dischargeDate || '',
+      dischargeTime: context.dischargeTime || '',
+      completed24HourIntervals: Core.calculateCompleted24HourIntervals(context)
+    };
+  },
+  getCardHistory() {
+    return { loaded: cardTrackerContext.loaded === true, cases: cardTrackerContext.cases || [] };
+  },
+  getBlockedInvestigationHistory() {
+    return getBlockedInvestigationHistory();
+  },
+  getPortalCompatibilityDetails() {
+    return getPortalCompatibilityDetails();
+  },
+  getInvestigationChecklist() {
+    const sheetItems = getInvestigationChecklist();
+    const items = sheetItems.length ? sheetItems : getMainClaimInvestigationChecklist();
+    return items.map(({ index, label, expected, approvedCell }) => ({ index, label, expected, writable: Boolean(approvedCell) }));
+  },
+  getCurrentTid() {
+    return findTid() || ipdClaimDetailContext.tid || '';
+  },
+  previewInvestigationVerification(verifiedCounts) {
+    return previewInvestigationVerification(verifiedCounts);
+  },
+  applyInvestigationVerification(token) {
+    return applyInvestigationVerification(token);
+  },
+  appendIpdActionRemarks(action, remarks) {
+    return appendIpdActionRemarks(action, remarks);
+  },
+  getReviewDocuments() {
+    return getReviewDocuments();
+  },
+  async getECardSummary() {
+    const tid = findTid();
+    if (!tid) return { ok: false, entries: [] };
+    const response = await fetch('/RGHS/tpaECardDetailbytid', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
+      body: new URLSearchParams({ id: tid })
+    });
+    return { ok: response.ok, entries: response.ok ? extractECardSummary(await response.text(), getCurrentCardIdentity().patientName) : [] };
+  },
   jumpToRow(key) {
     const row = previewRowElements.get(key);
     if (!row) return false;
@@ -1639,6 +2463,17 @@ globalThis.ClaimAutoFillActions = {
     row.style.outline = '3px solid #2563eb';
     setTimeout(() => { row.style.outline = previousOutline; }, 1800);
     return true;
+  },
+  jumpToRows(keys) {
+    const rows = [...new Set((Array.isArray(keys) ? keys : []).map(key => previewRowElements.get(key)).filter(Boolean))];
+    if (!rows.length) return 0;
+    rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    for (const row of rows) {
+      const previousOutline = row.style.outline;
+      row.style.outline = '3px solid #2563eb';
+      setTimeout(() => { row.style.outline = previousOutline; }, 1800);
+    }
+    return rows.length;
   },
   highlightDecisionRows,
   restoreRecovery() {
