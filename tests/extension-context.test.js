@@ -144,7 +144,7 @@ test('Apply reports a missing preview or selection instead of failing silently',
 
 test('Preview returns the widget to its refreshed result summary', () => {
   assert.match(source, /renderPreview\(await \(actions\.previewFresh \? actions\.previewFresh\(\) : actions\.preview\(\)\)\);\s*setSectionCollapsed\(ipdContext, 'ipd-context', true\);\s*setSectionCollapsed\(cardHistory, 'card-history', true\);/);
-  assert.match(source, /Unable to prepare this sheet for preview\. Refresh the RGHS page and try again\./);
+  assert.match(source, /Unable to prepare this sheet for preview\. Refresh the claim page and try again\./);
 });
 
 test('widget supports layout reset, collapsible context, and task focus', () => {
@@ -187,7 +187,7 @@ test('each high-risk decision row can be individually selected and jumped to', (
 test('companion-verified investigations are removed from the active general preview', () => {
   const content = read('content.js');
   assert.match(content, /claim-autofill:investigations-verified/);
-  assert.match(content, /rowIndexes: preview\.entries\.map\(entry => entry\.row\.index\)/);
+  assert.match(content, /rowIndexes: current\.entries\.map\(entry => entry\.row\.index\)/);
   assert.match(source, /function removeVerifiedInvestigationsFromPreview\(detail\)/);
   assert.match(source, /claim-autofill:investigations-verified', event => \{/);
   assert.match(source, /investigationChecklist\.dataset\.verified = 'true'/);

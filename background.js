@@ -825,7 +825,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
             return;
           }
           chrome.windows.create({
-            url: chrome.runtime.getURL('investigation-companion.html'),
+            url: `${chrome.runtime.getURL('investigation-companion.html')}?tid=${encodeURIComponent(tid)}`,
             type: 'popup',
             width: 400,
             height: 620
@@ -876,7 +876,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
           : 'applyInvestigationVerification';
         const payload = request.action === 'investigationCompanionPreview'
           ? { action, verifiedCounts: request.verifiedCounts }
-          : { action, token: request.token };
+          : { action, token: request.token, acknowledgedHighRisk: request.acknowledgedHighRisk === true };
         chrome.tabs.sendMessage(sheet.tabId, payload, response => {
           if (chrome.runtime.lastError) {
             sendResponse({ success: false, error: 'Matching process sheet is unavailable. Refresh it and reopen the Investigation Report.' });

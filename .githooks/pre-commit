@@ -16,13 +16,9 @@ npm run check || {
   exit 1
 }
 
-if [ -d node_modules/eslint ]; then
-  echo "pre-commit: eslint"
-  npx eslint . || {
-    echo "" >&2
-    echo "pre-commit: eslint failed - commit aborted." >&2
-    exit 1
-  }
-else
-  echo "pre-commit: eslint not installed (run npm install); skipping lint, CI will enforce it."
-fi
+echo "pre-commit: npm run lint"
+npm run lint || {
+  echo "" >&2
+  echo "pre-commit: lint failed - commit aborted. Install dependencies with npm ci if needed." >&2
+  exit 1
+}

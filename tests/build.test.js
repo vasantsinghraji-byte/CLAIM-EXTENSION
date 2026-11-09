@@ -8,6 +8,7 @@ const {
   createStagingManifest,
   createStoredZip,
   emulatorConfig,
+  normalizePackagedFile,
   runtimeConfigSource,
   validateEnvironmentConfig
 } = require('../build');
@@ -21,6 +22,14 @@ const testStagingConfig = {
   apiKey: 'test-staging-key-not-a-real-credential',
   functionsBaseUrl: 'https://asia-south1-claimextension.cloudfunctions.net'
 };
+
+test('package bytes are stable across Windows and Unix source line endings', () => {
+  const unix = Buffer.from('first line\nsecond line\n');
+  const windows = Buffer.from('first line\r\nsecond line\r\n');
+  assert.deepEqual(normalizePackagedFile('content.js', windows), unix);
+  assert.deepEqual(normalizePackagedFile('content.js', unix), unix);
+  assert.deepEqual(normalizePackagedFile('icons/icon.png', windows), windows);
+});
 
 test('production manifest strips development origins from every exposed match list', () => {
   const production = createProductionManifest(sourceManifest);

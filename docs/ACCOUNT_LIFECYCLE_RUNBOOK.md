@@ -11,11 +11,16 @@ routine production interface.
 
 1. The processor creates an account in Claim Spark.
 2. The processor verifies the email once.
-3. The processor chooses **Continue without organisation sponsorship**.
-4. Claim Spark creates a pending processor profile in the platform organization.
-5. Open the administrator dashboard, refresh **Users**, and approve the account.
-6. The processor clicks **Check Status** and is signed in after licence and
-   capacity checks succeed.
+3. Default self-service registration activates the processor under the platform
+   organisation when its organisation and licence are active and capacity remains.
+4. Existing suspended, rejected or deleted accounts require administrator action.
+   Retrying signup cannot reactivate them or replace a paid individual entitlement.
+5. A legacy pending self-registration can migrate only when it is a platform
+   processor with an inactive, unpaid licence. The migration is audited.
+
+Organisation-sponsored roster and individual-payment paths retain their separate
+approval/payment procedures below. Existing active accounts keep their entitlement
+and organisation when retrying onboarding.
 
 Use **Reject** when the registration is not authorized. Rejection requires a
 second confirmation, disables the Firebase identity, revokes its sessions and

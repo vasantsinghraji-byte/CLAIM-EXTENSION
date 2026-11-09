@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Claim Amount Auto-Fill",
-  "version": "1.11.1",
-  "description": "Fills approved amounts from claim amounts and audits bundled RGHS packages for unbundling and duplicate billing",
+  "version": "1.12.0",
+  "description": "Preview, review, and fill approved claim amounts with checks for unbundling and duplicate billing.",
   "permissions": [
     "activeTab",
     "storage",
     "alarms",
-    "windows",
     "tabs"
   ],
   "host_permissions": [

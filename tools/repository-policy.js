@@ -3,14 +3,18 @@
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 
-const COMMIT_PATTERN = /^(feat|fix|refactor|chore|docs|test|build|ci|perf|style|revert)(\([a-z0-9./-]+\))?!?: .+$/;
+const COMMIT_PATTERN = /^(feat|fix|refactor|chore|docs|test|build|ci|perf|style|revert)(\([a-z0-9./-]+\))?!?: \S.*$/;
 const BRANCH_PATTERN = /^(feat|fix|hotfix|refactor|chore|docs|test|build|ci|perf|release|experiment|dependabot|renovate)\/[a-z0-9][a-z0-9._/-]*$/;
 const PROTECTED_BRANCHES = new Set(['main', 'master', 'develop']);
 
-function validateCommitMessage(message) {
+function validateCommitMessage(message, { allowAutosquash = true, allowMerge = true } = {}) {
   const firstLine = String(message || '').split(/\r?\n/, 1)[0];
 
-  if (/^(Merge |Revert |fixup!|squash!)/.test(firstLine)) {
+  if (/^(fixup!|squash!)/.test(firstLine)) {
+    return allowAutosquash ? null : 'autosquash commits must be resolved before merge';
+  }
+
+  if ((allowMerge && /^Merge /.test(firstLine)) || /^Revert ".+"$/.test(firstLine)) {
     return null;
   }
 
@@ -48,20 +52,24 @@ function fail(label, detail) {
   process.exitCode = 1;
 }
 
-function checkCommit(message, label = 'commit message') {
-  const error = validateCommitMessage(message);
+function checkCommit(message, label = 'commit message', options) {
+  const error = validateCommitMessage(message, options);
   if (error) fail(label, error);
 }
 
 function checkRange(base, head) {
-  if (!base || !head || /^0+$/.test(base)) return;
+  if (!base || !head) throw new Error('Both base and head commits are required');
 
-  const records = git(['log', '--format=%H%x00%s', `${base}..${head}`]);
+  const revision = /^0+$/.test(base) ? head : `${base}..${head}`;
+  const records = git(['log', '--format=%H%x00%P%x00%s', revision, '--']);
   if (!records) return;
 
   for (const record of records.split('\n')) {
-    const [sha, subject] = record.split('\0');
-    checkCommit(subject, `commit ${sha.slice(0, 12)}`);
+    const [sha, parents, subject] = record.split('\0');
+    checkCommit(subject, `commit ${sha.slice(0, 12)}`, {
+      allowAutosquash: false,
+      allowMerge: parents.split(' ').length > 1
+    });
   }
 }
 
@@ -71,12 +79,17 @@ function checkCiEvent(eventPath) {
   if (event.pull_request) {
     const branchError = validateBranchName(event.pull_request.head.ref);
     if (branchError) fail('pull-request branch', branchError);
+    if (event.pull_request.head.ref.startsWith('experiment/')) {
+      fail('pull-request branch', 'graduate experiments to a focused feature or fix branch before merge');
+    }
     checkRange(event.pull_request.base.sha, event.pull_request.head.sha);
     return;
   }
 
   if (event.before && event.after) {
     checkRange(event.before, event.after);
+  } else {
+    throw new Error('CI requires a pull-request or push event with base and head commits');
   }
 }
 

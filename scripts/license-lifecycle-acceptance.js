@@ -233,6 +233,83 @@ async function testIndividualLifecycle(auth, db, adminToken) {
   assert.ok(renewed.license.expiresAt.toMillis() > renewalBase);
 }
 
+async function testSelfServiceSafety(auth, db) {
+  const register = (token, expectedError = null) => callFunction(
+    'completeInvitationOnboarding', token, { displayName: 'Synthetic Processor' }, expectedError
+  );
+  const fresh = await createVerifiedUser(auth, 'selfservice-fresh@claim-spark.local', 'Synthetic Processor');
+  const freshToken = await signIn(fresh.email);
+  assert.equal((await register(freshToken)).status, 'active');
+  assert.equal((await register(freshToken)).alreadyAccepted, true);
+  const created = (await db.doc(`users/${fresh.uid}`).get()).data();
+  assert.equal(created.accountStatus, 'active');
+  assert.equal(created.license.type, 'organisation');
+  assert.equal((await callFunction('verifyLicence', freshToken, { extensionVersion: '1.11.1' })).applyAllowed, true);
+  const audits = await db.collection('auditLogs').where('targetId', '==', fresh.uid).get();
+  assert.equal(audits.docs.filter(doc => doc.data().action === 'user.registration_completed').length, 1);
+
+  for (const status of ['suspended', 'rejected', 'deleted']) {
+    const identity = await createVerifiedUser(auth, `selfservice-${status}@claim-spark.local`, 'Synthetic Processor');
+    await db.doc(`users/${identity.uid}`).set({
+      email: identity.email, role: 'processor', organizationId: 'platform',
+      accountStatus: status, onboardingSource: 'self-registration', license: defaultLicense()
+    });
+    await register(await signIn(identity.email), 'PERMISSION_DENIED');
+    assert.equal((await db.doc(`users/${identity.uid}`).get()).data().accountStatus, status);
+  }
+
+  const pendingPaid = await createVerifiedUser(auth, 'selfservice-paid@claim-spark.local', 'Synthetic Processor');
+  await db.doc(`users/${pendingPaid.uid}`).set({
+    email: pendingPaid.email, role: 'processor', organizationId: 'platform', accountStatus: 'invited',
+    onboardingSource: 'self-registration', license: { ...defaultLicense(), paymentStatus: 'pending_verification' }
+  });
+  await register(await signIn(pendingPaid.email), 'PERMISSION_DENIED');
+  assert.equal((await db.doc(`users/${pendingPaid.uid}`).get()).data().license.type, 'individual');
+
+  const legacy = await createVerifiedUser(auth, 'selfservice-legacy@claim-spark.local', 'Synthetic Processor');
+  await db.doc(`users/${legacy.uid}`).set({
+    email: legacy.email, role: 'processor', organizationId: 'platform', accountStatus: 'invited',
+    onboardingSource: 'self-registration', license: defaultLicense()
+  });
+  assert.equal((await register(await signIn(legacy.email))).status, 'active');
+
+  const unverified = await auth.createUser({ email: 'selfservice-unverified@claim-spark.local', password: TEST_PASSWORD });
+  await register(await signIn(unverified.email), 'FAILED_PRECONDITION');
+  assert.equal((await db.doc(`users/${unverified.uid}`).get()).exists, false);
+
+  const licenceReference = db.doc('licences/platform');
+  const originalLicence = (await licenceReference.get()).data();
+  const invalidLicenceUser = await createVerifiedUser(auth, 'selfservice-expiry@claim-spark.local', 'Synthetic Processor');
+  const expiryToken = await signIn(invalidLicenceUser.email);
+  try {
+    for (const expiryDate of [null, Timestamp.fromMillis(Date.now() - 1000)]) {
+      await licenceReference.update({ expiryDate });
+      await register(expiryToken, 'FAILED_PRECONDITION');
+      assert.equal((await db.doc(`users/${invalidLicenceUser.uid}`).get()).exists, false);
+    }
+    await licenceReference.set(originalLicence);
+    const activeCount = (await db.collection('users').where('organizationId', '==', 'platform').where('accountStatus', '==', 'active').get()).size;
+    await licenceReference.update({ maximumUsers: activeCount + 1 });
+    const contenders = await Promise.all([1, 2].map(index =>
+      createVerifiedUser(auth, `selfservice-race-${index}@claim-spark.local`, 'Synthetic Processor')));
+    const results = await Promise.all(contenders.map(async identity => {
+      const token = await signIn(identity.email);
+      const { body } = await jsonRequest(`${FUNCTIONS_BASE_URL}/completeInvitationOnboarding`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ data: { displayName: 'Synthetic Processor' } })
+      });
+      return body;
+    }));
+    assert.equal(results.filter(result => result.result?.status === 'active').length, 1);
+    assert.equal(results.filter(result => result.error?.status === 'RESOURCE_EXHAUSTED').length, 1);
+    const finalCount = (await db.collection('users').where('organizationId', '==', 'platform').where('accountStatus', '==', 'active').get()).size;
+    assert.equal(finalCount, activeCount + 1);
+  } finally {
+    await licenceReference.set(originalLicence);
+  }
+  console.log('PASS: self-service status, payment, expiry, audit and concurrent capacity protections.');
+}
+
 async function main() {
   assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:9099');
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8080');
@@ -244,6 +321,7 @@ async function main() {
     const adminToken = await signIn(admin.email);
     await testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry);
     await testIndividualLifecycle(auth, db, adminToken);
+    await testSelfServiceSafety(auth, db);
     console.log('PASS: sponsored and individual licence lifecycles completed against local emulators.');
   } finally {
     await deleteApp(app);

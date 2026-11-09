@@ -969,7 +969,7 @@ function describeCounts(response) {
 function blockedMessage(reason) {
   const messages = {
     'autofill-disabled': 'Claim Extension is OFF. Turn it on, then preview again.',
-    'unsupported-layout': 'Unsupported RGHS portal layout. No fields were changed.',
+    'unsupported-layout': 'Unsupported claim portal layout. No fields were changed.',
     'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.',
     'invalid-processing-rule-set': 'Published processing rules failed validation. Contact an administrator.',
     'processing-rules-unavailable': 'The latest processing rules could not be verified. Check your connection and try again.',
@@ -977,6 +977,7 @@ function blockedMessage(reason) {
     'processing-rule-blocked': 'A centrally governed package rule blocks this claim.',
     'processing-validation-required': 'A centrally required validation must be completed before processing.',
     'processing-rule-target-missing': 'A configured rule target column is unavailable on this sheet.',
+    'overlapping-ipd-rules': 'Different IPD adjustments propose conflicting amounts. Ask your administrator to review the applicable policy.',
     'mandatory-action-required': 'All centrally mandatory actions must be applied together.',
     'mandatory-action-override': 'Centrally mandatory deductions and remarks cannot be overridden.',
     'signed-out': 'Sign in to Claim Spark to apply changes.',
@@ -1051,7 +1052,7 @@ fillNowBtn.addEventListener('click', async () => {
     previewToken = null;
     previewRowKeys = [];
     setFillButton();
-    showStatus('Open an RGHS claim page, then refresh and try again', 'error');
+    showStatus('Open a supported claim page, then refresh and try again', 'error');
   }
 });
 
@@ -1078,7 +1079,7 @@ exportLogBtn.addEventListener('click', () => {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `rghs-audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.download = `claim-audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();

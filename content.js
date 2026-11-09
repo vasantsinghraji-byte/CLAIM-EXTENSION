@@ -25,6 +25,7 @@ let invoicePatientValidation = { key: '', names: [], loading: false };
 let ipdClaimDetailContext = { tid: '', loading: false, loaded: false, dischargeStatus: '' };
 let cardTrackerContext = { tid: '', cardNumber: '', patientName: '', loading: false, loaded: false, cases: [] };
 let investigationChecklistPreview = null;
+let investigationApplyInFlight = false;
 let lastPublishedInvestigationChecklist = '';
 const historicalPreauthDetailsCache = new Map();
 const APPROVED_CONTROL_SELECTOR = [
@@ -447,14 +448,17 @@ function getInvestigationChecklist() {
     const index = nameCell.id.match(/_(\d+)$/)?.[1];
     const expected = Core.parseAmount(row.querySelector(`#packageDays_${index}`)?.textContent);
     const rate = Core.parseAmount(row.querySelector(`#packageRate_${index}`)?.textContent);
+    const claimAmount = Core.parseAmount(row.querySelector(`#packageAmount_${index}`)?.textContent);
     const approvedCell = row.querySelector(`#packageFinalAmount_${index}`);
     const remarksCell = row.querySelector(`#packageremarks_${index}`);
-    if (!index || expected === null || rate === null || !approvedCell || !remarksCell) continue;
+    if (!index || !Number.isSafeInteger(expected) || expected <= 0 || !(rate > 0)
+        || claimAmount === null || !approvedCell || !remarksCell) continue;
     rows.push({
       index: Number(index),
       label: row.querySelector(`#packageCode_${index}`)?.textContent?.trim() || `Investigation ${index}`,
       expected,
       rate,
+      claimAmount,
       approvedCell,
       remarksCell,
       rowEl: row
@@ -505,66 +509,119 @@ function getPreauthBlockedInvestigations() {
     .map(pkg => ({ label: pkg.label, code: pkg.code, ruleIds: [] }));
 }
 
-function previewInvestigationVerification(verifiedCounts) {
-  const supplied = new Map((Array.isArray(verifiedCounts) ? verifiedCounts : [])
-    .map(item => [Number(item.index), Core.parseAmount(item.found)]));
-  const rows = getInvestigationChecklist().filter(row => row.approvedCell && row.remarksCell);
-  const entries = rows.flatMap(row => {
+function investigationRuleIdentity() {
+  return JSON.stringify([processingRuleSet?.mode || '', processingRuleSet?.versionId || '', processingRuleSet?.checksum || '']);
+}
+
+function buildInvestigationVerification(verifiedCounts) {
+  const raw = fillAllApprovedAmounts({ apply: false });
+  if (raw.blocked) return { ...blockedFillResult(raw.blockReason), entries: [] };
+  if (raw.proposals.some(proposal => proposal.mandatory)) {
+    return { ...blockedFillResult('mandatory-action-required'), entries: [] };
+  }
+  const rows = getInvestigationChecklist();
+  const supplied = new Map();
+  for (const item of Array.isArray(verifiedCounts) ? verifiedCounts : []) {
+    const index = Number(item.index);
+    const found = Core.parseAmount(item.found);
+    const row = rows.find(candidate => candidate.index === index);
+    if (!row || supplied.has(index) || !Number.isSafeInteger(found) || found < 0 || found > row.expected) {
+      return { ...blockedFillResult('invalid-investigation-counts'), entries: [] };
+    }
+    supplied.set(index, found);
+  }
+  const entries = rows.filter(row => supplied.has(row.index)).map(row => {
     const found = supplied.get(row.index);
-    if (found === null || found === undefined || found < 0 || found > row.expected) return [];
-    const approvedAmount = Math.round(row.rate * found * 100) / 100;
+    const approvedAmount = Math.min(row.claimAmount, Math.round(row.rate * found * 100) / 100);
     const existingRemarks = getCellValue(row.remarksCell).trim();
     const remark = `Investigation verification: ${found} of ${row.expected} report(s) confirmed by processor.`;
-    return [{
-      key: `investigation-${row.index}`,
-      row,
-      found,
-      approvedAmount,
+    // Replace only our own earlier verification sentence, preserving other remarks.
+    const otherRemarks = existingRemarks.replace(/Investigation verification: [^;]*(?:;\s*)?/g, '').trim();
+    return {
+      row, found, approvedAmount,
       proposal: {
         key: `investigation-${row.index}`,
         label: row.label,
-        claimAmount: row.rate * row.expected,
+        claimAmount: row.claimAmount,
         beforeApproved: Core.parseAmount(getCellValue(row.approvedCell)) || 0,
         proposedApproved: approvedAmount,
         beforeRemarks: getCellValue(row.remarksCell),
-        proposedRemarks: existingRemarks.includes('Investigation verification:') ? existingRemarks : `${existingRemarks}${existingRemarks ? '; ' : ''}${remark}`,
+        proposedRemarks: `${otherRemarks}${otherRemarks ? '; ' : ''}${remark}`,
         risk: found < row.expected ? 'high' : 'low',
-        reason: `Processor verified ${found} of ${row.expected} investigation report(s)`
+        reason: `Processor verified ${found} of ${row.expected} investigation report(s) at rate ${row.rate}; ${row.label}`
       }
-    }];
+    };
   });
+  const protectedRow = entries.some(entry => raw.proposals.some(proposal =>
+    (proposal.ruleIds?.length || proposal.risk === 'high')
+      && raw.rowElements.get(proposal.key) === entry.row.rowEl));
+  if (protectedRow) return { ...blockedFillResult('investigation-policy-conflict'), entries: [] };
   const proposals = entries.map(entry => entry.proposal);
-  const token = Review.fingerprint(proposals);
-  investigationChecklistPreview = { token, entries, tid: findTid(), createdAt: Date.now() };
-  return { token, proposals };
+  return { blocked: false, token: Review.fingerprint(proposals), proposals, entries };
 }
 
-async function applyInvestigationVerification(token) {
-  const preview = investigationChecklistPreview;
-  if (!preview || preview.token !== token || preview.tid !== findTid() || Date.now() - preview.createdAt > 10 * 60 * 1000) {
-    return { blocked: true, blockReason: 'stale', count: 0 };
-  }
-  const batch = [];
-  for (const entry of preview.entries) {
-    setCellValue(entry.row.approvedCell, String(entry.approvedAmount), batch);
-    entry.row.approvedCell.dataset.claimExtensionInvestigationVerified = 'true';
-  }
+function previewInvestigationVerification(verifiedCounts) {
   investigationChecklistPreview = null;
-  undoBatch = batch;
-  window.dispatchEvent(new CustomEvent('claim-autofill:investigations-verified', {
-    detail: { rowIndexes: preview.entries.map(entry => entry.row.index) }
-  }));
-  const result = {
-    blocked: false,
-    count: batch.length,
-    changedFieldCount: batch.length,
-    hasUndo: batch.length > 0
+  if (!findTid()) return blockedFillResult('claim-unavailable');
+  const result = buildInvestigationVerification(verifiedCounts);
+  if (result.blocked || !result.entries.length) return { ...result, entries: undefined };
+  investigationChecklistPreview = {
+    token: result.token, entries: result.entries, verifiedCounts,
+    tid: findTid(), createdAt: Date.now(), ruleIdentity: investigationRuleIdentity()
   };
-  const recoverySaved = await persistRecoverySnapshot(batch);
-  if (recoverySaved) {
-    appendClaimActivity('apply', { fieldCount: batch.length, rowCount: preview.entries.length, ruleIds: ['RGHS-INVESTIGATION-VERIFICATION'] });
+  return { token: result.token, proposals: result.proposals };
+}
+
+async function applyInvestigationVerification(token, { acknowledgedHighRisk = false } = {}) {
+  if (investigationApplyInFlight) return blockedFillResult('apply-in-progress');
+  const preview = investigationChecklistPreview;
+  if (!preview || preview.token !== token) return blockedFillResult('stale');
+  investigationApplyInFlight = true;
+  try {
+    const refresh = await refreshProcessingRules();
+    if (!refresh.ok) return blockedFillResult('processing-rules-unavailable');
+    if (preview.ruleIdentity !== investigationRuleIdentity()) return blockedFillResult('processing-rules-changed');
+    if (!isAutoFillEnabled) return blockedFillResult('autofill-disabled');
+    const gate = evaluateLicenceGate(licenceState, true);
+    if (gate.blocked) return blockedFillResult(gate.reason);
+    if (preview !== investigationChecklistPreview || !preview.tid || preview.tid !== findTid()) {
+      return blockedFillResult('stale');
+    }
+    const current = buildInvestigationVerification(preview.verifiedCounts);
+    if (current.blocked) return { ...blockedFillResult(current.blockReason) };
+    const controlsChanged = current.entries.some((entry, index) =>
+      !entry.row.approvedCell.isConnected || !entry.row.remarksCell.isConnected
+      || entry.row.approvedCell !== preview.entries[index]?.row.approvedCell
+      || entry.row.remarksCell !== preview.entries[index]?.row.remarksCell);
+    const validation = Review.validateApply({
+      previewToken: token, currentToken: controlsChanged ? '' : current.token,
+      createdAt: preview.createdAt, selectedProposals: current.proposals, acknowledgedHighRisk
+    });
+    if (!validation.ok) return blockedFillResult(validation.reason);
+    const batch = [];
+    investigationChecklistPreview = null;
+    for (const entry of current.entries) {
+      setCellValue(entry.row.approvedCell, String(entry.approvedAmount), batch);
+      setCellValue(entry.row.remarksCell, entry.proposal.proposedRemarks, batch);
+    }
+    undoBatch = batch;
+    const result = await finalizeRecovery({
+      blocked: false, count: batch.length, changedFieldCount: batch.length,
+      _undoBatch: batch, _recoveryWrite: persistRecoverySnapshot(batch),
+      _activityDetails: { fieldCount: batch.length, rowCount: current.entries.length, ruleIds: ['RGHS-INVESTIGATION-VERIFICATION'] }
+    });
+    if (!result.blocked) {
+      for (const entry of current.entries) {
+        entry.row.approvedCell.dataset.claimExtensionInvestigationVerified = 'true';
+      }
+      window.dispatchEvent(new CustomEvent('claim-autofill:investigations-verified', {
+        detail: { rowIndexes: current.entries.map(entry => entry.row.index) }
+      }));
+    }
+    return { ...result, hasUndo: undoBatch.length > 0 };
+  } finally {
+    investigationApplyInFlight = false;
   }
-  return { ...result, recoverySaved };
 }
 
 function findIpdActionSelect() {
@@ -794,7 +851,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const result = previewInvestigationVerification(request.verifiedCounts);
     sendResponse({ success: true, ...result });
   } else if (request.action === 'applyInvestigationVerification') {
-    respond(applyInvestigationVerification(request.token));
+    respond(applyInvestigationVerification(request.token, request));
   }
   return true;
 });
@@ -808,7 +865,7 @@ chrome.runtime.onConnect.addListener(port => {
     } else if (message?.action === 'preview') {
       respond(previewInvestigationVerification(message.verifiedCounts));
     } else if (message?.action === 'apply') {
-      applyInvestigationVerification(message.token)
+      applyInvestigationVerification(message.token, message)
         .then(result => respond(result))
         .catch(error => port.postMessage({ id: message.id, success: false, error: String(error?.message || error) }));
     }
@@ -1520,11 +1577,11 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             auditLogEntries.push(Audit.buildAuditEntry(action, { ...context, amountBefore: record.approvedValue }));
           }
         }
-        debugLog(`[RGHS-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
+        debugLog(`[Claim-Audit] Row ${rowIndex}: ${actions.map(action => action.ruleId).join(', ')} ${deductAction && !hasApprovedOverride ? '(deduction applied)' : '(review decision applied)'}`);
       }
     }
 
-    const ipdContext = !isPharmacyPage && ipdClaimDetailContext.tid === findTid()
+    const ipdContext = bundledFallbackEnabled && !isPharmacyPage && ipdClaimDetailContext.tid === findTid()
       ? ipdClaimDetailContext : null;
     const completed24HourIntervals = ipdContext
       ? Core.calculateCompleted24HourIntervals(ipdContext) : null;
@@ -1535,7 +1592,6 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
     // Third pass: normal auto-fill, never touching audited rows
     for (const record of records) {
-      if (auditedRows.has(record.index)) continue;
       // A processor-confirmed investigation count is authoritative for this open
       // process sheet, including a verified zero. Do not replace it with the
       // claimed amount during a later general preview.
@@ -1565,6 +1621,19 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           })
         : null;
       const multipleSurgicalPlan = multipleSurgicalPlans.get(record.index) || null;
+      const applicableIpdPlans = [lamaDamaPlan, incompleteDailyPlan, multipleSurgicalPlan]
+        .filter(candidate => candidate && ['lama-dama-surgical', 'incomplete-daily-ipd', 'multiple-surgical-package'].includes(candidate.reason));
+      const proposedIpdAmounts = new Set(applicableIpdPlans
+        .map(candidate => Core.parseAmount(candidate.approvedValue ?? record.approvedValue)));
+      if (proposedIpdAmounts.size > 1) {
+        processingBlock = {
+          reason: 'overlapping-ipd-rules',
+          details: ['Different IPD adjustments apply to the same row. Manual policy review is required.']
+        };
+        continue;
+      }
+      // Audit review must not hide an unresolved conflict between IPD adjustments.
+      if (auditedRows.has(record.index)) continue;
       const plan = lamaDamaPlan?.reason === 'lama-dama-surgical'
         ? lamaDamaPlan
         : incompleteDailyPlan?.reason === 'incomplete-daily-ipd'
@@ -1595,8 +1664,8 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
       if (plan.reason === 'invalid-or-zero-claim' || plan.reason === 'invalid-pharmacy-values') continue;
 
+      const key = `table-${tableIndex}-row-${record.index}`;
       if (plan.approvedValue !== null || plan.remarksValue !== null) {
-        const key = `table-${tableIndex}-row-${record.index}`;
         const claimAmount = Core.parseAmount(record.claimValue) || 0;
         const proposedApproved = plan.approvedValue === null ? null : Core.parseAmount(plan.approvedValue);
         proposals.push({
@@ -1624,7 +1693,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             ? proposedApproved : undefined,
           decisionRole: plan.decisionRole || undefined,
           reason: plan.reason === 'medicine'
-            ? `${Core.DEDUCTION_PERCENT}% RGHS medicine deduction; rounded to nearest whole rupee`
+            ? `${Core.DEDUCTION_PERCENT}% medicine deduction under the configured claim policy; rounded to nearest whole rupee`
             : plan.reason === 'lama-dama-surgical'
               ? `${Core.LAMA_DAMA_SURGICAL_PERCENT}% of the surgical package for LAMA/DAMA discharge`
               : plan.reason === 'incomplete-daily-ipd'
@@ -1647,15 +1716,19 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
       // Apply the row plan. Hospital plans preserve existing nonzero approvals;
       // Pharmacy plans intentionally replace the portal's prefilled claim total.
-      if (plan.approvedValue !== null) {
-        if (apply) setCellValue(record.approvedCell, plan.approvedValue, batch);
+      const approvedValue = Object.prototype.hasOwnProperty.call(approvedOverrides, key)
+        ? String(approvedOverrides[key]) : plan.approvedValue;
+      const remarksValue = Object.prototype.hasOwnProperty.call(remarkOverrides, key)
+        ? String(remarkOverrides[key]) : plan.remarksValue;
+      if (approvedValue !== null) {
+        if (apply) setCellValue(record.approvedCell, approvedValue, batch);
         approvedCount++;
         debugLog(`[Claim Auto-Fill] Row ${record.index}: Planned approved amount "${plan.approvedValue}"`);
       }
 
       // Apply any rule-specific remark without touching rows that need none.
-      if (record.remarksCell && plan.remarksValue !== null) {
-        if (apply) setCellValue(record.remarksCell, plan.remarksValue, batch);
+      if (record.remarksCell && remarksValue !== null) {
+        if (apply) setCellValue(record.remarksCell, remarksValue, batch);
         remarksCount++;
         debugLog(`[Claim Auto-Fill] Row ${record.index}: Planned deduction remark`);
       }
@@ -2290,7 +2363,12 @@ async function finalizeRecovery(result) {
     ...publicResult
   } = result || {};
   if (publicResult.blocked || publicResult.changedFieldCount === 0) return publicResult;
-  const recoverySaved = await recoveryWrite;
+  let recoverySaved = false;
+  try {
+    recoverySaved = await recoveryWrite;
+  } catch {
+    // A rejected storage request must roll back the fields just like a false result.
+  }
   if (recoverySaved) {
     if (activityDetails) appendClaimActivity('apply', activityDetails);
     return { ...publicResult, recoverySaved: true };
@@ -2335,6 +2413,7 @@ function restorePersistentSnapshot() {
           continue;
         }
         setElementValue(element, entry.before);
+        delete element.dataset.claimExtensionInvestigationVerified;
         count++;
       }
       if (count === 0) return resolve({ count: 0, hasRecovery: true });
@@ -2359,6 +2438,7 @@ function restoreFillBatch(batch, { removeRecovery = true } = {}) {
     if (!element?.isConnected) continue;
     if (getElementValue(element) !== String(batch[index].after ?? '')) continue;
     setElementValue(element, batch[index].value);
+    delete element.dataset.claimExtensionInvestigationVerified;
     count++;
   }
   if (count > 0) {
@@ -2435,8 +2515,8 @@ globalThis.ClaimAutoFillActions = {
   previewInvestigationVerification(verifiedCounts) {
     return previewInvestigationVerification(verifiedCounts);
   },
-  applyInvestigationVerification(token) {
-    return applyInvestigationVerification(token);
+  applyInvestigationVerification(token, options) {
+    return applyInvestigationVerification(token, options);
   },
   appendIpdActionRemarks(action, remarks) {
     return appendIpdActionRemarks(action, remarks);

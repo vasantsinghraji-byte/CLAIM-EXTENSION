@@ -1,20 +1,20 @@
 # Privacy Policy for Claim Amount Auto-Fill
 
-**Effective date:** 26 July 2026
+**Effective date:** 4 November 2026
 
-**Extension version reviewed:** 1.9.1
+**Extension version reviewed:** 1.12.0
 
-Claim Amount Auto-Fill is a Chrome extension for authorized Rajasthan
-Government Health Scheme (RGHS) claim reviewers. It helps users preview, audit,
-and apply approved claim amounts and remarks on RGHS process sheets.
+Claim Amount Auto-Fill is a Chrome extension for authorized claim reviewers.
+It helps users preview, audit,
+and apply approved claim amounts and remarks on claim process sheets.
 
 ## Data the extension handles
 
-The extension processes content from the current RGHS process sheet. Depending
+The extension processes content from the current claim process sheet. Depending
 on the page, this can include:
 
 - claim or transaction identifiers;
-- RGHS page URLs;
+- claim-page URLs;
 - package, procedure, investigation, and treatment descriptions;
 - claim, approved, rate, unit, and deduction amounts;
 - remarks and field values needed to preview, apply, undo, or recover a change;
@@ -22,7 +22,7 @@ on the page, this can include:
 - extension settings, custom review rules, remark templates, and widget
   position.
 
-For invite-only access, the service also handles:
+For account registration and licensed access, the service also handles:
 
 - account email, Firebase UID, verified-email status, and authentication tokens;
 - display name, organization, role, and account status;
@@ -43,7 +43,7 @@ user activity.
 
 The extension uses this data only to provide its disclosed purpose:
 
-- detect supported RGHS process-sheet fields;
+- detect supported claim process-sheet fields;
 - calculate and display proposed approved amounts;
 - screen configured package combinations for review risks;
 - show a review and reconciliation interface;
@@ -73,7 +73,7 @@ Data is stored using browser-provided storage:
   subsequent writes. A fully restored snapshot is removed.
 - Audit and feedback records are bounded in size but otherwise remain until
   they are cleared by the user or replaced by normal extension operation.
-- A short-lived submission summary may be stored in the RGHS tab's session
+- A short-lived submission summary may be stored in the claim portal tab's session
   storage for up to 24 hours and is scoped to the same portal path.
 - A UPI transaction reference and verification metadata remain in the user's
   server-side account record until replaced or account deletion/redaction.
@@ -84,19 +84,19 @@ extension-removal behavior.
 
 ## Data sharing and transmission
 
-Claim Amount Auto-Fill uses a Firebase development backend for invite-only
+Claim Amount Auto-Fill uses a Firebase backend for
 authentication, account and organization authorization, licence verification,
 configuration, rate limiting, and privacy-safe audit metadata. Firebase
 receives the minimum account and access data listed above. The extension does
 not send patient names, TIDs or claim identifiers, diagnoses, treatment text,
-claim/approved/deduction amounts, RGHS URLs, medical documents, or portal
+claim/approved/deduction amounts, claim portal URLs, medical documents, or portal
 remarks to Firebase.
 
 The extension does not include advertising or third-party analytics code.
 
-The extension operates on the RGHS page already opened by the user. Changes
+The extension operates on the claim page already opened by the user. Changes
 explicitly applied by the user become part of that page and may later be sent
-to RGHS when the user independently submits the portal form. The extension
+to the claim portal when the user independently submits the portal form. The extension
 does not click or automatically submit that form.
 
 Chrome may sync the non-claim settings described above according to the user's
@@ -107,10 +107,11 @@ governed by Google's own terms and privacy policy.
 
 The production extension runs only on `https://rghs.rajasthan.gov.in/*`. All
 executable code is packaged with the extension; the extension does not download
-or execute remote code. It requests only the `activeTab` and `storage`
-permissions plus `alarms` for bounded licence rechecks. It contacts only the
+or execute remote code. It requests `activeTab` and `storage`, `alarms` for bounded
+licence rechecks, and `tabs` to connect the investigation companion with its
+matching claim sheet. It contacts only the
 Firebase Identity Toolkit, Secure Token API, the configured callable Functions
-origin, and the RGHS host declared in its manifest.
+origin, and the claim portal host declared in its manifest.
 
 No method of local storage can be guaranteed to prevent access by a person or
 software that already controls the user's browser profile or device. Users

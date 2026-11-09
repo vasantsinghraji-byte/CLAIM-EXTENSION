@@ -439,7 +439,7 @@
           open.addEventListener('click', () => {
             const url = new URL(entry.transactionUrl, location.origin);
             if (url.origin !== location.origin) {
-              showStatus('The portal record link is not available on this RGHS page.', 'error');
+              showStatus('The portal record link is not available on this claim page.', 'error');
               return;
             }
             url.hash = entry.transactionId || '';
@@ -597,7 +597,7 @@
     cardHistory.hidden = false;
     cardHistory.replaceChildren();
     const title = document.createElement('strong');
-    title.textContent = `RGHS case history (${history.cases.length})`;
+    title.textContent = `Claim case history (${history.cases.length})`;
     cardHistory.appendChild(title);
     if (history.cases.length) {
       const list = document.createElement('ul');
@@ -684,7 +684,7 @@
       });
       cardHistory.append(blockedInvestigations, historyResults);
     }
-    makeSectionCollapsible(cardHistory, 'card-history', `RGHS case history (${history.cases.length})`);
+    makeSectionCollapsible(cardHistory, 'card-history', `Claim case history (${history.cases.length})`);
   }
 
   function renderInvestigationChecklist() {
@@ -722,6 +722,10 @@
       input.value = String(item.expected);
       input.dataset.index = String(item.index);
       input.setAttribute('aria-label', `${item.label}: reports found`);
+      if (writable) input.addEventListener('input', () => {
+        investigationPreviewToken = null;
+        apply.disabled = true;
+      });
       row.append(label, input);
       investigationChecklist.appendChild(row);
     }
@@ -738,6 +742,15 @@
     apply.type = 'button';
     apply.textContent = 'Apply verified quantities';
     apply.disabled = true;
+    const acknowledgeLabel = document.createElement('label');
+    const acknowledge = document.createElement('input');
+    acknowledge.type = 'checkbox';
+    acknowledgeLabel.hidden = true;
+    acknowledgeLabel.append(acknowledge, ' I reviewed the proposed reductions against the investigation reports.');
+    let acknowledgementRequired = false;
+    acknowledge.addEventListener('change', () => {
+      apply.disabled = !investigationPreviewToken || acknowledgementRequired && !acknowledge.checked;
+    });
     preview.addEventListener('click', () => {
       const verifiedCounts = [...investigationChecklist.querySelectorAll('input[data-index]')]
         .map(input => ({ index: Number(input.dataset.index), found: input.value }));
@@ -749,16 +762,25 @@
         return;
       }
       investigationPreviewToken = result.token;
-      apply.disabled = false;
+      acknowledgementRequired = result.proposals.some(item => item.risk === 'high');
+      acknowledge.checked = false;
+      acknowledgeLabel.hidden = !acknowledgementRequired;
+      apply.disabled = acknowledgementRequired;
+      for (const item of result.proposals) {
+        const summary = document.createElement('p');
+        summary.textContent = `${item.reason}. Approved: ${item.beforeApproved} → ${item.proposedApproved}. Remark: ${item.proposedRemarks}`;
+        actionsRow.appendChild(summary);
+      }
       const reductions = result.proposals.filter(item => item.risk === 'high').length;
       showStatus(`${result.proposals.length} investigation row(s) prepared. ${reductions ? `${reductions} reduction(s) require your confirmed Apply.` : 'No reductions detected.'}`, reductions ? 'warning' : 'success');
     });
     apply.addEventListener('click', async () => {
       if (!investigationPreviewToken) return;
       apply.disabled = true;
-      const result = await actions.applyInvestigationVerification?.(investigationPreviewToken);
+      const result = await actions.applyInvestigationVerification?.(investigationPreviewToken, { acknowledgedHighRisk: acknowledge.checked });
       if (result?.blocked) {
-        showStatus('Investigation verification is stale. Review the quantities again before applying.', 'error');
+        investigationPreviewToken = null;
+        showStatus(`Investigation Apply blocked (${result.blockReason}). Review the sheet and preview again.`, 'error');
         return;
       }
       investigationPreviewToken = null;
@@ -766,7 +788,7 @@
       recoverButton.disabled = false;
       showStatus(`Applied ${result?.changedFieldCount || 0} verified investigation field change(s). Recovery was saved locally.`, 'success');
     });
-    actionsRow.append(preview, apply);
+    actionsRow.append(preview, apply, acknowledgeLabel);
     investigationChecklist.appendChild(actionsRow);
     makeSectionCollapsible(investigationChecklist, 'investigations', 'Investigation verification');
   }
@@ -963,13 +985,14 @@
       applyButton.disabled = true;
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
-        'unsupported-layout': 'BLOCKED: The RGHS process-sheet layout is not compatible with this extension version.',
+        'unsupported-layout': 'BLOCKED: The claim process-sheet layout is not compatible with this extension version.',
         'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.',
         'invalid-processing-rule-set': 'BLOCKED: The published processing rules failed validation. Contact an administrator.',
         'processing-rules-unavailable': 'BLOCKED: The latest processing rules could not be verified. Try again when connected.',
         'processing-rule-blocked': 'BLOCKED: A centrally governed package rule prevents processing.',
         'processing-validation-required': 'BLOCKED: A centrally required validation must be completed.',
         'processing-rule-target-missing': 'BLOCKED: A configured target column is unavailable on this sheet.',
+        'overlapping-ipd-rules': 'BLOCKED: Different IPD adjustments propose conflicting amounts. Ask your administrator to review the applicable policy.',
         'signed-out': 'BLOCKED: Sign in to Claim Spark to continue.',
         'licence-preview-blocked': 'BLOCKED: Your licence does not currently allow Preview. Contact your administrator.',
         'update-required': 'BLOCKED: Update Claim Spark before continuing.',
@@ -1289,7 +1312,7 @@
       requestAnimationFrame(() => reviewList.scrollIntoView({ block: 'start', behavior: 'smooth' }));
     } catch (_) {
       if (!hasValidExtensionContext()) return invalidateStaleWidget();
-      showStatus('Unable to prepare this sheet for preview. Refresh the RGHS page and try again.', 'error');
+      showStatus('Unable to prepare this sheet for preview. Refresh the claim page and try again.', 'error');
     }
   });
   pendingButton.addEventListener('click', () => {

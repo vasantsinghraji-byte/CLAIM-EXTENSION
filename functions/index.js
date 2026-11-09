@@ -657,6 +657,28 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
 
     await db.runTransaction(async transaction => {
       const userSnapshot = await transaction.get(userReference);
+      if (userSnapshot.exists) {
+        const user = userSnapshot.data();
+        if (user.email !== authenticatedEmail) {
+          fail('failed-precondition', 'Existing user profile does not match authenticated email');
+        }
+        if (user.accountStatus === 'active') {
+          onboarding = user;
+          role = user.role;
+          alreadyAccepted = true;
+          return;
+        }
+        // Self-service registration cannot undo an administrator decision or
+        // replace an invitation, sponsored membership, or individual purchase.
+        if (user.accountStatus !== 'invited'
+            || user.onboardingSource !== 'self-registration'
+            || user.organizationId !== SELF_SERVICE_ORGANIZATION_ID
+            || user.role !== SELF_SERVICE_ROLE
+            || user.license?.status !== 'inactive'
+            || user.license?.paymentStatus !== 'not_required') {
+          fail('permission-denied', 'Existing account requires administrator action');
+        }
+      }
       const [organizationSnapshot, licenceSnapshot, activeUsers] = await Promise.all([
         transaction.get(organizationReference),
         transaction.get(licenceReference),
@@ -665,25 +687,15 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
       if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
         fail('failed-precondition', 'Organization is not active');
       }
+      const platformExpiryMs = licenceSnapshot.exists ? timestampMillis(licenceSnapshot.data().expiryDate) : NaN;
       if (!licenceSnapshot.exists || licenceSnapshot.data().status !== 'active'
-          || timestampMillis(licenceSnapshot.data().expiryDate) < Date.now()) {
+          || !Number.isFinite(platformExpiryMs) || platformExpiryMs <= Date.now()) {
         fail('failed-precondition', 'Organization licence is not active');
       }
       const maximumUsers = boundedInteger(licenceSnapshot.data().maximumUsers, 'maximumUsers', 1, 500);
       if (userSnapshot.exists) {
         const user = userSnapshot.data();
-        if (user.email !== authenticatedEmail) {
-          fail('failed-precondition', 'Existing user profile does not match authenticated email');
-        }
         onboarding = user;
-        if (user.accountStatus === 'active') {
-          alreadyAccepted = true;
-          role = user.role || SELF_SERVICE_ROLE;
-          return;
-        }
-        if (user.organizationId !== SELF_SERVICE_ORGANIZATION_ID) {
-          fail('failed-precondition', 'Existing user profile belongs to another organization');
-        }
         if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
         const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
         role = user.role || SELF_SERVICE_ROLE;
@@ -701,6 +713,7 @@ exports.completeInvitationOnboarding = onCall(callableOptions, async request => 
           },
           updatedAt: FieldValue.serverTimestamp()
         });
+        createRegistrationAudit(transaction);
         return;
       }
       if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
