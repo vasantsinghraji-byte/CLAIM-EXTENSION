@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const ProcessingRules = require('../processing-rules');
+const ServerRules = require('../functions/lib/processing-rules');
+const moneyCases = require('../functions/test/fixtures/processing-money-cases.json');
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -165,4 +167,66 @@ test('published central rules are accepted only when their checksum matches', as
   assert.equal(await ProcessingRules.verifyPublishedRuleSet(published), true);
   published.rules[0].priority++;
   assert.equal(await ProcessingRules.verifyPublishedRuleSet(published), false);
+});
+
+test('central money parsing accepts supported currency formats and rejects malformed values', () => {
+  for (const input of [1000, '1000', '1,000', '₹ 1,000.00', 'Rs. 1,000', 'INR 1000']) {
+    assert.equal(ProcessingRules.parseMoney(input), 1000, String(input));
+  }
+  assert.equal(ProcessingRules.parseMoney('1,23,456.78'), 123456.78);
+  assert.equal(ProcessingRules.parseMoney('123,456.78'), 123456.78);
+  assert.equal(ProcessingRules.parseMoney('0'), 0);
+  for (const input of ['', '   ', null, undefined, true, {}, NaN, Infinity, -1,
+    '-1', '1,00', '1,000junk', '1000oops', '1e3', '1.2.3', '1 000']) {
+    assert.equal(ProcessingRules.parseMoney(input), null, String(input));
+  }
+});
+
+test('formatted central amounts calculate normally and invalid money blocks evaluation', () => {
+  const set = { schemaVersion: 2, rules: [rule()] };
+  const line = { index: 1, packageText: 'PKG-X', claimValue: '1,000.00', approvedValue: '' };
+  const result = ProcessingRules.evaluate(set, [line], 'IPD');
+  assert.equal(result.rowActions[0].proposedApproved, 900);
+  for (const changed of [{ claimValue: '1,00' }, { claimValue: '-10' }, { approvedValue: 'invalid' }]) {
+    const invalid = ProcessingRules.evaluate(set, [{ ...line, ...changed }], 'IPD');
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.blocked, true);
+    assert.equal(invalid.rowActions.length, 0);
+  }
+});
+
+for (const item of moneyCases) {
+  test(`browser and publication scenarios agree: ${item.name}`, () => {
+    const action = { type: 'applyDeduction', targetPackageCodes: ['PKG-X'], cumulative: item.cumulative === true,
+      calculation: { method: item.method, basis: item.basis || 'claimedAmount', value: item.value } };
+    const scenario = { scenarioId: 'MONEY-CHECK', name: item.name, processingArea: 'IPD',
+      lines: [{ packageCodes: ['PKG-X'], claimAmount: item.claim,
+        ...(item.approved === '' ? {} : { approvedAmount: item.approved }) }],
+      expected: { matchedRuleIds: ['IPD-X-10'], blocked: false, approvedAmounts: { 'PKG-X': item.expected } } };
+    const normalized = ServerRules.normalizeRule(rule({ actions: [action], scenarios: [scenario] }));
+    const server = ServerRules.runScenarios([normalized]);
+    const browser = ProcessingRules.evaluate({ schemaVersion: 2, rules: [normalized] }, [
+      { index: 0, packageText: 'PKG-X', claimValue: item.claim, approvedValue: item.approved }
+    ], 'IPD');
+    assert.equal(server.passed, true, JSON.stringify(server.results));
+    assert.equal(browser.ok, true);
+    assert.equal(browser.rowActions[0].proposedApproved, item.expected);
+    assert.equal(browser.rowActions[0].proposedApproved, server.results[0].actual.approvedAmounts['PKG-X']);
+  });
+}
+
+test('browser and server agree on rejected outcomes after package exclusion', () => {
+  const exclude = rule({ actions: [{ type: 'excludePackage', targetPackageCodes: ['PKG-X'] }], scenarios: [{
+    scenarioId: 'EXCLUSION-OUTCOME', name: 'Rejected outcome triggers subsequent blocking', processingArea: 'IPD',
+    lines: [{ packageCodes: ['PKG-X'], claimAmount: 1000 }],
+    expected: { matchedRuleIds: ['IPD-X-10', 'REJECTED-BLOCK'], blocked: true, approvedAmounts: { 'PKG-X': 0 } }
+  }] });
+  const block = rule({ ruleId: 'REJECTED-BLOCK', priority: 400, enforcement: 'blocking',
+    conditions: { operator: 'processingOutcomeEquals', value: 'rejected' },
+    actions: [{ type: 'blockProcessing', message: 'Review the excluded package.' }] });
+  const rules = [exclude, block].map(value => ServerRules.normalizeRule(value));
+  assert.equal(ServerRules.runScenarios(rules).passed, true);
+  assert.equal(ProcessingRules.evaluate({ schemaVersion: 2, rules }, [
+    { index: 0, packageText: 'PKG-X', claimValue: 1000, approvedValue: '' }
+  ], 'IPD').blocked, true);
 });
