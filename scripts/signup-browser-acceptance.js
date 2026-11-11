@@ -10,10 +10,29 @@ const { createBuildEntries, runtimeConfigSource } = require('../build');
 const { BrowserPipe, until } = require('./extension-browser-e2e');
 const { findChrome } = require('./browser-smoke-e2e');
 
-function cleanup(directory) {
+async function cleanup(directory) {
   const resolved = path.resolve(directory);
   if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep + 'claim-signup-e2e-')) throw new Error('Unexpected test cleanup path');
-  fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 12, retryDelay: 300 });
+  await fs.promises.rm(resolved, { recursive: true, force: true, maxRetries: 12, retryDelay: 300 });
+}
+
+function waitForBrowserExit(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const exited = () => { clearTimeout(timer); resolve(true); };
+    const timer = setTimeout(() => { child.removeListener('exit', exited); resolve(false); }, 5000);
+    child.once('exit', exited);
+  });
+}
+
+async function closeBrowser(browser, child) {
+  if (browser) await browser.send('Browser.close').catch(() => {});
+  // Let Chrome finish shutting down its writers before deleting the profile.
+  // Immediate SIGTERM can leave renderer processes writing on Linux runners.
+  if (child && !await waitForBrowserExit(child)) {
+    child.kill();
+    if (!await waitForBrowserExit(child)) throw new Error('Signup browser did not exit before profile cleanup');
+  }
 }
 
 // Actual unpacked extension + actual Auth/Functions/Firestore emulators.
@@ -121,10 +140,9 @@ async function testSignupBrowser({ db, adminToken, callFunction }) {
     assert.equal(profile.license.status, 'inactive');
     console.log('PASS: actual extension signup, duplicate detection, inline verification feedback, reopen/sign-in recovery, real email-code verification, unpaid locks, payment/activation separation and stale-entitlement Apply denial. Local Firebase emulators only.');
   } finally {
-    if (browser) await browser.send('Browser.close').catch(() => {});
-    if (child && child.exitCode === null) { child.kill(); await new Promise(resolve => { child.once('exit', resolve); setTimeout(resolve, 2000); }); }
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    cleanup(temporary);
+    await closeBrowser(browser, child);
+    await cleanup(temporary);
   }
 }
 module.exports = { testSignupBrowser };
