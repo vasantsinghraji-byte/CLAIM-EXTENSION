@@ -30,6 +30,18 @@ test('server normalizes centrally governed rules and creates stable checksums', 
   assert.equal(normalizeRuleSet([validRule]).checksum, normalizeRuleSet([validRule]).checksum);
 });
 
+test('saved synthetic scenarios can be normalized again for validation and publication', () => {
+  const withScenario = { ...validRule, scenarios: [{ scenarioId: 'SAVED-SCENARIO', name: 'Saved scenario', processingArea: 'IPD',
+    lines: [{ packageCodes: ['PKG-X'], claimAmount: 1000, approvedAmount: 1000 }],
+    expected: { matchedRuleIds: ['IPD-X-10'], blocked: false, approvedAmounts: { 'PKG-X': 900 } } }] };
+  const saved = normalizeRule(withScenario);
+  assert.equal(saved.scenarios[0].outcome, '');
+  assert.equal(saved.scenarios[0].lines[0].index, 0);
+  assert.deepEqual(normalizeRule(saved), saved);
+  assert.equal(normalizeRuleSet([saved]).checksum, normalizeRuleSet([withScenario]).checksum);
+  assert.throws(() => normalizeRule({ ...saved, scenarios: [{ ...saved.scenarios[0], lines: [{ ...saved.scenarios[0].lines[0], index: 8 }] }] }), /line position/);
+});
+
 test('server rejects executable or unrecognized rule fields', () => {
   assert.throws(() => normalizeRule({ ...validRule, script: 'alert(1)' }), /not allowed/);
   assert.throws(() => normalizeRule({
