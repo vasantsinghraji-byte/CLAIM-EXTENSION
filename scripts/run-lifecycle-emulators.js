@@ -51,9 +51,11 @@ function main() {
     FUNCTIONS_DISCOVERY_TIMEOUT: '60000'
   };
   const firebaseCli = path.join(root, 'node_modules', 'firebase-tools', 'lib', 'bin', 'firebase.js');
+  const mode = ['--governance-only', '--onboarding-only', '--licence-regressions-only'].find(flag => process.argv.includes(flag));
+  const acceptance = `node scripts/license-lifecycle-acceptance.js${mode ? ` ${mode}` : ''}`;
   const result = spawnSync(node22, [
     firebaseCli, 'emulators:exec', '--only', 'auth,functions,firestore',
-    'node scripts/license-lifecycle-acceptance.js',
+    acceptance,
     '--project', 'demo-claimextension', '--config', 'firebase.emulator.json'
   ], { cwd: root, env, stdio: 'inherit' });
   process.exitCode = result.status === null ? 1 : result.status;

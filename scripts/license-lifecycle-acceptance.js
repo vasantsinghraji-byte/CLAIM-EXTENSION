@@ -125,6 +125,7 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   });
   assert.deepEqual(rosterImport, { organizationId: 'acceptance-org', submitted: 2, created: 2, updated: 0 });
   const sponsoredToken = await signIn(sponsored.email);
+  await callFunction('completeInvitationOnboarding', sponsoredToken, { displayName: 'Sponsored Processor' });
   const onboarding = await callFunction('completeOrganizationSponsoredOnboarding', sponsoredToken, {
     organizationId: 'acceptance-org', employeeCode: 'EMP-ACCEPT-01', displayName: 'Sponsored Processor'
   });
@@ -148,6 +149,10 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   assert.equal(access.applyAllowed, true);
 
   await callFunction('setUserLicense', adminToken, { uid: sponsored.uid, action: 'deactivate' });
+  const deactivatedAccess = await callFunction('verifyLicence', sponsoredToken, { extensionVersion: '1.12.0' });
+  assert.equal(deactivatedAccess.status, 'inactive');
+  assert.equal(deactivatedAccess.applyAllowed, false);
+  await callFunction('getActiveProcessingRules', sponsoredToken, { extensionVersion: '1.12.0' }, 'PERMISSION_DENIED');
   await callFunction('suspendUser', adminToken, { uid: sponsored.uid });
   await callFunction('activateUser', adminToken, { uid: sponsored.uid });
   const reactivated = (await db.doc(`users/${sponsored.uid}`).get()).data();
@@ -157,10 +162,12 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   const reactivatedAccess = await callFunction(
     'verifyLicence', sponsoredToken, { extensionVersion: '1.11.1' }
   );
-  assert.equal(reactivatedAccess.status, 'active',
-    'active organisation members inherit the organisation licence');
+  assert.equal(reactivatedAccess.status, 'inactive',
+    'account reactivation must not bypass the independent user licence deactivation');
   assert.equal(reactivatedAccess.licenseType, 'organisation');
-  assert.equal(reactivatedAccess.applyAllowed, true);
+  assert.equal(reactivatedAccess.applyAllowed, false);
+  await callFunction('setUserLicense', adminToken, { uid: sponsored.uid, action: 'activate', durationWeeks: 4 });
+  assert.equal((await callFunction('verifyLicence', sponsoredToken, { extensionVersion: '1.12.0' })).applyAllowed, true);
 }
 
 async function testIndividualLifecycle(auth, db, adminToken) {
@@ -222,6 +229,9 @@ async function testIndividualLifecycle(auth, db, adminToken) {
   assert.equal(pendingRenewalAccess.applyAllowed, true);
   assert.equal(pendingRenewalAccess.expiringSoon, true);
   assert.equal(pendingRenewalAccess.paymentStatus, 'pending_verification');
+  await callFunction('verifyUserPayment', adminToken, { uid: individual.uid, verified: false, reason: 'Synthetic declined renewal' });
+  assert.equal((await callFunction('verifyLicence', individualToken, { extensionVersion: '1.12.0' })).applyAllowed, true,
+    'declining a renewal must preserve the previously paid current term');
   await callFunction('verifyUserPayment', adminToken, { uid: individual.uid, verified: true });
   await callFunction('setUserLicense', adminToken, {
     uid: individual.uid, action: 'extend', durationWeeks: 1
@@ -233,21 +243,24 @@ async function testIndividualLifecycle(auth, db, adminToken) {
   assert.ok(renewed.license.expiresAt.toMillis() > renewalBase);
 }
 
-async function testSelfServiceSafety(auth, db) {
+async function testSelfServiceSafety(auth, db, adminToken) {
   const register = (token, expectedError = null) => callFunction(
     'completeInvitationOnboarding', token, { displayName: 'Synthetic Processor' }, expectedError
   );
   const fresh = await createVerifiedUser(auth, 'selfservice-fresh@claim-spark.local', 'Synthetic Processor');
-  const freshToken = await signIn(fresh.email);
-  assert.equal((await register(freshToken)).status, 'active');
-  assert.equal((await register(freshToken)).alreadyAccepted, true);
+  const token = await signIn(fresh.email);
+  const registration = await register(token);
+  assert.equal(registration.status, 'invited');
+  assert.equal(registration.activationRequired, true);
+  assert.equal(registration.accessSelectionRequired, true);
+  assert.equal((await register(token)).alreadyAccepted, true);
   const created = (await db.doc(`users/${fresh.uid}`).get()).data();
-  assert.equal(created.accountStatus, 'active');
-  assert.equal(created.license.type, 'organisation');
-  assert.equal((await callFunction('verifyLicence', freshToken, { extensionVersion: '1.11.1' })).applyAllowed, true);
+  assert.equal(created.accountStatus, 'invited');
+  assert.equal(created.license.type, 'individual');
+  assert.equal(created.license.status, 'inactive');
+  await callFunction('verifyLicence', token, { extensionVersion: '1.12.0' }, 'PERMISSION_DENIED');
   const audits = await db.collection('auditLogs').where('targetId', '==', fresh.uid).get();
   assert.equal(audits.docs.filter(doc => doc.data().action === 'user.registration_completed').length, 1);
-
   for (const status of ['suspended', 'rejected', 'deleted']) {
     const identity = await createVerifiedUser(auth, `selfservice-${status}@claim-spark.local`, 'Synthetic Processor');
     await db.doc(`users/${identity.uid}`).set({
@@ -257,57 +270,114 @@ async function testSelfServiceSafety(auth, db) {
     await register(await signIn(identity.email), 'PERMISSION_DENIED');
     assert.equal((await db.doc(`users/${identity.uid}`).get()).data().accountStatus, status);
   }
-
-  const pendingPaid = await createVerifiedUser(auth, 'selfservice-paid@claim-spark.local', 'Synthetic Processor');
-  await db.doc(`users/${pendingPaid.uid}`).set({
-    email: pendingPaid.email, role: 'processor', organizationId: 'platform', accountStatus: 'invited',
-    onboardingSource: 'self-registration', license: { ...defaultLicense(), paymentStatus: 'pending_verification' }
-  });
-  await register(await signIn(pendingPaid.email), 'PERMISSION_DENIED');
-  assert.equal((await db.doc(`users/${pendingPaid.uid}`).get()).data().license.type, 'individual');
-
-  const legacy = await createVerifiedUser(auth, 'selfservice-legacy@claim-spark.local', 'Synthetic Processor');
-  await db.doc(`users/${legacy.uid}`).set({
-    email: legacy.email, role: 'processor', organizationId: 'platform', accountStatus: 'invited',
-    onboardingSource: 'self-registration', license: defaultLicense()
-  });
-  assert.equal((await register(await signIn(legacy.email))).status, 'active');
-
+  await callFunction('submitPaymentProof', token, { paymentReference: 'SELF-REG-PAYMENT', durationWeeks: 1 });
+  assert.equal((await register(token)).accessSelectionRequired, false);
+  assert.equal((await db.doc(`users/${fresh.uid}`).get()).data().license.paymentStatus, 'pending_verification');
+  await callFunction('activateUser', adminToken, { uid: fresh.uid });
+  assert.equal((await callFunction('verifyLicence', token, { extensionVersion: '1.12.0' })).applyAllowed, false,
+    'account approval alone must not activate an unpaid licence');
+  await callFunction('setUserLicense', adminToken, { uid: fresh.uid, action: 'activate', durationWeeks: 1 }, 'FAILED_PRECONDITION');
+  // Even inconsistent active data cannot authorize an unpaid initial term.
+  await db.doc(`users/${fresh.uid}`).update({ 'license.status': 'active', 'license.expiresAt': Timestamp.fromMillis(Date.now() + 86400000) });
+  assert.equal((await callFunction('verifyLicence', token, { extensionVersion: '1.12.0' })).applyAllowed, false);
+  await callFunction('getActiveProcessingRules', token, { extensionVersion: '1.12.0' }, 'PERMISSION_DENIED');
+  await db.doc(`users/${fresh.uid}`).update({ 'license.paymentStatus': 'not_required' });
+  await callFunction('setUserLicense', adminToken, { uid: fresh.uid, action: 'extend', durationWeeks: 1 }, 'FAILED_PRECONDITION');
+  const inherited = await createVerifiedUser(auth, 'legacy-inherited@claim-spark.local', 'Legacy Unactivated Processor');
+  const inheritedToken = await signIn(inherited.email);
+  await db.doc(`users/${inherited.uid}`).set({ email: inherited.email, role: 'processor', accountStatus: 'active',
+    organizationId: 'platform', onboardingSource: 'self-registration', license: {
+      ...defaultLicense(), type: 'organisation', status: 'active', organizationId: 'platform',
+      expiresAt: Timestamp.fromMillis(Date.now() + 86400000)
+    } });
+  assert.equal((await callFunction('verifyLicence', inheritedToken, { extensionVersion: '1.12.0' })).applyAllowed, false,
+    'legacy automatically inherited licence must require explicit administrator activation');
+  await callFunction('getActiveProcessingRules', inheritedToken, { extensionVersion: '1.12.0' }, 'PERMISSION_DENIED');
+  await callFunction('setUserLicense', adminToken, { uid: inherited.uid, action: 'activate', durationWeeks: 4 });
+  assert.equal((await callFunction('verifyLicence', inheritedToken, { extensionVersion: '1.12.0' })).applyAllowed, true);
   const unverified = await auth.createUser({ email: 'selfservice-unverified@claim-spark.local', password: TEST_PASSWORD });
   await register(await signIn(unverified.email), 'FAILED_PRECONDITION');
   assert.equal((await db.doc(`users/${unverified.uid}`).get()).exists, false);
-
   const licenceReference = db.doc('licences/platform');
   const originalLicence = (await licenceReference.get()).data();
-  const invalidLicenceUser = await createVerifiedUser(auth, 'selfservice-expiry@claim-spark.local', 'Synthetic Processor');
-  const expiryToken = await signIn(invalidLicenceUser.email);
   try {
-    for (const expiryDate of [null, Timestamp.fromMillis(Date.now() - 1000)]) {
-      await licenceReference.update({ expiryDate });
-      await register(expiryToken, 'FAILED_PRECONDITION');
-      assert.equal((await db.doc(`users/${invalidLicenceUser.uid}`).get()).exists, false);
-    }
+    await licenceReference.update({ expiryDate: Timestamp.fromMillis(Date.now() - 1) });
+    const waiting = await createVerifiedUser(auth, 'selfservice-waiting@claim-spark.local', 'Synthetic Processor');
+    assert.equal((await register(await signIn(waiting.email))).status, 'invited');
+    await callFunction('activateUser', adminToken, { uid: waiting.uid }, 'FAILED_PRECONDITION');
     await licenceReference.set(originalLicence);
     const activeCount = (await db.collection('users').where('organizationId', '==', 'platform').where('accountStatus', '==', 'active').get()).size;
     await licenceReference.update({ maximumUsers: activeCount + 1 });
-    const contenders = await Promise.all([1, 2].map(index =>
-      createVerifiedUser(auth, `selfservice-race-${index}@claim-spark.local`, 'Synthetic Processor')));
-    const results = await Promise.all(contenders.map(async identity => {
-      const token = await signIn(identity.email);
-      const { body } = await jsonRequest(`${FUNCTIONS_BASE_URL}/completeInvitationOnboarding`, {
-        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ data: { displayName: 'Synthetic Processor' } })
-      });
-      return body;
-    }));
-    assert.equal(results.filter(result => result.result?.status === 'active').length, 1);
-    assert.equal(results.filter(result => result.error?.status === 'RESOURCE_EXHAUSTED').length, 1);
-    const finalCount = (await db.collection('users').where('organizationId', '==', 'platform').where('accountStatus', '==', 'active').get()).size;
-    assert.equal(finalCount, activeCount + 1);
-  } finally {
-    await licenceReference.set(originalLicence);
+    const contenders = await Promise.all([1, 2].map(index => createVerifiedUser(auth, `selfservice-race-${index}@claim-spark.local`, 'Synthetic Processor')));
+    for (const identity of contenders) await register(await signIn(identity.email));
+    const results = await Promise.all(contenders.map(identity => jsonRequest(`${FUNCTIONS_BASE_URL}/activateUser`, {
+      method: 'POST', headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ data: { uid: identity.uid } })
+    })));
+    assert.equal(results.filter(result => result.body.result).length, 1);
+    assert.equal(results.filter(result => result.body.error?.status === 'RESOURCE_EXHAUSTED').length, 1);
+  } finally { await licenceReference.set(originalLicence); }
+  console.log('PASS: pending registration, idempotent recovery, unpaid access denial and administrator capacity enforcement.');
+}
+
+async function testRuleGovernance(auth, db, adminToken) {
+  const secondAdmin = await createVerifiedUser(auth, 'acceptance-policy-admin@claim-spark.local', 'Synthetic Policy Administrator');
+  await auth.setCustomUserClaims(secondAdmin.uid, { role: 'platformAdmin', accountStatus: 'active', organizationId: 'platform' });
+  await db.doc(`users/${secondAdmin.uid}`).set({ email: secondAdmin.email, role: 'platformAdmin', accountStatus: 'active', organizationId: 'platform' });
+  const secondToken = await signIn(secondAdmin.email);
+  const warning = { ruleId: 'QA-WARNING', schemaVersion: 2, name: 'Synthetic warning', description: '',
+    processingArea: 'ALL', enabled: true, priority: 200, enforcement: 'advisory',
+    conditions: { operator: 'packagePresent', packageCodes: ['QA-WARN'] }, actions: [{ type: 'warn', message: 'Synthetic review warning' }], scenarios: [] };
+  await callFunction('saveProcessingRuleDraft', adminToken, { rule: warning });
+  await callFunction('setProcessingRuleStatus', adminToken, { ruleId: warning.ruleId, enabled: false });
+  await callFunction('setProcessingRuleStatus', adminToken, { ruleId: warning.ruleId, enabled: true });
+  const validated = await callFunction('validateProcessingRuleDrafts', adminToken, { bundledFallbackEnabled: true });
+  assert.equal(validated.ruleCount, 1);
+  const first = await callFunction('publishProcessingRuleDrafts', adminToken, { bundledFallbackEnabled: true });
+  assert.equal(first.approvalRequired, false); assert.ok(first.versionId);
+  const deduction = { ruleId: 'QA-DEDUCTION', schemaVersion: 2, name: 'Synthetic deduction', description: '',
+    processingArea: 'IPD', enabled: true, priority: 100, enforcement: 'mandatory',
+    conditions: { operator: 'packagePresent', packageCodes: ['QA-DEDUCT'] }, actions: [{ type: 'applyDeduction',
+      targetPackageCodes: ['QA-DEDUCT'], calculation: { method: 'fixedAmount', basis: 'claimedAmount', value: 100 }, cumulative: false }],
+    scenarios: [{ scenarioId: 'QA-DEDUCT-TEST', name: 'Synthetic deduction test', processingArea: 'IPD',
+      lines: [{ packageCodes: ['QA-DEDUCT'], claimAmount: 1000, approvedAmount: 1000 }],
+      expected: { matchedRuleIds: ['QA-DEDUCTION'], blocked: false, approvedAmounts: { 'QA-DEDUCT': 900 } } }] };
+  await callFunction('saveProcessingRuleDraft', adminToken, { rule: deduction });
+  const impact = await callFunction('validateProcessingRuleDrafts', adminToken, { bundledFallbackEnabled: true });
+  assert.equal(impact.scenarios.publishable, true);
+  const pending = await callFunction('publishProcessingRuleDrafts', adminToken, { bundledFallbackEnabled: true });
+  assert.equal(pending.approvalRequired, true);
+  await callFunction('approveProcessingRulePublication', adminToken, { approvalId: pending.approval.approvalId }, 'PERMISSION_DENIED');
+  const approved = await callFunction('approveProcessingRulePublication', secondToken, { approvalId: pending.approval.approvalId });
+  assert.ok(approved.versionId);
+  const reader = await createVerifiedUser(auth, 'acceptance-rule-reader@claim-spark.local', 'Synthetic Rule Reader');
+  await db.doc(`users/${reader.uid}`).set({ email: reader.email, role: 'processor', accountStatus: 'active', organizationId: 'platform',
+    license: { ...defaultLicense(), type: 'organisation', status: 'active', organizationId: 'platform' } });
+  const readerToken = await signIn(reader.email);
+  const active = await callFunction('getActiveProcessingRules', readerToken, { extensionVersion: '1.12.0', supportedRuleSchemaVersions: [2] });
+  assert.equal(active.versionId, approved.versionId); assert.equal(active.rules.length, 2);
+  const unchanged = await callFunction('getActiveProcessingRules', readerToken, {
+    extensionVersion: '1.12.0', supportedRuleSchemaVersions: [2], knownVersionId: active.versionId });
+  assert.equal(unchanged.unchanged, true);
+  const feedback = await callFunction('submitProcessingRuleFeedback', readerToken, { ruleId: deduction.ruleId,
+    ruleSetVersion: approved.versionId, category: 'incorrect_deduction', processingArea: 'IPD', packageCodes: ['QA-DEDUCT'] });
+  for (const status of ['under_review', 'accepted', 'rejected', 'resolved']) {
+    await callFunction('reviewProcessingRuleFeedback', adminToken, { feedbackId: feedback.feedbackId, status,
+      resolution: status === 'resolved' ? 'rule_updated' : null });
   }
-  console.log('PASS: self-service status, payment, expiry, audit and concurrent capacity protections.');
+  assert.equal((await callFunction('listProcessingRuleFeedback', adminToken)).feedback.find(item => item.feedbackId === feedback.feedbackId).status, 'resolved');
+  const rollback = await callFunction('activateProcessingRuleVersion', adminToken, { versionId: first.versionId });
+  if (rollback.approvalRequired) await callFunction('approveProcessingRulePublication', secondToken, { approvalId: rollback.approval.approvalId });
+  assert.equal((await db.doc('processingRuleState/active').get()).data().versionId, first.versionId);
+  const rejected = await callFunction('publishProcessingRuleDrafts', adminToken, { bundledFallbackEnabled: true });
+  assert.equal(rejected.approvalRequired, true);
+  await callFunction('rejectProcessingRulePublication', secondToken, { approvalId: rejected.approval.approvalId });
+  assert.equal((await db.doc(`processingRuleApprovals/${rejected.approval.approvalId}`).get()).data().status, 'rejected');
+  assert.equal((await db.doc('processingRuleState/active').get()).data().versionId, first.versionId);
+  assert.equal((await callFunction('listProcessingRuleVersions', adminToken)).versions.length, 2);
+  assert.ok((await callFunction('listProcessingRuleApprovals', adminToken)).approvals.length >= 2);
+  assert.ok((await callFunction('listProcessingRuleHistory', adminToken)).events.length >= 5);
+  console.log('PASS: rule drafts/status, validation, publish, distinct-admin approval, self-approval rejection, version refresh, feedback/review, rollback, rejected publication and history on isolated emulators.');
 }
 
 async function main() {
@@ -319,9 +389,23 @@ async function main() {
     const db = getFirestore(app);
     const { admin, sponsoredExpiry } = await seedFoundation(auth, db);
     const adminToken = await signIn(admin.email);
+    if (process.argv.includes('--licence-regressions-only')) {
+      await testIndividualLifecycle(auth, db, adminToken);
+      await testSelfServiceSafety(auth, db, adminToken);
+      console.log('PASS: final unpaid, legacy inherited access, renewal and capacity regressions on local emulators.');
+      return;
+    }
+    if (process.argv.includes('--governance-only')) {
+      await testRuleGovernance(auth, db, adminToken);
+      console.log('PASS: complete rule-governance acceptance against local emulators.');
+      return;
+    }
     await testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry);
     await testIndividualLifecycle(auth, db, adminToken);
-    await testSelfServiceSafety(auth, db);
+    await testSelfServiceSafety(auth, db, adminToken);
+    await require('./signup-browser-acceptance').testSignupBrowser({ db, adminToken, callFunction });
+    if (process.argv.includes('--onboarding-only')) return;
+    await testRuleGovernance(auth, db, adminToken);
     console.log('PASS: sponsored and individual licence lifecycles completed against local emulators.');
   } finally {
     await deleteApp(app);

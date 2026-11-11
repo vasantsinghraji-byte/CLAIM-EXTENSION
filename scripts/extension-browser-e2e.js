@@ -116,7 +116,7 @@ async function main() {
   const chrome = findChrome();
   if (!chrome) throw new Error('Chrome is required for actual-extension acceptance. Set CHROME_PATH.');
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'claim-extension-e2e-'));
-  const state = { rules: [], governed: false, offline: false };
+  const state = { held: [], holdLicence: false, rules: [], governed: false, offline: false };
   const json = (response, value) => { response.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }); response.end(JSON.stringify(value)); };
   const server = http.createServer((request, response) => {
     if (request.method === 'OPTIONS') { response.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*' }); response.end(); return; }
@@ -130,7 +130,9 @@ async function main() {
         rules: state.rules, bundledFallbackEnabled: false, checksum: `sha256:${checksum}:central` } });
     }
     if (request.url === '/functions/verifyLicence') {
-      return json(response, { result: { status: 'active', applyAllowed: true, previewAllowed: true, expiresAt: new Date(Date.now() + 3600000).toISOString() } });
+      const finish = () => json(response, { result: { status: 'active', applyAllowed: true, previewAllowed: true, expiresAt: new Date(Date.now() + 3600000).toISOString() } });
+      if (state.holdLicence) state.held.push(finish); else finish();
+      return;
     }
     response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(request.url.startsWith('/RGHS/processSheetSearch/')
       ? fixture.replace('value="SYN-A"', `value="${request.url.includes('/SYN-B/') ? 'SYN-B' : 'SYN-A'}"`) : '<html><body></body></html>');
@@ -226,11 +228,20 @@ async function main() {
     assert.equal((await evaluate('ClaimAutoFillActions.restoreRecovery()')).count, 1);
     assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '0');
     state.offline = false;
+    state.holdLicence = true;
+    await options.evaluate(`window.pendingLicence=chrome.runtime.sendMessage({action:'authRefreshLicence'});true`);
+    await until(() => state.held.length, 'pending verification');
     assert.equal((await options.evaluate(`chrome.runtime.sendMessage({action:'authSignOut'})`)).success, true);
+    state.held.splice(0).forEach(finish => finish()); state.holdLicence = false;
+    await options.evaluate('window.pendingLicence');
+    const signedOut = await options.evaluate(`chrome.storage.local.get(['authSession','licenceState','processingRuleSet'])`);
+    assert.equal(signedOut.authSession, null); assert.equal(signedOut.licenceState, null); assert.equal(signedOut.processingRuleSet, null);
+    await until(() => popup.evaluate(`document.getElementById('fillNowBtn').disabled && !document.getElementById('claimAccessStatus').hidden`), 'signed-out popup locks claim tools');
     const afterSignOut = await options.evaluate(`chrome.storage.session.get('claimReviewDecisions')`);
     assert.deepEqual(afterSignOut.claimReviewDecisions, []);
-    console.log('PASS: actual extension, worker restart, scoped review resume, multi-tab isolation, safe-row continuation, policy freshness, offline Undo/recovery and sign-out review cleanup.');
+    console.log('PASS: actual extension, worker restart, scoped review resume, multi-tab isolation, safe-row continuation, policy freshness, offline Undo/recovery, sign-out races and review cleanup.');
   } finally {
+    state.held.splice(0).forEach(finish => finish());
     if (browser) await browser.send('Browser.close').catch(() => {});
     if (child && child.exitCode === null) { child.kill(); await new Promise(resolve => { child.once('exit', resolve); setTimeout(resolve, 2000); }); }
     await new Promise(resolve => server.close(resolve)); server.closeAllConnections();
