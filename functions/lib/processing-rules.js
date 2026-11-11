@@ -155,7 +155,8 @@ function scenario(value, path) {
   if (!Array.isArray(source.lines) || !source.lines.length || source.lines.length > 50) throw new Error(`${path}.lines is invalid`);
   const lines = source.lines.map((line, index) => {
     const linePath = `${path}.lines[${index}]`;
-    const item = keys(line, ['packageCodes', 'claimAmount', 'approvedAmount'], ['packageCodes', 'claimAmount'], linePath);
+    const item = keys(line, ['index', 'packageCodes', 'claimAmount', 'approvedAmount'], ['packageCodes', 'claimAmount'], linePath);
+    if (item.index !== undefined && item.index !== index) throw new Error(`${linePath}.index must match the line position`);
     return {
       index,
       packageCodes: codes(item.packageCodes, `${linePath}.packageCodes`),
@@ -179,7 +180,7 @@ function scenario(value, path) {
     scenarioId,
     name: text(source.name, `${path}.name`, 160),
     processingArea,
-    outcome: source.outcome === undefined ? '' : text(source.outcome, `${path}.outcome`, 40),
+    outcome: source.outcome === undefined || source.outcome === '' ? '' : text(source.outcome, `${path}.outcome`, 40),
     lines,
     expected: { matchedRuleIds, blocked: expected.blocked, approvedAmounts: normalizedAmounts }
   };
