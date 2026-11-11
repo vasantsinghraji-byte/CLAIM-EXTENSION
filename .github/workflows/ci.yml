@@ -64,6 +64,9 @@ jobs:
       - name: Real browser apply and undo smoke
         run: npm run test:browser
 
+      - name: Actual extension Apply and review recovery acceptance
+        run: npm run test:extension
+
       - name: Firestore security rules tests
         run: npm run test:firebase
 
