@@ -3,7 +3,8 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { FieldValue, Timestamp, getFirestore } = require('firebase-admin/firestore');
-const { HttpsError, onCall } = require('firebase-functions/v2/https');
+const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
+const { createMonitorHandler } = require('./lib/admin-monitor');
 const { logger } = require('firebase-functions');
 const {
   ACCOUNT_STATUSES,
@@ -61,6 +62,13 @@ const ADMIN_LIST_LIMIT = 100;
 const USER_LIST_LIMIT = 500;
 const SELF_SERVICE_ORGANIZATION_ID = 'platform';
 const SELF_SERVICE_ROLE = 'processor';
+
+exports.monitorAdminDashboard = onRequest({
+  region: REGION, memory: '256MiB', maxInstances: 10, timeoutSeconds: 300,
+  cors: ['https://claimextension-prod.web.app', 'https://claimextension-prod.firebaseapp.com',
+    'https://claimextension.web.app', 'https://claimextension.firebaseapp.com', /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/]
+}, createMonitorHandler({ db, verifyToken: token => getAuth().verifyIdToken(token, true),
+  authorize: requirePlatformAdmin, projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || '' }));
 
 function fail(code, message) {
   throw new HttpsError(code, message);

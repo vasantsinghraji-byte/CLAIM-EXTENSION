@@ -28,11 +28,16 @@ const browserGlobals = {
   URLSearchParams: 'readonly',
   importScripts: 'readonly',
   TextEncoder: 'readonly',
+  TextDecoder: 'readonly',
+  AbortController: 'readonly',
   requestAnimationFrame: 'readonly',
   getComputedStyle: 'readonly'
 };
 
 const nodeGlobals = {
+  AbortController: 'readonly',
+  TextDecoder: 'readonly',
+  queueMicrotask: 'readonly',
   require: 'readonly',
   module: 'writable',
   process: 'readonly',
@@ -100,6 +105,7 @@ module.exports = [
       'scripts/browser-smoke-e2e.js',
       'scripts/extension-browser-e2e.js',
       'scripts/signup-browser-acceptance.js',
+      'scripts/admin-dashboard-e2e.js',
       'scripts/hosting-smoke.js',
       'scripts/license-lifecycle-acceptance.js',
       'scripts/run-lifecycle-emulators.js',

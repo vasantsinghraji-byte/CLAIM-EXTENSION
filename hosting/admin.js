@@ -9,6 +9,13 @@
   let profile = null;
   let processingRuleDrafts = [];
   let validatedRuleImpact = null;
+  const pendingMutations = new Set();
+  const monitor = globalThis.ClaimSparkMonitor.create({ api: Api, onDenied: error => {
+    showSignedOut();
+    byId('signInError').textContent = error.message === 'PERMISSION_DENIED'
+      ? 'Administrator access was removed or suspended. Contact another platform administrator.'
+      : 'Your session ended. Sign in again to reconnect.';
+  } });
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -44,15 +51,19 @@
   }
 
   async function action(name, data, successMessage) {
+    const key = !/^(get|list|validate)/.test(name) ? JSON.stringify([name, data]) : null;
+    if (key && pendingMutations.has(key)) { message('This change is already being saved.'); return null; }
+    if (key) { pendingMutations.add(key); message('Saving change…'); }
     try {
       const result = await Api.call(name, data);
       if (successMessage) message(successMessage, 'success');
       return result;
     } catch (error) {
+      if (error.message === 'SESSION_CHANGED') return null;
       message(errorText(error), 'error');
       if (error.message === 'UNAUTHENTICATED') showSignedOut();
       return null;
-    }
+    } finally { if (key) pendingMutations.delete(key); }
   }
 
   function formatDate(value) {
@@ -259,8 +270,15 @@
   }
 
   function showSignedOut() {
+    monitor.stop();
     Api.signOut();
     profile = null;
+    document.body.classList.remove('admin-authenticated');
+    for (const id of ['usersList', 'pendingUsersList', 'pendingPaymentsList', 'expiringUsersList',
+      'invitationsList', 'organizationsList', 'rosterList', 'auditList', 'ruleFeedbackList']) byId(id).replaceChildren();
+    byId('invitationMessage').value = '';
+    byId('invitationSecret').hidden = true;
+    byId('sessionLabel').textContent = '';
     dashboardView.hidden = true;
     signInView.hidden = false;
     byId('password').value = '';
@@ -276,18 +294,39 @@
     profile = result;
     signInView.hidden = true;
     dashboardView.hidden = false;
+    document.body.classList.add('admin-authenticated');
     byId('sessionLabel').textContent = `${profile.email} · ${profile.organizationId}`;
+    monitor.start();
     await Promise.all([
       loadUsers(), loadInvitations(), loadOrganizations(), loadAudit(),
       loadProcessingRules(), loadProcessingRuleFeedback()
     ]);
   }
 
+  function filterUsers() {
+    const query = byId('userSearch').value.toLowerCase().trim();
+    const status = byId('userStatusFilter').value;
+    const records = [...byId('usersList').querySelectorAll('.user-record')];
+    let visible = 0;
+    for (const record of records) {
+      const matchesStatus = status === 'all' || (status === 'current' ? record.dataset.accountStatus !== 'deleted'
+        : status === 'inactive-licence' ? record.dataset.accountStatus !== 'deleted' && record.dataset.licenseStatus === 'inactive'
+          : record.dataset.accountStatus === status);
+      record.hidden = !matchesStatus || !record.dataset.search.includes(query);
+      if (!record.hidden) visible++;
+    }
+    byId('userResultsCount').textContent = `${visible} of ${records.length} loaded accounts${byId('usersList').dataset.truncated === 'true' ? ' \u00b7 Backend result limit reached; this list is incomplete.' : ''}`;
+    byId('userSearchEmpty').hidden = visible > 0 || records.length === 0;
+  }
+  byId('userSearch').addEventListener('input', filterUsers);
+  byId('userStatusFilter').addEventListener('change', filterUsers);
+
   async function loadUsers() {
     const pendingContainer = byId('pendingUsersList');
     const paymentContainer = byId('pendingPaymentsList');
     const expiringContainer = byId('expiringUsersList');
     const usersContainer = byId('usersList');
+    const expanded = new Set([...byId('usersPanel').querySelectorAll('.user-record:has(details[open])')].map(record => record.dataset.userId));
     empty(pendingContainer, 'Loading pending approvals...');
     empty(paymentContainer, 'Loading payment submissions...');
     empty(expiringContainer, 'Loading expiry warnings...');
@@ -299,18 +338,52 @@
     }
 
     function userRecord(user, pending = false) {
-      const record = element('article', 'record');
+      const record = element('article', 'record user-record');
       const license = user.license || {};
-      record.append(
-        element('h3', '', `${user.displayName || 'Unnamed user'} · ${user.email}`),
-        element('p', 'meta', `${pending ? 'pending approval' : user.accountStatus} · ${user.role} · ${user.organizationId}`),
-        element('p', 'meta', `Registered ${formatDate(user.createdAt)} · ${user.onboardingSource}`),
-        element('p', 'meta', `License: ${license.type || 'individual'} · ${license.status || 'inactive'} · activated ${formatDate(license.activatedAt)} · expires ${formatDate(license.expiresAt)}`)
-      );
-      if (license.type === 'individual') {
-        record.append(element('p', 'meta', `Payment: ${license.paymentStatus || 'not_required'} · ${license.paymentReference || 'no reference'}`));
+      record.dataset.userId = user.uid;
+      record.dataset.accountStatus = user.accountStatus;
+      record.dataset.licenseStatus = license.status || 'inactive';
+      record.dataset.search = [user.displayName, user.email, user.organizationId].join(' ').toLowerCase();
+      const identity = element('div', 'user-identity');
+      const name = user.displayName || 'Unnamed user';
+      const avatar = element('span', 'user-avatar', name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase());
+      avatar.setAttribute('aria-hidden', 'true');
+      const heading = element('div', 'user-name');
+      heading.append(element('h3', '', name), element('p', 'meta', user.email));
+      identity.append(avatar, heading);
+      const badges = element('div', 'user-badges');
+      const accountBadge = element('span', 'status-badge', pending ? 'Pending approval' : user.accountStatus);
+      accountBadge.dataset.state = pending ? 'pending' : user.accountStatus;
+      const activationMissing = user.role !== 'platformAdmin' && user.onboardingSource === 'self-registration'
+        && license.type === 'organisation' && !license.activatedAt;
+      if (activationMissing) record.dataset.licenseStatus = 'inactive';
+      const licenceBadge = element('span', 'status-badge', activationMissing ? 'Activation required' : `Licence ${license.status || 'inactive'}`);
+      licenceBadge.dataset.state = license.status === 'active' && !activationMissing ? 'active' : 'neutral';
+      badges.append(accountBadge, licenceBadge);
+      const header = element('div', 'user-summary');
+      header.append(identity, badges);
+      const roles = { processor: 'Processor', organizationAdmin: 'Organization admin', platformAdmin: 'Platform admin' };
+      record.append(header, element('p', 'user-facts', `${roles[user.role] || user.role} \u00b7 ${user.organizationId} \u00b7 Expires ${formatDate(license.expiresAt)}`));
+      if (pending && user.uid !== profile.uid) {
+        const review = element('div', 'record-actions approval-actions');
+        const approve = button('Approve', 'approve', { uid: user.uid });
+        approve.className = 'button primary';
+        review.append(approve, button('Reject', 'reject', { uid: user.uid, email: user.email }, true));
+        record.append(review);
       }
+      const details = element('details', 'user-management');
+      details.open = expanded.has(user.uid);
+      details.append(element('summary', '', user.accountStatus === 'deleted' ? 'View account details' : 'Manage account'));
+      const information = element('div', 'account-information');
+      information.append(
+        element('p', 'meta', `Registered ${formatDate(user.createdAt)} \u00b7 ${user.onboardingSource || 'Source not recorded'}`),
+        element('p', 'meta', `Licence: ${license.type || 'individual'} \u00b7 activated ${formatDate(license.activatedAt)}`)
+      );
+      if (license.type === 'individual') information.append(element('p', 'meta', `Payment: ${license.paymentStatus || 'not_required'} \u00b7 ${license.paymentReference || 'no reference'}`));
+      details.append(information);
       if (user.accountStatus !== 'deleted') {
+        const licenceGroup = element('section', 'management-group');
+        licenceGroup.append(element('h4', '', 'Licence access'), element('p', 'meta', 'Choose a duration to activate or extend. Deactivation removes licence access.'));
         const controls = element('div', 'record-actions');
         const durationPreset = element('select');
         durationPreset.dataset.licenseDurationPreset = user.uid;
@@ -322,60 +395,42 @@
           durationPreset.append(option);
         }
         const durationCustom = document.createElement('input');
-        durationCustom.type = 'number';
-        durationCustom.min = '1';
-        durationCustom.max = '52';
+        durationCustom.type = 'number'; durationCustom.min = '1'; durationCustom.max = '52';
         durationCustom.placeholder = 'Custom weeks';
         durationCustom.dataset.licenseDurationCustom = user.uid;
         durationCustom.setAttribute('aria-label', `Custom license duration in weeks for ${user.email}`);
+        const deactivate = button(license.status === 'inactive' ? 'Licence inactive' : 'Deactivate license', 'license-deactivate', { uid: user.uid }, true);
+        deactivate.disabled = license.status === 'inactive';
         const activate = button('Activate license', 'license-activate', { uid: user.uid });
         const extend = button('Extend license', 'license-extend', { uid: user.uid });
         const needsPaymentVerification = license.type === 'individual' && license.paymentStatus !== 'verified';
         activate.disabled = needsPaymentVerification;
         extend.disabled = needsPaymentVerification;
-        if (needsPaymentVerification) record.append(element('p', 'meta', license.paymentReference
-          ? 'Verify this payment before activating or extending the licence.'
+        if (needsPaymentVerification) licenceGroup.append(element('p', 'meta', license.paymentReference
+          ? 'Verify this payment in Payment verification before activating or extending the licence.'
           : 'No individual payment has been submitted. Ask the user to choose a plan and submit their UPI reference.'));
-        controls.append(
-          durationPreset,
-          durationCustom,
-          activate,
-          extend,
-          button('Deactivate license', 'license-deactivate', { uid: user.uid }, true)
-        );
-        if (user.uid === profile.uid) {
-          record.append(controls);
-          return record;
+        controls.append(durationPreset, durationCustom, activate, extend, deactivate);
+        licenceGroup.append(controls); details.append(licenceGroup);
+        if (user.uid !== profile.uid && !pending) {
+          const accessGroup = element('section', 'management-group');
+          accessGroup.append(element('h4', '', 'Account permissions'));
+          const accessControls = element('div', 'record-actions');
+          const role = element('select');
+          role.setAttribute('aria-label', `Role for ${user.email}`); role.dataset.uid = user.uid;
+          for (const value of ['processor', 'organizationAdmin', 'platformAdmin']) {
+            const option = element('option', '', roles[value]); option.value = value;
+            option.selected = value === user.role; role.append(option);
+          }
+          accessControls.append(role, button('Save role', 'role', { uid: user.uid }));
+          accessGroup.append(accessControls); details.append(accessGroup);
+          const accountGroup = element('div', 'record-actions account-danger-actions');
+          accountGroup.append(button(user.accountStatus === 'active' ? 'Suspend account' : 'Reactivate account',
+            user.accountStatus === 'active' ? 'suspend' : 'reactivate', { uid: user.uid }),
+          button('Delete account', 'delete', { uid: user.uid, email: user.email }, true));
+          details.append(accountGroup);
         }
-        if (pending) {
-          const approve = button('Approve', 'approve', { uid: user.uid });
-          approve.className = 'button primary';
-          controls.append(
-            approve,
-            button('Reject', 'reject', { uid: user.uid, email: user.email }, true)
-          );
-          record.append(controls);
-          return record;
-        }
-        const role = element('select');
-        role.setAttribute('aria-label', `Role for ${user.email}`);
-        role.dataset.uid = user.uid;
-        for (const value of ['processor', 'organizationAdmin', 'platformAdmin']) {
-          const option = element('option', '', value);
-          option.value = value;
-          option.selected = value === user.role;
-          role.append(option);
-        }
-        const statusLabel = user.accountStatus === 'active' ? 'Suspend' : 'Reactivate';
-        const statusAction = user.accountStatus === 'active' ? 'suspend' : 'reactivate';
-        controls.append(
-          role,
-          button('Save role', 'role', { uid: user.uid }),
-          button(statusLabel, statusAction, { uid: user.uid }),
-          button('Delete account', 'delete', { uid: user.uid, email: user.email }, true)
-        );
-        record.append(controls);
       }
+      record.append(details);
       return record;
     }
 
@@ -391,6 +446,13 @@
       return user.accountStatus === 'active' && user.license?.status === 'active'
         && Number.isFinite(expiry) && expiry >= now && expiry <= warningEnd;
     });
+    for (const [id, count] of [['approvalQueue', pendingUsers.length], ['paymentQueue', pendingPayments.length], ['expiryQueue', expiringUsers.length]]) {
+      const queue = byId(id);
+      if (!count) queue.open = false;
+      else if (!queue.classList.contains('has-items') && id !== 'expiryQueue') queue.open = true;
+      queue.classList.toggle('has-items', count > 0);
+    }
+    byId('approvalQueueCount').textContent = pendingUsers.length;
     byId('pendingCount').textContent = `${result.pendingCount ?? pendingUsers.length} pending`;
     pendingContainer.replaceChildren(...pendingUsers.map(user => userRecord(user, true)));
     paymentContainer.replaceChildren(...pendingPayments.map(user => {
@@ -409,6 +471,8 @@
     byId('expiringUserCount').textContent = `${expiringUsers.length} user${expiringUsers.length === 1 ? '' : 's'}`;
     expiringContainer.replaceChildren(...expiringUsers.map(user => userRecord(user)));
     usersContainer.replaceChildren(...otherUsers.map(user => userRecord(user)));
+    usersContainer.dataset.truncated = String(result.truncated === true);
+    filterUsers();
     if (!pendingUsers.length) empty(pendingContainer, 'No registrations are waiting for approval.');
     if (!pendingPayments.length) empty(paymentContainer, 'No individual payments are waiting for verification.');
     if (!expiringUsers.length) empty(expiringContainer, 'No active user licences expire within seven days.');
@@ -857,15 +921,44 @@
     if (result) loadProcessingRuleFeedback();
   });
 
-  document.querySelector('.tabs').addEventListener('click', event => {
-    const tab = event.target.closest('[data-tab]');
+  function selectTab(name) {
+    const tab = [...document.querySelectorAll('.tabs [data-tab]')].find(node => node.dataset.tab === name);
     if (!tab) return;
     for (const buttonNode of document.querySelectorAll('[data-tab]')) {
       buttonNode.classList.toggle('active', buttonNode === tab);
+      if (buttonNode === tab) buttonNode.setAttribute('aria-current', 'page');
+      else buttonNode.removeAttribute('aria-current');
     }
     for (const panel of document.querySelectorAll('[data-panel]')) {
       panel.hidden = panel.dataset.panel !== tab.dataset.tab;
     }
+    const titles = { overview: ['Overview', 'Your accounts, priorities and latest activity at a glance.'],
+      users: ['Users & payments', 'Review registrations, payment submissions and account access.'],
+      invitations: ['Invitations', 'Invite processors and manage pending invitations.'],
+      organizations: ['Organizations', 'Manage organizations and their account capacity.'],
+      roster: ['Employee roster', 'Manage employee codes for sponsored accounts.'],
+      licences: ['Licences', 'Activate, renew or suspend organization access.'],
+      rules: ['Processing rules', 'Review, validate and publish centrally managed rules.'],
+      'rule-feedback': ['Rule feedback', 'Review structured policy feedback from processors.'],
+      audit: ['Audit events', 'Review recorded backend administration and extension events.'] };
+    byId('pageTitle').textContent = titles[name][0];
+    byId('pageDescription').textContent = titles[name][1];
+  }
+  document.querySelector('.tabs').addEventListener('click', event => {
+    const tab = event.target.closest('[data-tab]');
+    if (tab) selectTab(tab.dataset.tab);
+  });
+  byId('overviewPanel').addEventListener('click', event => {
+    const control = event.target.closest('[data-open-tab]');
+    if (control) {
+      selectTab(control.dataset.openTab);
+      const queue = byId(control.dataset.openQueue);
+      if (queue) { queue.open = true; queue.scrollIntoView({ block: 'start' }); }
+    }
+  });
+  byId('monitorUserSearch').addEventListener('input', event => {
+    const query = event.target.value.toLowerCase().trim();
+    for (const row of byId('monitorUserRows').rows) row.hidden = !row.textContent.toLowerCase().includes(query);
   });
 
   byId('inviteForm').addEventListener('submit', async event => {
@@ -1022,16 +1115,20 @@
       }
       result = await action('rejectUserRegistration', { uid }, 'Registration rejected.');
     } else if (control.dataset.action === 'role') {
-      const role = [...byId('usersList').querySelectorAll('select[data-uid]')]
-        .find(node => node.dataset.uid === uid);
+      const role = control.closest('.record').querySelector('select[data-uid]');
+      if (!role) return message('The role selector is unavailable. Refresh the user list and try again.', 'error');
       result = await action('changeUserRole', { uid, role: role.value }, 'User role changed.');
     } else if (['license-activate', 'license-extend', 'license-deactivate'].includes(control.dataset.action)) {
       const record = control.closest('.record');
       const custom = Number(record.querySelector(`[data-license-duration-custom="${uid}"]`)?.value);
+      const customText = record.querySelector(`[data-license-duration-custom="${uid}"]`)?.value.trim();
       const preset = Number(record.querySelector(`[data-license-duration-preset="${uid}"]`)?.value);
       const licenseAction = control.dataset.action.replace('license-', '');
       const data = { uid, action: licenseAction };
       if (licenseAction !== 'deactivate') {
+        if (customText && (!Number.isInteger(custom) || custom < 1 || custom > 52)) {
+          return message('Custom licence duration must be a whole number from 1 to 52 weeks. No change was saved.', 'error');
+        }
         data.durationWeeks = Number.isInteger(custom) && custom >= 1 && custom <= 52 ? custom : preset;
       }
       const success = { activate: 'activated', extend: 'extended', deactivate: 'deactivated' }[licenseAction];
@@ -1093,5 +1190,6 @@
   });
 
   resetRuleEditor();
+  byId('signInButton').disabled = false;
   if (Api.load()) establishDashboard();
 })();
