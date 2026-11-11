@@ -127,7 +127,7 @@ async function closeBrowser(browser, child) {
 }
 
 const fixture = `<!doctype html><html><body><input id="transid" value="SYN-A">
-<table><tr><th>Particular</th><th>Package Code(Package Name)</th><th>Rate</th><th>Unit/Hours/Days</th><th>Claim Amount(Rs.)</th><th>Approved Amount(Rs.)</th><th>Deductions</th><th>Remarks</th><th hidden></th></tr>
+<table id="processSheetTable"><tr><th>Particular</th><th>Package Code(Package Name)</th><th>Rate</th><th>Unit/Hours/Days</th><th>Claim Amount(Rs.)</th><th>Approved Amount(Rs.)</th><th>Deductions</th><th>Remarks</th><th hidden></th></tr>
 <tr><td hidden>1</td><td id="packageName_0">Investigation</td><td id="packageCode_0">INV-SYN</td><td id="packageRate_0">100</td><td id="packageDays_0">4</td><td id="packageAmount_0">400</td><td><input id="packageFinalAmount_0" name="packageFinalAmounts" type="number" value="0"></td><td>0</td><td><textarea id="packageremarks_0"></textarea></td><td hidden>1</td></tr></table></body></html>`;
 
 async function main() {
@@ -194,6 +194,22 @@ async function main() {
     await evaluate(`document.getElementById('transid').value='SYN-A'`);
     assert.equal((await evaluate('ClaimAutoFillActions.undo()')).count, 1);
     assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '0');
+    await evaluate(`document.getElementById('packageDays_0').textContent='20';document.getElementById('packageAmount_0').textContent='2000'`);
+    assert.equal((await evaluate('ClaimAutoFillActions.getInvestigationChecklist()')).length, 1);
+    for (const found of ['1e1', '1.0', '0,3', '₹3', '', true, null, '9007199254740992']) {
+      const rejected = await evaluate(`ClaimAutoFillActions.previewInvestigationVerification([{index:0,found:${JSON.stringify(found)}}])`);
+      assert.equal(rejected.blockReason, 'invalid-investigation-counts');
+      assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '0');
+    }
+    const countPreview = await evaluate(`ClaimAutoFillActions.previewInvestigationVerification([{index:'0',found:'10'}])`);
+    assert.equal(countPreview.proposals[0].proposedApproved, 1000);
+    const verified = await evaluate(`ClaimAutoFillActions.applyInvestigationVerification(${JSON.stringify(countPreview.token)},{acknowledgedHighRisk:true})`);
+    assert.equal(verified.blocked, false, JSON.stringify(verified)); assert.equal(verified.recoverySaved, true);
+    assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '1000');
+    assert.equal((await evaluate('ClaimAutoFillActions.undo()')).count, 2);
+    assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '0');
+    assert.equal((await evaluate(`ClaimAutoFillActions.previewInvestigationVerification([{index:0,found:'0'}])`)).proposals[0].proposedApproved, 0);
+    await evaluate(`document.getElementById('packageDays_0').textContent='4';document.getElementById('packageAmount_0').textContent='400'`);
     // Interact with the actual closed widget through DOM/CDP, not a replacement
     // UI or substituted Chrome APIs. Saving a deselection must survive Preview.
     const widget = await widgetRoot(page, world);

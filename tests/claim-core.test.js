@@ -5,6 +5,7 @@ const {
   PHARMACY_MARKET_PRICE_REMARK,
   LAMA_DAMA_SURGICAL_REMARK,
   parseAmount,
+  parseCount,
   calculateMedicineApprovedAmount,
   planRowUpdate,
   planPharmacyRowUpdate,
@@ -293,4 +294,14 @@ test('live RGHS hidden cells are mapped from the approved-input anchor', () => {
     approvedIdx: 6,
     remarksIdx: 8
   });
+});
+
+test('report counts accept only safe non-negative whole numbers', () => {
+  for (const value of [0, 10, '0', '10', ' 10 ', '0010', Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)]) {
+    assert.equal(parseCount(value), Number(value));
+  }
+  for (const value of ['', ' ', null, undefined, true, false, {}, [], 1n, '1e1', '1.0', '1,000', '1oops',
+    '₹1', '1%', '+1', '0x10', '-0', -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '9007199254740992']) {
+    assert.equal(parseCount(value), null, String(value));
+  }
 });

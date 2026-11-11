@@ -254,12 +254,92 @@ function investigationFixtureHtml() {
     </script></body></html>`;
 }
 
+function companionFixtureHtml() {
+  const setup = `<pre id="out">RUNNING</pre><script>
+    const saved = { '0': '1e1', '1': '1.5', '2': '1,000', '3': null, '4': '0' };
+    const messages = [], listeners = [];
+    let holdPreview = false;
+    const pendingPreviews = [];
+    const chrome = window.chrome = {
+      runtime: {},
+      storage: { session: {
+        get(key, callback) { callback(key === 'investigationCompanion'
+          ? { investigationCompanion: { tid: 'SYNTHETIC-COUNTS' } } : { [key]: saved }); },
+        set(value, callback) { callback?.(); }, remove(key, callback) { callback?.(); }
+      } },
+      tabs: {
+        query(query, callback) { callback([{ id: 1, url: 'https://rghs.rajasthan.gov.in/RGHS/processSheetSearch/SYNTHETIC-COUNTS/' }]); },
+        connect() { return {
+          onDisconnect: { addListener() {} }, onMessage: { addListener(fn) { listeners.push(fn); } },
+          postMessage(message) {
+            messages.push(message);
+            const reply = message.action === 'getChecklist'
+              ? { items: Array.from({ length: 5 }, (_, index) => ({ index, label: 'Synthetic investigation ' + index, expected: 20 })) }
+              : { token: 'synthetic-count-preview', proposals: [{ risk: 'low', reason: 'Synthetic preview response',
+                beforeApproved: 0, proposedApproved: 2000, proposedRemarks: 'Synthetic review' }] };
+            const respond = () => listeners.forEach(fn => fn({ id: message.id, success: true, ...reply }));
+            if (message.action === 'preview' && holdPreview) pendingPreviews.push(respond);
+            else queueMicrotask(respond);
+          }
+        }; }
+      }
+    };
+  </script>`;
+  const checks = `<script>
+    (async () => {
+      const assert = (condition, message) => { if (!condition) throw new Error(message); };
+      const waitFor = async check => {
+        for (let i = 0; i < 100; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
+        throw new Error('Companion did not finish rendering');
+      };
+      const inputs = () => [...document.querySelectorAll('#items input[data-index]')];
+      await waitFor(() => inputs().length === 5);
+      assert(inputs().map(input => input.value).join(',') === '20,20,20,20,0', 'Invalid saved values were coerced into counts or valid zero was lost');
+      assert(inputs().every(input => input.step === '1'), 'Report controls must use whole steps');
+      const input = inputs()[0], preview = document.getElementById('preview'), apply = document.getElementById('apply');
+      const previewCalls = () => messages.filter(message => message.action === 'preview').length;
+      for (const value of ['1e1', '1.0', '1.5', '-1', '21', '9007199254740992', '']) {
+        input.value = value; input.dispatchEvent(new Event('input'));
+        assert(!input.checkValidity(), 'Invalid count accepted in the companion: ' + value);
+        const before = previewCalls(); preview.click();
+        assert(previewCalls() === before && apply.disabled && !preview.disabled, 'Invalid count reached the process sheet or kept Apply enabled');
+      }
+      input.value = '10'; input.dispatchEvent(new Event('input')); preview.click();
+      await waitFor(() => !preview.disabled && !apply.disabled);
+      assert(messages.filter(message => message.action === 'preview').at(-1).verifiedCounts[0].found === '10', 'Valid count was not forwarded exactly');
+      input.value = '1e1'; input.dispatchEvent(new Event('input'));
+      assert(apply.disabled && document.getElementById('preview-details').children.length === 0, 'Changing a count must invalidate the old preview');
+      holdPreview = true;
+      input.value = '10'; input.dispatchEvent(new Event('input')); preview.click();
+      await waitFor(() => pendingPreviews.length === 1);
+      input.value = '1e1'; input.dispatchEvent(new Event('input'));
+      holdPreview = false; pendingPreviews.splice(0).forEach(respond => respond());
+      await waitFor(() => !preview.disabled);
+      assert(apply.disabled && document.getElementById('preview-details').children.length === 0, 'A delayed preview re-enabled Apply after counts changed');
+      document.getElementById('discard').click();
+      await waitFor(() => inputs().every(item => item.value === '20' && item.checkValidity()));
+      assert(apply.disabled, 'Discard must require a fresh preview');
+      // Preview validates current controls even when no input event was delivered.
+      input.value = '1e1'; const before = previewCalls(); preview.click();
+      assert(previewCalls() === before && apply.disabled, 'Preview relied only on an earlier input event');
+      input.value = '0'; input.dispatchEvent(new Event('input')); preview.click();
+      await waitFor(() => !preview.disabled && !apply.disabled);
+      assert(messages.filter(message => message.action === 'preview').at(-1).verifiedCounts[0].found === '0', 'Zero reports was discarded');
+      const out = document.getElementById('out'); out.dataset.passed = 'true';
+      out.textContent = 'PASS: actual companion controls, saved-count recovery, strict input validation, preview blocking and zero counts';
+    })().catch(error => { const out = document.getElementById('out'); out.dataset.passed = 'false'; out.textContent = String(error.stack || error); });
+  </script>`;
+  return fs.readFileSync(path.join(root, 'investigation-companion.html'), 'utf8')
+    .replace('<script src="claim-core.js"></script>', setup + `<script>${inlineScript('claim-core.js')}</script>`)
+    .replace('<script src="investigation-companion.js"></script>', `<script>${inlineScript('investigation-companion.js')}</script>` + checks);
+}
+
 function main() {
   const chrome = findChrome();
   if (!chrome) throw new Error('Chrome/Chromium was not found. Set CHROME_PATH to run the browser smoke test.');
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'claim-browser-smoke-'));
   try {
-    for (const [name, html] of [['standard', fixtureHtml()], ['investigation', investigationFixtureHtml()]]) {
+    for (const [name, html] of [['standard', fixtureHtml()], ['investigation', investigationFixtureHtml()], ['companion', companionFixtureHtml()]]) {
       const fixture = path.join(temporary, `${name}.html`);
       fs.writeFileSync(fixture, html);
       const result = spawnSync(chrome, [
@@ -278,7 +358,9 @@ function main() {
         const diagnostic = result.stdout.match(/<pre id="out"[^>]*>([\s\S]*?)<\/pre>/)?.[1] || result.stderr || 'Missing browser result';
         throw new Error(`${name} browser smoke failed: ${diagnostic.slice(0, 2000)}`);
       }
-      console.log(`PASS: ${name} real-browser content and exact undo/recovery restoration.`);
+      console.log(name === 'companion'
+        ? 'PASS: companion real-browser controls, saved-count recovery and strict Preview validation.'
+        : `PASS: ${name} real-browser content and exact undo/recovery restoration.`);
     }
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });

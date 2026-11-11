@@ -13,6 +13,7 @@ const acknowledgement = document.getElementById('acknowledgement');
 const acknowledge = document.getElementById('acknowledge');
 let companionTid = '';
 let previewToken = '';
+let countRevision = 0;
 let acknowledgementRequired = false;
 let processPort = null;
 let requestSequence = 0;
@@ -102,7 +103,20 @@ async function connectProcessSheet() {
   return requestProcessSheet('getChecklist');
 }
 
+function validateReportCount(input) {
+  const count = globalThis.ClaimAutoFillCore.parseCount(input.value);
+  const expected = globalThis.ClaimAutoFillCore.parseCount(input.max);
+  input.setCustomValidity(count !== null && expected !== null && count <= expected
+    ? '' : 'Enter a whole report count within the expected quantity.');
+  return input.checkValidity();
+}
+
 async function renderItems(items) {
+  ++countRevision;
+  previewToken = '';
+  applyButton.disabled = true;
+  previewDetails.replaceChildren();
+  acknowledge.checked = false;
   container.replaceChildren();
   if (!items.length) {
     const empty = document.createElement('div');
@@ -120,14 +134,17 @@ async function renderItems(items) {
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '0';
+    input.step = '1';
     input.max = String(item.expected);
     const saved = savedCounts[String(item.index)];
-    const savedValue = Number(saved);
-    input.value = Number.isFinite(savedValue) && savedValue >= 0 && savedValue <= item.expected
+    const savedValue = globalThis.ClaimAutoFillCore.parseCount(saved);
+    input.value = savedValue !== null && savedValue <= item.expected
       ? String(savedValue) : String(item.expected);
     input.dataset.index = String(item.index);
     input.setAttribute('aria-label', `${item.label}: reports found`);
     input.addEventListener('input', () => {
+      ++countRevision;
+      validateReportCount(input);
       previewToken = '';
       applyButton.disabled = true;
       previewDetails.replaceChildren();
@@ -154,16 +171,25 @@ chrome.storage.session.get('investigationCompanion', ({ investigationCompanion }
 });
 
 previewButton.addEventListener('click', async () => {
-  const verifiedCounts = [...container.querySelectorAll('input')]
-    .map(input => ({ index: Number(input.dataset.index), found: input.value }));
+  const inputs = [...container.querySelectorAll('input[data-index]')];
   previewButton.disabled = true;
   previewToken = '';
   applyButton.disabled = true;
   acknowledge.checked = false;
   previewDetails.replaceChildren();
+  const invalidInput = inputs.find(input => !validateReportCount(input));
+  if (invalidInput) {
+    status.textContent = 'Enter a whole report count within the expected quantity before previewing.';
+    invalidInput.reportValidity();
+    previewButton.disabled = false;
+    return;
+  }
+  const verifiedCounts = inputs.map(input => ({ index: input.dataset.index, found: input.value }));
   status.textContent = 'Preparing process-sheet changes…';
+  const revision = countRevision;
   try {
     const result = await requestProcessSheet('preview', { verifiedCounts });
+    if (revision !== countRevision) return;
     if (!result.proposals?.length) throw new Error('Enter valid report counts before previewing.');
     previewToken = result.token;
     acknowledgementRequired = result.proposals.some(proposal => proposal.risk === 'high');
@@ -176,7 +202,7 @@ previewButton.addEventListener('click', async () => {
     }
     status.textContent = `${result.proposals.length} investigation row(s) prepared. Click Apply to update the process sheet.`;
   } catch (error) {
-    showConnectionError(error);
+    if (revision === countRevision) showConnectionError(error);
   } finally {
     previewButton.disabled = false;
   }
@@ -204,11 +230,15 @@ applyButton.addEventListener('click', async () => {
 });
 
 discardButton.addEventListener('click', async () => {
-  await clearSavedCounts();
+  ++countRevision;
   previewToken = '';
   applyButton.disabled = true;
+  previewDetails.replaceChildren();
+  acknowledge.checked = false;
+  await clearSavedCounts();
   for (const input of container.querySelectorAll('input[data-index]')) {
     input.value = input.max;
+    validateReportCount(input);
   }
   status.textContent = 'Saved investigation counts discarded.';
 });

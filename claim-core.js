@@ -48,6 +48,12 @@
     return Number.isFinite(amount) && amount >= 0 ? amount : null;
   }
 
+  function parseCount(value) {
+    if (typeof value !== 'number' && (typeof value !== 'string' || !/^\d+$/.test(value.trim()))) return null;
+    const count = Number(value);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+  }
+
   // RGHS approved amounts are whole rupees. Round to the nearest rupee after deduction.
   function calculateMedicineApprovedAmount(amount) {
     return Math.round(amount * (100 - DEDUCTION_PERCENT) / 100);
@@ -368,6 +374,7 @@
     LAMA_DAMA_SURGICAL_REMARK,
     MEDICINE_KEYWORDS,
     parseAmount,
+    parseCount,
     calculateMedicineApprovedAmount,
     isMedicineRow,
     isEmptyApprovedValue,
