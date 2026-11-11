@@ -969,6 +969,7 @@ function describeCounts(response) {
 function blockedMessage(reason) {
   const messages = {
     'autofill-disabled': 'Claim Extension is OFF. Turn it on, then preview again.',
+    'claim-unavailable': 'The current claim identifier is unavailable. Wait for the claim to load, then preview again.',
     'unsupported-layout': 'Unsupported claim portal layout. No fields were changed.',
     'invalid-rule-set': 'Audit rule validation failed. Reload a verified build.',
     'invalid-processing-rule-set': 'Published processing rules failed validation. Contact an administrator.',

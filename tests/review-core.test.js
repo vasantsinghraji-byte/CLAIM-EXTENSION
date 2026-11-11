@@ -25,6 +25,13 @@ test('fingerprint binds centrally governed enforcement and target remarks', () =
   );
 });
 
+test('fingerprints distinguish claim identity, package text, and reviewer-visible labels', () => {
+  assert.notEqual(fingerprint(rows, 'claim-a'), fingerprint(rows, 'claim-b'));
+  for (const change of [{ label: 'Different procedure' }, { packageText: 'DIFFERENT-PACKAGE' }]) {
+    assert.notEqual(fingerprint(rows), fingerprint([{ ...rows[0], ...change }, ...rows.slice(1)]));
+  }
+});
+
 test('reconciliation returns selected before/after totals and deductions', () => {
   assert.deepEqual(reconcile(rows, ['r1', 'r2']), {
     rowCount: 2,

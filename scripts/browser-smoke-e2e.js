@@ -100,7 +100,8 @@ function investigationFixtureHtml() {
           onMessage: { addListener() {} }, onConnect: { addListener() {} },
           sendMessage(request, callback) {
             if (request.action === 'ensureRuleOverridesMigration') return;
-            if (request.action === 'refreshProcessingRules') return callback({ success: false });
+            if (request.action === 'refreshProcessingRules') return callback(window.ruleRefreshEnabled
+              ? { success: true, ruleSet: window.centralRuleSet || processingRuleSet } : { success: false });
             callback?.({ success: window.recoveryAllowed });
           }
         }
@@ -163,9 +164,85 @@ function investigationFixtureHtml() {
         const conflicting = actions.preview();
         assert(conflicting.blockReason === 'overlapping-ipd-rules', 'Conflicting IPD adjustments: ' + JSON.stringify({ blocked: conflicting.blockReason, rules: conflicting.proposals.map(item => item.ruleIds), values: conflicting.proposals.map(item => item.proposedApproved) }));
         assert(approved.value === '0', 'Conflicting IPD preview changed a control');
+
+        // Exercise central calculation and the real Preview/Apply writer, then
+        // verify claim switches and replaced controls without mocking the DOM.
+        secondRow.remove();
+        ipdClaimDetailContext = {};
+        window.ruleRefreshEnabled = true;
+        document.getElementById('packageName_0').textContent = 'Synthetic procedure';
+        document.getElementById('packageCode_0').textContent = 'PKG-X';
+        const claim = document.getElementById('packageAmount_0');
+        claim.textContent = '1,000.00';
+        approved.value = '';
+        const centralRule = {
+          ruleId: 'SYN-10', name: 'Synthetic central check', processingArea: 'IPD', priority: 100,
+          enabled: true, enforcement: 'mandatory', conditions: { operator: 'packagePresent', packageCodes: ['PKG-X'] },
+          actions: [{ type: 'applyDeduction', targetPackageCodes: ['PKG-X'],
+            calculation: { method: 'percentage', basis: 'claimedAmount', value: 10 } }]
+        };
+        window.centralRuleSet = { schemaVersion: 2, mode: 'remote-required', versionId: 'synthetic-central-v1',
+          bundledFallbackEnabled: false, rules: [centralRule] };
+        processingRuleSet = window.centralRuleSet;
+        const applyPrepared = (prepared, extra = {}) => actions.applyFresh({ token: prepared.token,
+          selectedRowKeys: prepared.proposals.map(item => item.key), acknowledgedHighRisk: true, ...extra });
+        let prepared = await actions.previewFresh();
+        let committed = await applyPrepared(prepared);
+        assert(!committed.blocked && approved.value === '900' && committed.reconciliation.proposedApprovedTotal === 900,
+          'Formatted claim failed central calculation or Apply');
+        assert(actions.undo().count === 1 && approved.value === '', 'Central amount Undo failed');
+        claim.textContent = '1000oops';
+        prepared = await actions.previewFresh();
+        assert(prepared.blocked && (await applyPrepared(prepared)).blocked && approved.value === '',
+          'Malformed central money was accepted');
+        claim.textContent = '1000';
+        approved.value = '600';
+        centralRule.actions[0].calculation.value = 80;
+        prepared = await actions.previewFresh();
+        committed = await applyPrepared(prepared);
+        assert(!committed.blocked && approved.value === '200', 'Partial approval deduction was capped incorrectly');
+        actions.undo();
+        approved.value = '400';
+        centralRule.actions[0].calculation = { method: 'fullAmount', basis: 'claimedAmount', value: 100 };
+        committed = await applyPrepared(await actions.previewFresh());
+        assert(!committed.blocked && approved.value === '0', 'Full central deduction did not clear partial approval');
+        actions.undo();
+        const remarkAction = { type: 'writeRemark', targetPackageCodes: ['PKG-X'],
+          target: { sheet: 'IPD', columnKey: 'remarks' }, writeMode: 'append', template: 'Synthetic central remark.' };
+        centralRule.actions = [remarkAction];
+        approved.value = '0';
+        prepared = await actions.previewFresh();
+        assert(prepared.proposals[0].proposedApproved === null, 'Remark-only rule proposed an amount write');
+        committed = await applyPrepared(prepared);
+        assert(!committed.blocked && approved.value === '0' && remarks.value.includes('Synthetic central remark.'),
+          'Remark-only Apply changed an explicit zero approval');
+        assert(actions.undo().count === 1 && remarks.value === 'Existing remark', 'Remark-only Undo failed');
+        approved.value = '';
+        centralRule.enforcement = 'advisory';
+        centralRule.actions = [{ type: 'applyDeduction', targetPackageCodes: ['PKG-X'],
+          calculation: { method: 'percentage', basis: 'claimedAmount', value: 10 } }, remarkAction];
+        prepared = await actions.previewFresh();
+        const key = prepared.proposals[0].key;
+        committed = await applyPrepared(prepared, { approvedOverrides: { [key]: 1000 },
+          remarkOverrides: { [key]: 'Processor approved after review.' } });
+        assert(!committed.blocked && approved.value === '1000' && committed.reconciliation.proposedApprovedTotal === 1000
+          && remarks.value === 'Existing remark; Processor approved after review.', 'Central reviewed overrides were ignored');
+        window.structuredClone(committed);
+        assert(actions.undo().count === 2 && approved.value === '' && remarks.value === 'Existing remark',
+          'Central override Undo did not exactly restore controls');
+        prepared = await actions.previewFresh();
+        document.getElementById('transid').value = 'SYNTHETIC-OTHER';
+        assert((await applyPrepared(prepared)).blockReason === 'stale' && approved.value === '',
+          'Old preview was accepted after a claim switch');
+        document.getElementById('transid').value = 'SYNTHETIC-TEST';
+        prepared = await actions.previewFresh();
+        const replacement = approved.cloneNode(true);
+        approved.replaceWith(replacement);
+        assert((await applyPrepared(prepared)).blockReason === 'stale' && replacement.value === '',
+          'Old preview was accepted for a replacement approved control');
         const out = document.getElementById('out');
         out.dataset.passed = 'true';
-        out.textContent = 'PASS: actual content-script investigation Apply, acknowledgement, stale values, Undo, recovery rollback, reviewed overrides, central fallback disable and IPD conflict blocking';
+        out.textContent = 'PASS: actual content-script investigation and central Apply, money validation, partial/full deductions, zero preservation, reviewed overrides, exact Undo, claim/control binding and IPD conflict blocking';
       })().catch(error => {
         const out = document.getElementById('out');
         out.dataset.passed = 'false';

@@ -10,6 +10,8 @@
   function normalizeProposal(proposal) {
     return {
       key: String(proposal.key),
+      label: String(proposal.label || ''),
+      packageText: String(proposal.packageText || ''),
       claimAmount: Number(proposal.claimAmount) || 0,
       beforeApproved: Number(proposal.beforeApproved) || 0,
       proposedApproved: proposal.proposedApproved === null ? null : Number(proposal.proposedApproved),
@@ -26,9 +28,9 @@
     };
   }
 
-  function fingerprint(proposals) {
+  function fingerprint(proposals, claimIdentity = '') {
     const input = proposals.map(normalizeProposal).sort((a, b) => a.key.localeCompare(b.key));
-    const text = JSON.stringify(input);
+    const text = JSON.stringify([claimIdentity, input]);
     let hash = 0x811c9dc5;
     for (let index = 0; index < text.length; index++) {
       hash ^= text.charCodeAt(index);
@@ -161,5 +163,32 @@
     };
   }
 
-  return { RISK_ORDER, fingerprint, reconcile, validateApply, groupProposals, decisionForGroup };
+  function resumeDecisions(preview, saved) {
+    if (!saved || saved.previewToken !== preview.token || saved.ruleSetVersion !== (preview.ruleSetVersion || '')
+      || saved.ruleSetChecksum !== (preview.ruleSetChecksum || '')) return null;
+    const selected = new Set((saved.selectedKeys || []).filter(key => preview.proposals.some(row => row.key === key)));
+    for (const row of preview.proposals) if (row.mandatory) selected.add(row.key);
+    const approvedOverrides = {}, remarkOverrides = {};
+    for (const row of preview.proposals.filter(item => selected.has(item.key) && !item.mandatory)) {
+      const amount = saved.approvedOverrides?.[row.key];
+      if (Number.isFinite(amount) && amount >= 0 && amount <= row.claimAmount) approvedOverrides[row.key] = amount;
+      const remark = saved.remarkOverrides?.[row.key];
+      if (typeof remark === 'string') remarkOverrides[row.key] = remark;
+    }
+    // Resuming a review never restores a prior acknowledgement.
+    const exceptionalGroups = groupProposals(preview.proposals)
+      .filter(group => group.proposals.some(row => selected.has(row.key))).map(group => group.id);
+    return { selectedKeys: [...selected], approvedOverrides, remarkOverrides, exceptionalGroups };
+  }
+
+  function carryDecisions(previous, next, saved) {
+    if (previous.claimIdentity !== next.claimIdentity || previous.ruleSetVersion !== next.ruleSetVersion
+      || previous.ruleSetChecksum !== next.ruleSetChecksum) return null;
+    const unchanged = new Set(next.proposals.filter(row => previous.proposals.some(before => before.key === row.key
+      && fingerprint([before]) === fingerprint([row]))).map(row => row.key));
+    return resumeDecisions(next, { ...saved, previewToken: next.token, ruleSetVersion: next.ruleSetVersion || '',
+      ruleSetChecksum: next.ruleSetChecksum || '', selectedKeys: saved.selectedKeys.filter(key => unchanged.has(key)) });
+  }
+
+  return { RISK_ORDER, fingerprint, reconcile, validateApply, groupProposals, decisionForGroup, resumeDecisions, carryDecisions };
 });

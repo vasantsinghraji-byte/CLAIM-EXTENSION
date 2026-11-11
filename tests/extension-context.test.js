@@ -197,7 +197,8 @@ test('pending-only mode and claim decision memory remain processor-local', () =>
   assert.match(source, /Only Pending Work/);
   assert.match(source, /panel\.classList\.toggle\('pending-only', pendingOnly\)/);
   assert.match(source, /function decisionMemoryKey\(\)/);
-  assert.match(source, /chrome\.storage\.session\.set/);
+  assert.match(source, /saveReviewDecisions/);
+  assert.doesNotMatch(source, /chrome\.storage\.session/);
   assert.match(source, /function restoreDecisionMemory\(\)/);
 });
 

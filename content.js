@@ -11,6 +11,7 @@ let licenceState = null; // null = never checked yet (fresh install or signed ou
 let undoBatch = [];
 let lastPreview = null;
 let previewRowElements = new Map();
+let previewControlBindings = new Map();
 const Core = globalThis.ClaimAutoFillCore;
 const Audit = globalThis.RGHSAuditCore;
 const AuditRules = globalThis.RGHSAuditRules;
@@ -579,7 +580,7 @@ async function applyInvestigationVerification(token, { acknowledgedHighRisk = fa
   investigationApplyInFlight = true;
   try {
     const refresh = await refreshProcessingRules();
-    if (!refresh.ok) return blockedFillResult('processing-rules-unavailable');
+    if (!refresh.ok) return blockedFillResult(refresh.blockReason || 'processing-rules-unavailable');
     if (preview.ruleIdentity !== investigationRuleIdentity()) return blockedFillResult('processing-rules-changed');
     if (!isAutoFillEnabled) return blockedFillResult('autofill-disabled');
     const gate = evaluateLicenceGate(licenceState, true);
@@ -598,7 +599,7 @@ async function applyInvestigationVerification(token, { acknowledgedHighRisk = fa
       createdAt: preview.createdAt, selectedProposals: current.proposals, acknowledgedHighRisk
     });
     if (!validation.ok) return blockedFillResult(validation.reason);
-    const batch = [];
+    const batch = createClaimBatch();
     investigationChecklistPreview = null;
     for (const entry of current.entries) {
       setCellValue(entry.row.approvedCell, String(entry.approvedAmount), batch);
@@ -659,8 +660,13 @@ function findIpdActionTextBox(action) {
   return null;
 }
 
-function appendIpdActionRemarks(action, remarks) {
+async function appendIpdActionRemarks(action, remarks) {
   if (!isMainIpdClaimPage()) return { ok: false, addedCount: 0 };
+  if (!isAutoFillEnabled) return { ok: false, addedCount: 0, blockReason: 'autofill-disabled' };
+  const refresh = await refreshProcessingRules();
+  if (!refresh.ok) return { ok: false, addedCount: 0, blockReason: refresh.blockReason || 'processing-rules-unavailable' };
+  const gate = evaluateLicenceGate(licenceState, true);
+  if (gate.blocked || !findTid()) return { ok: false, addedCount: 0, blockReason: gate.reason || 'claim-unavailable' };
   if (!['approve', 'query', 'reject'].includes(action)) return { ok: false, addedCount: 0 };
   const targetBox = findIpdActionTextBox(action);
   if (!targetBox) return { ok: false, addedCount: 0 };
@@ -668,8 +674,14 @@ function appendIpdActionRemarks(action, remarks) {
   const additions = [...new Set((Array.isArray(remarks) ? remarks : [])
     .map(remark => String(remark || '').trim())
     .filter(remark => remark && !existing.includes(remark)))];
-  if (additions.length) setElementValue(targetBox, [existing, ...additions].filter(Boolean).join('\n'));
-  return { ok: true, addedCount: additions.length };
+  if (!additions.length) return { ok: true, addedCount: 0 };
+  const batch = createClaimBatch();
+  setCellValue(targetBox, [existing, ...additions].filter(Boolean).join('\n'), batch);
+  undoBatch = batch;
+  const result = await finalizeRecovery({ blocked: false, count: batch.length, changedFieldCount: batch.length,
+    _undoBatch: batch, _recoveryWrite: persistRecoverySnapshot(batch),
+    _activityDetails: { fieldCount: batch.length, ruleIds: ['IPD-ACTION-REMARKS'] } });
+  return { ...result, ok: !result.blocked, addedCount: result.blocked ? 0 : additions.length, hasUndo: undoBatch.length > 0 };
 }
 
 function getReviewDocuments() {
@@ -896,14 +908,14 @@ function refreshProcessingRules() {
 
 async function createFreshPreview() {
   const refresh = await refreshProcessingRules();
-  if (!refresh.ok) return formatPreview(blockedFillResult('processing-rules-unavailable', [refresh.error]));
+  if (!refresh.ok) return formatPreview(blockedFillResult(refresh.blockReason || 'processing-rules-unavailable', [refresh.error]));
   return createReviewedPreview();
 }
 
 async function applyFreshPreview(options) {
   const previewVersion = lastPreview?.ruleSetVersion || '';
   const refresh = await refreshProcessingRules();
-  if (!refresh.ok) return blockedFillResult('processing-rules-unavailable', [refresh.error]);
+  if (!refresh.ok) return blockedFillResult(refresh.blockReason || 'processing-rules-unavailable', [refresh.error]);
   if (previewVersion !== (processingRuleSet?.versionId || '')) return blockedFillResult('processing-rules-changed');
   return finalizeRecovery(await applyReviewedPreview(options));
 }
@@ -1144,7 +1156,8 @@ function blockedFillResult(reason, details = []) {
     auditFlagged: 0,
     auditDeducted: 0,
     proposals: [],
-    rowElements: new Map()
+    rowElements: new Map(),
+    rowControls: new Map()
   };
 }
 
@@ -1175,9 +1188,16 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   let auditFlagged = 0;
   let auditDeducted = 0;
   const auditLogEntries = [];
-  const batch = [];
+  const batch = createClaimBatch();
   const proposals = [];
   const rowElements = new Map();
+  const rowControls = new Map();
+  const registerRow = (key, record) => {
+    rowElements.set(key, record.rowEl);
+    const cells = [record.claimCell, record.approvedCell, ...Object.values(record.targetCells)];
+    const elements = [...new Set(cells.filter(Boolean).map(cell => findEditableElement(cell) || cell))];
+    rowControls.set(key, elements.map(element => ({ element, value: getElementValue(element) })));
+  };
   let processingBlock = null;
   const processingWarnings = [];
   const tables = collectTables(roots);
@@ -1414,13 +1434,22 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
           reason: `Centrally governed rule${action.ruleIds.length === 1 ? '' : 's'}: ${action.ruleIds.join(', ')}`,
           ruleIds: action.ruleIds
         });
-        rowElements.set(key, record.rowEl);
+        registerRow(key, record);
         if (!apply || selectedRowKeys && !selectedRowKeys.has(key)) continue;
-        setCellValue(record.approvedCell, String(action.proposedApproved), batch);
-        approvedCount++;
-        for (const [columnKey, remark] of Object.entries(action.remarks)) {
+        const approvedValue = Object.prototype.hasOwnProperty.call(approvedOverrides, key)
+          ? Number(approvedOverrides[key]) : action.proposedApproved;
+        if (approvedValue !== null) {
+          setCellValue(record.approvedCell, String(approvedValue), batch);
+          approvedCount++;
+        }
+        const appliedRemarks = { ...action.remarks };
+        if (Object.prototype.hasOwnProperty.call(remarkOverrides, key)) {
+          appliedRemarks.remarks = String(remarkOverrides[key] ?? '').trim();
+        }
+        for (const [columnKey, remark] of Object.entries(appliedRemarks)) {
           if (!remark) continue;
           const cell = record.targetCells[columnKey];
+          if (!cell) continue;
           const existing = getCellValue(cell);
           const next = action.remarkModes[columnKey] === 'replace' || !existing ? remark : `${existing}; ${remark}`;
           setCellValue(cell, next, batch);
@@ -1543,7 +1572,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
             ? Number(primaryFinding.fixedDeduction.amount)
             : null
         });
-        rowElements.set(key, record.rowEl);
+        registerRow(key, record);
         if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
 
         const hasApprovedOverride = Object.prototype.hasOwnProperty.call(approvedOverrides, key);
@@ -1710,7 +1739,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
               : plan.reason === 'incomplete-daily-ipd' ? ['RGHS-IPD-INCOMPLETE-FINAL-DAY']
                 : plan.reason === 'multiple-surgical-package' ? ['RGHS-IPD-MULTIPLE-SURGICAL'] : []
         });
-        rowElements.set(key, record.rowEl);
+        registerRow(key, record);
         if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
       }
 
@@ -1797,6 +1826,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
               });
               proposedApprovedInputs.add(sib);
               rowElements.set(key, parent);
+              rowControls.set(key, [input, sib].map(element => ({ element, value: getElementValue(element) })));
               if (apply && selectedRowKeys && !selectedRowKeys.has(key)) continue;
               if (apply) {
                 const approvedValue = Object.prototype.hasOwnProperty.call(approvedOverrides, key)
@@ -1822,7 +1852,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   updateAuditBadge(auditFlagged + auditDeducted);
   return {
     count, changedFieldCount: batch.length, approvedCount, remarksCount,
-    auditFlagged, auditDeducted, processingWarnings, proposals, rowElements,
+    auditFlagged, auditDeducted, processingWarnings, proposals, rowElements, rowControls,
     _recoveryWrite: recoveryWrite,
     _undoBatch: batch
   };
@@ -1844,7 +1874,8 @@ function updateAuditBadge(count) {
 }
 
 function formatPreview(raw, createdAt = Date.now()) {
-  const token = Review.fingerprint(raw.proposals);
+  const claimIdentity = JSON.stringify([location.href, findTid()]);
+  const token = Review.fingerprint(raw.proposals, claimIdentity);
   return {
     count: raw.count,
     rowCount: raw.proposals.length,
@@ -1855,6 +1886,7 @@ function formatPreview(raw, createdAt = Date.now()) {
     processingWarnings: raw.processingWarnings || [],
     proposals: raw.proposals,
     token,
+    claimIdentity,
     createdAt,
     ruleSetVersion: processingRuleSet?.versionId || '',
     ruleSetChecksum: processingRuleSet?.checksum || '',
@@ -1870,6 +1902,7 @@ function createReviewedPreview() {
   const preview = formatPreview(raw);
   lastPreview = preview;
   previewRowElements = raw.rowElements;
+  previewControlBindings = raw.rowControls;
   appendClaimActivity('preview', {
     blocked: preview.blocked,
     blockReason: preview.blockReason,
@@ -1884,10 +1917,26 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
   const currentRaw = fillAllApprovedAmounts({ apply: false });
   if (currentRaw.blocked) {
     appendClaimActivity('apply-blocked', { blockReason: currentRaw.blockReason });
-    return { ...blockedFillResult(currentRaw.blockReason, currentRaw.blockDetails), rowElements: undefined, proposals: undefined };
+    return { ...blockedFillResult(currentRaw.blockReason, currentRaw.blockDetails), rowElements: undefined, rowControls: undefined, proposals: undefined };
   }
   const current = formatPreview(currentRaw, lastPreview?.createdAt);
   const selectedKeys = Array.isArray(selectedRowKeys) ? [...new Set(selectedRowKeys)] : [];
+  // Bind the review to both its claim and actual controls. Matching monetary
+  // values alone must not authorize writes after an SPA switches claims/rows.
+  const controlsChanged = selectedKeys.some(key => {
+    const before = previewControlBindings?.get(key);
+    const live = currentRaw.rowControls.get(key);
+    return !before || !live || before.length !== live.length || before.some((binding, index) =>
+      !binding.element.isConnected || binding.element !== live[index].element || binding.value !== live[index].value);
+  });
+  if (!lastPreview || lastPreview.claimIdentity !== current.claimIdentity || controlsChanged) {
+    lastPreview = null;
+    previewControlBindings = new Map();
+    return { ...blockedFillResult('stale'), rowElements: undefined, rowControls: undefined, proposals: undefined };
+  }
+  if (Core.isSupportedClaimPage(location.pathname) && !findTid()) {
+    return { ...blockedFillResult('claim-unavailable'), rowElements: undefined, rowControls: undefined, proposals: undefined };
+  }
   const missingMandatory = current.proposals.some(proposal => proposal.mandatory && !selectedKeys.includes(proposal.key));
   if (missingMandatory) return { blocked: true, blockReason: 'mandatory-action-required', count: 0 };
   const mandatoryRemarkOverride = Object.keys(remarkOverrides).some(key =>
@@ -1896,7 +1945,9 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
   const invalidOverride = Object.entries(approvedOverrides).some(([key, value]) => {
     const proposal = current.proposals.find(item => item.key === key);
     if (!proposal || !selectedKeys.includes(key)) return true;
-    if (proposal.mandatory) return Math.abs(Number(value) - Number(proposal.proposedApproved)) >= 0.005;
+    if (!Number.isFinite(Number(value)) || typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return true;
+    if (proposal.mandatory) return proposal.proposedApproved === null
+      || Math.abs(Number(value) - Number(proposal.proposedApproved)) >= 0.005;
     const allowed = [0, proposal.claimAmount, proposal.beforeApproved, proposal.proposedApproved, proposal.recommendedApproved]
       .filter(item => item !== null && item !== undefined)
       .map(Number);
@@ -1934,15 +1985,17 @@ function applyReviewedPreview({ token, selectedRowKeys, approvedOverrides = {}, 
   });
   if (result.blocked) {
     appendClaimActivity('apply-blocked', { blockReason: result.blockReason });
-    return { ...result, rowElements: undefined, proposals: undefined };
+    return { ...result, rowElements: undefined, rowControls: undefined, proposals: undefined };
   }
   const ruleIds = [...new Set(selected.flatMap(proposal => proposal.ruleIds || []))];
   lastPreview = null;
   previewRowElements = new Map();
+  previewControlBindings = new Map();
   return {
     ...result,
     proposals: undefined,
     rowElements: undefined,
+    rowControls: undefined,
     blocked: false,
     reconciliation: validation.totals,
     _activityDetails: {
@@ -2338,17 +2391,34 @@ function appendAuditLog(entries) {
   appendStorageEntries('rghsAuditLog', Audit.dedupeLogEntries([], entries));
 }
 
+function currentClaimContext() {
+  return { tid: findTid(), url: globalThis.location?.href || '' };
+}
+
+function matchesClaimContext(saved, current = currentClaimContext()) {
+  if (!saved || saved.url !== current.url) return false;
+  if (current.tid) return saved.tid === current.tid;
+  // Shared portal routes cannot identify a claim by URL alone.
+  return !Core.isSupportedClaimPage(globalThis.location?.pathname || '') && !saved.tid;
+}
+
+function createClaimBatch() {
+  const batch = [];
+  batch.claimContext = currentClaimContext();
+  return batch;
+}
+
 function persistRecoverySnapshot(batch) {
   const entries = batch
     .filter(item => item.element?.id)
     .map(item => ({ id: item.element.id, before: String(item.value ?? ''), after: getElementValue(item.element) }));
   if (!entries.length || entries.length !== batch.length) return Promise.resolve(false);
 
+  batch.recoveryId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const snapshot = {
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: batch.recoveryId,
     createdAt: Date.now(),
-    tid: findTid(),
-    url: location.href,
+    ...batch.claimContext,
     version: chrome.runtime.getManifest().version,
     entries
   };
@@ -2388,13 +2458,7 @@ function getMatchingRecoverySnapshot(callback) {
   chrome.storage.local.get(['claimRecoverySnapshots'], result => {
     const snapshots = Array.isArray(result.claimRecoverySnapshots) ? result.claimRecoverySnapshots : [];
     const activeSnapshots = snapshots.filter(item => Date.now() - item.createdAt <= 24 * 60 * 60 * 1000);
-    const tid = findTid();
-    // location.href alone identifies the claim on process sheets, but on tpaOPD
-    // every claim shares the same URL - matching by URL there would restore a
-    // different claim's saved field values onto whatever claim is on screen now.
-    // Once a TID is known, it must agree; URL is only trusted when no TID exists.
-    const snapshot = [...activeSnapshots].reverse().find(item =>
-      tid ? item.tid === tid : item.url === location.href);
+    const snapshot = [...activeSnapshots].reverse().find(item => matchesClaimContext(item));
     callback(snapshot || null, activeSnapshots);
   });
 }
@@ -2403,26 +2467,32 @@ function restorePersistentSnapshot() {
   return new Promise(resolve => {
     getMatchingRecoverySnapshot(snapshot => {
       if (!snapshot) return resolve({ count: 0, hasRecovery: false });
+      if (!matchesClaimContext(snapshot)) return resolve({ count: 0, hasRecovery: true, blocked: true, blockReason: 'stale' });
       let count = 0;
       let conflicts = 0;
+      let missing = 0;
+      const restoredIds = [];
       for (const entry of snapshot.entries) {
         const element = document.getElementById(entry.id);
-        if (!element?.isConnected) continue;
+        if (!element?.isConnected) { missing++; continue; }
         if (getElementValue(element) !== String(entry.after ?? '')) {
           conflicts++;
           continue;
         }
         setElementValue(element, entry.before);
         delete element.dataset.claimExtensionInvestigationVerified;
+        restoredIds.push(entry.id);
         count++;
       }
-      if (count === 0) return resolve({ count: 0, hasRecovery: true });
+      if (count === 0) return resolve({ count: 0, conflicts, missing, hasRecovery: true });
       const fullyRestored = count === snapshot.entries.length;
       if (fullyRestored) {
         queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
+      } else {
+        queueStorageMutation({ action: 'markRecoveryEntriesRestored', id: snapshot.id, restoredIds });
       }
       appendClaimActivity('restore', { fieldCount: count });
-      resolve({ count, conflicts, hasRecovery: !fullyRestored });
+      resolve({ count, conflicts, missing, hasRecovery: !fullyRestored });
     });
   });
 }
@@ -2432,21 +2502,23 @@ function hasPersistentRecovery(callback) {
 }
 
 function restoreFillBatch(batch, { removeRecovery = true } = {}) {
+  if (!matchesClaimContext(batch.claimContext)) return 0;
   let count = 0;
   for (let index = batch.length - 1; index >= 0; index--) {
+    if (batch[index].restored) continue;
     const element = batch[index].element;
     if (!element?.isConnected) continue;
     if (getElementValue(element) !== String(batch[index].after ?? '')) continue;
     setElementValue(element, batch[index].value);
     delete element.dataset.claimExtensionInvestigationVerified;
+    batch[index].restored = true;
     count++;
   }
   if (count > 0) {
     appendClaimActivity('undo', { fieldCount: count });
-    if (removeRecovery && count === batch.length) {
-      getMatchingRecoverySnapshot(snapshot => {
-        if (snapshot) queueStorageMutation({ action: 'removeRecoverySnapshot', id: snapshot.id });
-      });
+    if (removeRecovery && batch.recoveryId) {
+      queueStorageMutation({ action: 'markRecoveryEntriesRestored', id: batch.recoveryId,
+        restoredIds: batch.filter(item => item.restored).map(item => item.element.id) });
     }
   }
   return count;
@@ -2454,8 +2526,9 @@ function restoreFillBatch(batch, { removeRecovery = true } = {}) {
 
 function undoLastFill() {
   const batch = undoBatch;
-  undoBatch = [];
-  return restoreFillBatch(batch);
+  const count = restoreFillBatch(batch);
+  if (batch.every(item => item.restored)) undoBatch = [];
+  return count;
 }
 
 globalThis.ClaimAutoFillActions = {
@@ -2464,7 +2537,7 @@ globalThis.ClaimAutoFillActions = {
     return { ...result, hasUndo: undoBatch.length > 0 };
   },
   async apply(options) {
-    const result = await finalizeRecovery(applyReviewedPreview(options));
+    const result = await applyFreshPreview(options);
     return { ...result, hasUndo: undoBatch.length > 0 };
   },
   async previewFresh() {
