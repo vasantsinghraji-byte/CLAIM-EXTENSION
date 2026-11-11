@@ -102,10 +102,28 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-function cleanupTestDirectory(directory) {
+async function cleanupTestDirectory(directory) {
   const resolved = path.resolve(directory);
   if (!resolved.startsWith(path.resolve(os.tmpdir()) + path.sep + 'claim-extension-e2e-')) throw new Error('Unexpected test cleanup path');
-  fs.rmSync(resolved, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  await fs.promises.rm(resolved, { recursive: true, force: true, maxRetries: 12, retryDelay: 300 });
+}
+
+function waitForBrowserExit(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const exited = () => { clearTimeout(timer); resolve(true); };
+    const timer = setTimeout(() => { child.removeListener('exit', exited); resolve(false); }, 5000);
+    child.once('exit', exited);
+  });
+}
+
+async function closeBrowser(browser, child) {
+  if (browser) await browser.send('Browser.close').catch(() => {});
+  // Allow Chrome to finish shutting down its profile writers before deletion.
+  if (child && !await waitForBrowserExit(child)) {
+    child.kill();
+    if (!await waitForBrowserExit(child)) throw new Error('Extension browser did not exit before profile cleanup');
+  }
 }
 
 const fixture = `<!doctype html><html><body><input id="transid" value="SYN-A">
@@ -242,10 +260,9 @@ async function main() {
     console.log('PASS: actual extension, worker restart, scoped review resume, multi-tab isolation, safe-row continuation, policy freshness, offline Undo/recovery, sign-out races and review cleanup.');
   } finally {
     state.held.splice(0).forEach(finish => finish());
-    if (browser) await browser.send('Browser.close').catch(() => {});
-    if (child && child.exitCode === null) { child.kill(); await new Promise(resolve => { child.once('exit', resolve); setTimeout(resolve, 2000); }); }
-    await new Promise(resolve => server.close(resolve)); server.closeAllConnections();
-    cleanupTestDirectory(temporary);
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    await closeBrowser(browser, child);
+    await cleanupTestDirectory(temporary);
   }
 }
 
