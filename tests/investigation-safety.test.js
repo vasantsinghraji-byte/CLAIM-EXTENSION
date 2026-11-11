@@ -110,13 +110,41 @@ test('investigation Apply blocks rule changes, unavailable rules and mandatory p
 
 test('investigation counts reject partial invalid input and cap approval at the claimed amount', () => {
   const { row, preview } = setup();
-  for (const found of ['', '-1', '1.5', '5', 'not-a-count']) {
+  for (const found of ['', '-1', '1.5', '1.0', '5', 'not-a-count', '1e0', '1,0', '0,3', '₹3', '1oops', true, null]) {
     assert.equal(preview([{ index: 0, found }]).blocked, true, found);
   }
   assert.equal(preview([{ index: 0, found: 1 }, { index: 0, found: 2 }]).blocked, true);
   assert.equal(preview([{ index: 99, found: 1 }]).blocked, true);
   row.claimAmount = 250;
   assert.equal(preview().proposals[0].proposedApproved, 250);
+});
+
+test('report-count scientific notation cannot become a different approved quantity', () => {
+  const { row, preview } = setup();
+  row.expected = 20; row.claimAmount = 2000;
+  assert.equal(preview([{ index: 0, found: '1e1' }]).blockReason, 'invalid-investigation-counts');
+  assert.equal(preview([{ index: 0, found: '10' }]).proposals[0].proposedApproved, 1000);
+});
+
+test('invalid checklist row indices and malformed entries cannot select a different investigation', () => {
+  const { row, preview } = setup();
+  for (const index of ['', ' ', null, undefined, false, true, '0.0', '0e0', '0oops', [], -1, 0.5, 9007199254740992]) {
+    assert.equal(preview([{ index, found: '1' }]).blockReason, 'invalid-investigation-counts', String(index));
+  }
+  for (const item of [null, undefined, true, {}, 'not-an-entry']) {
+    assert.equal(preview([item]).blockReason, 'invalid-investigation-counts');
+  }
+  assert.equal(row.approvedCell.value, '400');
+  assert.equal(preview([{ index: '0', found: '0' }]).proposals[0].proposedApproved, 0);
+});
+
+test('invalid counts in any submitted row cancel the preview and invalidate the old Apply token', async () => {
+  const { row, preview, apply } = setup();
+  const valid = preview([{ index: 0, found: '3' }]);
+  assert.equal(preview([{ index: 0, found: '3' }, { index: 99, found: '1e1' }]).blockReason, 'invalid-investigation-counts');
+  assert.equal((await apply(valid.token)).blocked, true);
+  assert.equal(row.approvedCell.value, '400');
+  assert.equal(row.remarksCell.value, 'Keep this remark');
 });
 
 test('investigation recovery failures restore both fields and never mark them verified', async () => {

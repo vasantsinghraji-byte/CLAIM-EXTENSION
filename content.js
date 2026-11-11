@@ -523,8 +523,8 @@ function buildInvestigationVerification(verifiedCounts) {
   const rows = getInvestigationChecklist();
   const supplied = new Map();
   for (const item of Array.isArray(verifiedCounts) ? verifiedCounts : []) {
-    const index = Number(item.index);
-    const found = Core.parseAmount(item.found);
+    const index = Core.parseCount(item?.index);
+    const found = Core.parseCount(item?.found);
     const row = rows.find(candidate => candidate.index === index);
     if (!row || supplied.has(index) || !Number.isSafeInteger(found) || found < 0 || found > row.expected) {
       return { ...blockedFillResult('invalid-investigation-counts'), entries: [] };
