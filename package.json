@@ -1,6 +1,6 @@
 {
   "name": "claim-autofill-extension",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "Chrome extension for reviewing and filling approved claim amounts with configurable audit checks",
   "scripts": {
     "build": "node build.js",

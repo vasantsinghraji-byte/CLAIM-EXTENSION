@@ -186,3 +186,15 @@
 
 - Add governed processing, investigation review, verified platform access, and reviewed safety safeguards.
 - Use generic claim wording across the interface, proposed remarks, website and Store materials; retain existing integration and saved-data compatibility.
+
+## 1.12.1 - 2026-11-11
+
+- Preserve saved rule scenarios across repeated validation and align central browser/server money parsing, deduction caps, explicit-zero approvals and rejected outcomes.
+- Bind Apply, Undo and recovery to the originating claim/page and captured controls; retain partial recovery conflicts for retry and include IPD remarks in recovery.
+- Resume account-scoped review decisions through the service worker and continue safe-row review without carrying changed proposals or high-risk acknowledgement.
+- Keep verified signups pending, preserve verification recovery, separate individual payment/approval/licence activation and enforce explicit user deactivation with fresh entitlement checks.
+- Prevent delayed authentication, licence, policy and hosted-administrator responses from restoring signed-out state.
+- Add a responsive administrator dashboard with searchable accounts, guarded management controls and authenticated live monitoring.
+- Reject invalid report counts/row indices and stale companion previews; show local bundled/central comparisons and policy explanations while preserving the selected processing mode.
+- Expand real-Chrome, emulator and regression acceptance, stabilize browser cleanup, and enforce staged-index validation with recovery snapshots and focused PR guidance.
+- Reconcile release documentation and privacy disclosures, align candidate versions and regenerate package metadata. Store publication and backend deployment remain separate rollout steps.

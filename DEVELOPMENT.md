@@ -1,5 +1,9 @@
 # Development Guide
 
+The administrator control tower lives at `/admin` on the production Hosting
+site. Access, monitoring semantics, tests and the scoped deployment sequence are
+documented in [administrator control tower](docs/ADMIN_CONTROL_TOWER.md).
+
 ## Local Firebase configuration
 
 Tracked source contains no Firebase API key values. Copy
@@ -38,6 +42,38 @@ Page load, route updates, DOM mutations, and enabling the extension must never c
 
 Preview tokens are deterministic fingerprints of row keys, current/proposed values, remarks, risks, and reasons. Apply recomputes the preview against the live DOM and blocks stale, expired, empty, unbalanced, or unacknowledged high-risk selections. Recovery snapshots contain only control IDs, before/after values, TID/URL context, timestamp, and extension version; they expire after 24 hours and are capped at 20 entries.
 
+General previews also bind the exact page URL and current claim identifier.
+Apply checks the original control identities and captured values, including
+secondary remark columns; switching claims or replacing controls requires a new
+preview. Supported claim pages require an identifiable claim before Apply.
+Central money parsing, deduction corrections and server/browser parity checks
+are described in [claim Apply safety fixes](docs/CLAIM_APPLY_SAFETY_FIXES.md).
+
+Undo batches and saved snapshots require the originating claim ID and exact page
+URL. Missing IDs on shared portal routes block recovery. Partial restoration
+retains unresolved fields and reports conflicts/unavailable controls. IPD action
+remarks use the same recovery and Undo path as amount changes.
+
+Authentication state writes share a serialized queue and an operation generation;
+responses from before sign-out, cancellation or an account change cannot restore
+credentials, entitlement or rule caches. Simultaneous rule checks are coalesced,
+with every subsequent Apply still requesting fresh authority.
+
+Review decisions use a service-worker broker for `chrome.storage.session`; content
+scripts never access that storage area directly. Saved reviews are scoped by
+user, claim and exact page, limited to 30 reviews/24 hours and cleared on sign-out.
+Resuming requires identical proposal and rule identities and resets high-risk
+acknowledgement. Safe-row Apply automatically previews remaining work and carries
+only unchanged decisions. Compare mode displays amount differences locally and
+does not allow central rules to write portal fields.
+
+Run `npm run test:extension` for acceptance with the actual unpacked extension,
+real Chrome APIs and an isolated service worker/profile. It uses only a synthetic
+loopback backend and fixtures, checks worker restart, multi-tab isolation, review
+resumption, safe-row continuation, offline recovery and sign-out races, and never
+connects to real claim or Firebase accounts. Chrome must support the DevTools
+`Extensions.loadUnpacked` command; set `CHROME_PATH` when needed.
+
 Custom findings are stored under `customRuleConfig` in `chrome.storage.local`.
 They may extend only the unbundling and upcoding-review families, are validated
 before persistence, and merge as review-only rules. Never add a path that lets
@@ -55,13 +91,21 @@ eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
 1. Edit the root source files.
 2. Run `npm run check`.
-3. Run `npm run lint`, `npm run test:functions`, and `npm run test:firebase`
-   before a release.
+3. Run `npm run lint`, `npm run test:functions`, `npm run test:browser`,
+   `npm run test:extension`, `npm run test:dashboard`, `npm run test:firebase`,
+   and `npm run test:lifecycle` before a release. Match the hosted CI gates.
 4. Run `npm run build`.
 5. Load or reload `dist/` at `chrome://extensions/`.
 6. Refresh the claim page or local `test-page.html` fixture.
 
 The build fails when a required production file is missing. It produces a deterministic `claim-autofill-extension.zip` without another dependency.
+
+Release 1.12.1 preparation, artifact verification and rollout checkpoints are
+documented in [the release review](docs/RELEASE_1.12.1_REVIEW.md). Existing
+uncommitted work is accounted for in [the reconciliation record](docs/WORKTREE_RECONCILIATION.md).
+Use a dedicated worktree from current main and retain the original recovery
+snapshot until reconciliation and review are complete. Release packaging does
+not deploy Firebase services or publish the extension.
 
 ## Tests
 
