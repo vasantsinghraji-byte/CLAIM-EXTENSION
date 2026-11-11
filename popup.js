@@ -221,6 +221,7 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   authAwaitingActivation.hidden = stage !== 'awaiting-activation';
   authSignedIn.hidden = stage !== 'signed-in';
   adminPanel.hidden = stage !== 'signed-in' || authSession?.role !== 'platformAdmin';
+  document.getElementById('adminDashboardEntry').hidden = adminPanel.hidden;
 
   if (stage === 'signed-in') {
     authEmailLabel.textContent = authSession.email || '';

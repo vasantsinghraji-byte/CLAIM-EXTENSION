@@ -6,8 +6,9 @@
   <meta name="robots" content="noindex,nofollow">
   <title>Claim Spark Administration</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin.css">
 </head>
-<body>
+<body class="admin-page">
   <header class="site-header">
     <a href="/" class="brand">Claim Spark</a>
     <span>Administration</span>
@@ -15,56 +16,96 @@
   <main class="dashboard-shell">
     <section id="signInView" class="auth-card">
       <h1>Administrator sign in</h1>
-      <p>Use a verified, active platform-administrator account.</p>
-      <form id="signInForm">
+      <p class="meta">Manage your users, licences and organization from one workspace.</p>
+      <form id="signInForm" method="post" action="/admin">
         <label for="email">Email</label>
         <input id="email" name="email" type="email" autocomplete="username" required>
         <label for="password">Password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required minlength="6">
-        <button id="signInButton" class="button primary" type="submit">Sign in</button>
+        <button id="signInButton" class="button primary" type="submit" disabled>Sign in</button>
       </form>
       <p id="signInError" class="message error" role="alert"></p>
+      <a href="/support">Need help accessing your administrator account?</a>
     </section>
 
     <section id="dashboardView" hidden>
+      <aside class="admin-sidebar">
+        <a class="workspace-brand" href="/admin"><span class="brand-mark">C</span><span>Claim Spark<strong>Administration</strong></span></a>
+        <p class="nav-label">Operations</p>
+        <nav class="tabs" aria-label="Administrator sections">
+          <button type="button" data-tab="overview" class="active" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> Overview</button>
+          <p class="nav-label">People &amp; access</p>
+          <button type="button" data-tab="users"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m1 4a5 5 0 0 1 3 4v2"/></svg> Users &amp; payments</button>
+          <button type="button" data-tab="organizations"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h1m4 0h1m-6 4h1m4 0h1m-5 10v-6h4v6"/></svg> Organizations</button>
+          <button type="button" data-tab="licences"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18m-14 5h4"/></svg> Licences</button>
+          <button type="button" data-tab="invitations"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/></svg> Invitations</button>
+          <button type="button" data-tab="roster"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg> Employee roster</button>
+          <p class="nav-label">Policy &amp; activity</p>
+          <button type="button" data-tab="rules"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg> Processing rules</button>
+          <button type="button" data-tab="rule-feedback"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11a8 8 0 0 1-8 8H5l-4 3V11a10 10 0 0 1 20 0Z"/><path d="M7 10h8m-8 4h5"/></svg> Rule feedback</button>
+          <button type="button" data-tab="audit"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16M8 14l4-5 4 3 5-8"/></svg> Audit events</button>
+        </nav>
+        <div class="sidebar-footer"><span id="environmentLabel" class="environment-label">Connecting</span><p id="projectLabel">Verifying backend</p><a href="/support">Support &amp; account access ↗</a></div>
+      </aside>
+      <div class="admin-workspace">
       <div class="dashboard-heading">
         <div>
-          <h1>Administrator dashboard</h1>
+          <p class="eyebrow">Administration / Workspace</p>
+          <h1 id="pageTitle">Overview</h1>
+          <p id="pageDescription">Your accounts, priorities and latest activity at a glance.</p>
           <p id="sessionLabel"></p>
         </div>
-        <button id="signOutButton" class="button secondary" type="button">Sign out</button>
+        <div class="session-actions"><span id="liveStatus" class="live-status" data-state="offline" role="status">Disconnected</span><button id="signOutButton" class="button secondary" type="button">Sign out</button></div>
       </div>
       <p id="globalMessage" class="message" role="status" aria-live="polite"></p>
 
-      <nav class="tabs" aria-label="Administrator sections">
-        <button type="button" data-tab="users" class="active">Users</button>
-        <button type="button" data-tab="invitations">Invitations</button>
-        <button type="button" data-tab="organizations">Organizations</button>
-        <button type="button" data-tab="roster">Roster</button>
-        <button type="button" data-tab="licences">Licences</button>
-        <button type="button" data-tab="rules">Processing rules</button>
-        <button type="button" data-tab="rule-feedback">Rule feedback</button>
-        <button type="button" data-tab="audit">Audit events</button>
-      </nav>
+      <section data-panel="overview" id="overviewPanel" class="monitor-overview">
+        <div class="overview-toolbar"><p id="lastUpdated">Waiting for the first backend snapshot</p><button id="reconnectMonitor" class="button secondary" type="button">Reconnect</button></div>
+        <p id="monitorError" class="monitor-warning" role="alert" hidden></p>
+        <div class="metric-grid">
+          <article class="metric-card"><span>Total users</span><strong data-metric="users">&mdash;</strong><p>All account records</p></article>
+          <article class="metric-card"><span>Active accounts</span><strong data-metric="active">&mdash;</strong><p>Accounts enabled for use</p></article>
+          <article class="metric-card"><span>Pending approvals</span><strong data-metric="pending">&mdash;</strong><button class="metric-link" data-open-tab="users" data-open-queue="approvalQueue" type="button">Review registrations &rarr;</button></article>
+          <article class="metric-card"><span>Payments to verify</span><strong data-metric="payments">&mdash;</strong><button class="metric-link" data-open-tab="users" data-open-queue="paymentQueue" type="button">Review payments &rarr;</button></article>
+        </div>
+        <div class="summary-strip" aria-label="Additional account statistics">
+          <span><strong data-metric="expiring">&mdash;</strong> licences expiring in 7 days</span>
+          <span><strong data-metric="organizations">&mdash;</strong> organizations</span>
+          <span><strong data-metric="activeLicences">&mdash;</strong> active organization licences</span>
+          <span><strong data-metric="invitations">&mdash;</strong> pending invitations</span>
+        </div>
+        <section class="monitor-card attention-card"><div class="panel-heading"><div><h2>Needs attention</h2><p class="meta">Registrations, payments and licence warnings &middot; latest 12</p></div><button class="button primary" data-open-tab="users" type="button">Manage users</button></div><div class="table-scroll"><table><thead><tr><th>User</th><th>Organization</th><th>Reason</th><th>Licence expiry</th></tr></thead><tbody id="attentionRows"><tr><td colspan="4">Waiting for backend data...</td></tr></tbody></table></div></section>
+        <section class="monitor-card"><div class="panel-heading"><div><h2>Recent activity</h2><p class="meta">Latest 25 recorded events &middot; updates automatically</p></div><button class="button secondary" data-open-tab="audit" type="button">View audit log</button></div><div class="table-scroll activity-table"><table><thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Organization</th><th>Version / result</th></tr></thead><tbody id="monitorAuditRows"><tr><td colspan="5">Waiting for backend data...</td></tr></tbody></table></div></section>
+        <details class="workspace-details"><summary><span>Account &amp; organization details<small>Recent account changes and licence capacity</small></span></summary>
+          <section class="monitor-card"><div class="panel-heading"><div><h2>Recently updated accounts</h2><p class="meta">Latest 20 accounts by recorded update time</p></div><button class="button secondary" data-open-tab="users" type="button">All users</button></div><label class="table-filter" for="monitorUserSearch">Search these accounts<input id="monitorUserSearch" type="search" placeholder="Name, email or organization"></label><div class="table-scroll"><table><thead><tr><th>User</th><th>Email</th><th>Organization</th><th>Account</th><th>Licence</th><th>Expires</th></tr></thead><tbody id="monitorUserRows"><tr><td colspan="6">Waiting for backend data...</td></tr></tbody></table></div></section>
+          <section class="monitor-card"><div class="panel-heading"><div><h2>Organization capacity</h2><p class="meta">First 20 by ID &middot; counts include pending and suspended users</p></div><button class="button secondary" data-open-tab="organizations" type="button">Manage organizations</button></div><div class="table-scroll"><table><thead><tr><th>Organization</th><th>Status</th><th>Users / capacity</th><th>Licence</th><th>Expires</th></tr></thead><tbody id="monitorOrganizationRows"><tr><td colspan="5">Waiting for backend data...</td></tr></tbody></table></div></section>
+        </details>
+        <details class="workspace-details"><summary><span>System &amp; extension health<small>Service configuration and reported extension versions</small></span></summary><div class="overview-columns">
+          <section class="monitor-card"><h2>Service configuration</h2><dl class="service-details"><div><dt>Processing</dt><dd id="maintenanceValue">&mdash;</dd></div><div><dt>Minimum extension</dt><dd id="minimumVersionValue">&mdash;</dd></div><div><dt>Policy mode</dt><dd id="ruleModeValue">&mdash;</dd></div><div><dt>Active rule version</dt><dd id="ruleVersionValue">&mdash;</dd></div><div><dt>Rule feedback</dt><dd id="feedbackValue">&mdash;</dd></div></dl></section>
+          <section class="monitor-card"><h2>Reported versions</h2><div id="versionDistribution"><p class="empty">Waiting for server events...</p></div><p id="versionSample" class="meta">Version coverage will appear after the live feed connects.</p><p class="data-boundary">Claim amounts, patient records and portal activity stay in users’ browsers. They are not collected by this dashboard.</p></section>
+        </div></details>
+      </section>
 
-      <section id="usersPanel" class="panel" data-panel="users">
+      <section id="usersPanel" class="panel" data-panel="users" hidden>
         <div class="panel-heading">
           <h2>Users <span id="pendingCount" class="count-badge">0 pending</span></h2>
           <button id="refreshUsers" class="button secondary" type="button">Refresh</button>
         </div>
-        <section class="pending-approvals" aria-labelledby="pendingUsersHeading">
-          <h3 id="pendingUsersHeading">Pending approvals</h3>
+        <details class="pending-approvals" id="approvalQueue">
+          <summary id="pendingUsersHeading">Pending approvals <span id="approvalQueueCount" class="queue-count">0</span></summary>
           <div id="pendingUsersList" class="record-list"></div>
-        </section>
-        <section class="pending-approvals" aria-labelledby="pendingPaymentsHeading">
-          <h3 id="pendingPaymentsHeading">Payment verification <span id="pendingPaymentCount" class="count-badge">0 pending</span></h3>
+        </details>
+        <details class="pending-approvals" id="paymentQueue">
+          <summary id="pendingPaymentsHeading">Payment verification <span id="pendingPaymentCount" class="queue-count">0 pending</span></summary>
           <div id="pendingPaymentsList" class="record-list"></div>
-        </section>
-        <section class="pending-approvals" aria-labelledby="expiringUsersHeading">
-          <h3 id="expiringUsersHeading">Expiring within 7 days <span id="expiringUserCount" class="count-badge">0 users</span></h3>
+        </details>
+        <details class="pending-approvals" id="expiryQueue">
+          <summary id="expiringUsersHeading">Expiring within 7 days <span id="expiringUserCount" class="queue-count">0 users</span></summary>
           <div id="expiringUsersList" class="record-list"></div>
-        </section>
-        <h3>Approved and inactive users</h3>
+        </details>
+        <div class="directory-heading"><div><h3>User directory</h3><p id="userResultsCount" class="meta" role="status"></p></div></div>
+        <div class="directory-toolbar"><label for="userSearch">Search users<input id="userSearch" type="search" placeholder="Search name, email or organization"></label><label for="userStatusFilter">Show<select id="userStatusFilter"><option value="current">Current accounts</option><option value="active">Active accounts</option><option value="inactive-licence">Inactive licences</option><option value="suspended">Suspended accounts</option><option value="deleted">Deleted accounts</option><option value="all">All records</option></select></label></div>
+        <p id="userSearchEmpty" class="empty" hidden>No users match your search. Try a different name or status.</p>
         <div id="usersList" class="record-list"></div>
       </section>
 
@@ -254,9 +295,11 @@
         <p>Latest 100 privacy-safe server events.</p>
         <div id="auditList" class="record-list"></div>
       </section>
+      </div>
     </section>
   </main>
   <script src="/firebase-client.js"></script>
+  <script src="/admin-monitor.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>

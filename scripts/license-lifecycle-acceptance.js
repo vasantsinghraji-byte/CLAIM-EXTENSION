@@ -380,6 +380,65 @@ async function testRuleGovernance(auth, db, adminToken) {
   console.log('PASS: rule drafts/status, validation, publish, distinct-admin approval, self-approval rejection, version refresh, feedback/review, rollback, rejected publication and history on isolated emulators.');
 }
 
+async function testAdminMonitor(auth, db, adminToken) {
+  const endpoint = `${FUNCTIONS_BASE_URL}/monitorAdminDashboard`;
+  const denied = await fetch(endpoint, { method: 'POST' });
+  assert.equal(denied.status, 401);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  let reader;
+  const reference = db.doc('users/monitor-synthetic');
+  const adminIdentity = await auth.verifyIdToken(adminToken);
+  const adminReference = db.doc(`users/${adminIdentity.uid}`);
+  const adminProfile = (await adminReference.get()).data();
+  let adminChanged = false;
+  try {
+    const response = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${adminToken}` }, signal: controller.signal });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /text\/event-stream/);
+    reader = response.body.getReader();
+    const decoder = new TextDecoder(); let buffer = '';
+    const nextSnapshot = async () => {
+      while (true) {
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+          if (block.startsWith('event: snapshot\n')) return JSON.parse(block.split('\ndata: ')[1]);
+          if (block.startsWith('event: monitor-error\n')) return { monitorError: JSON.parse(block.split('\ndata: ')[1]).code };
+        }
+        const { value, done } = await reader.read();
+        assert.equal(done, false, 'Live monitor closed before the expected snapshot');
+        buffer += decoder.decode(value, { stream: true });
+      }
+    };
+    const before = await nextSnapshot();
+    assert.equal(before.projectId, PROJECT_ID);
+    await reference.set({ email: 'monitor-synthetic@claim-spark.local', displayName: 'Synthetic monitor account',
+      organizationId: 'platform', accountStatus: 'invited', role: 'processor', license: defaultLicense(), updatedAt: Timestamp.now() });
+    let after;
+    do { after = await nextSnapshot(); } while (after.counts.users === before.counts.users);
+    assert.equal(after.counts.users, before.counts.users + 1);
+    assert.equal(after.counts.pending, before.counts.pending + 1);
+    await reference.update({ accountStatus: 'active', updatedAt: Timestamp.now() });
+    do { after = await nextSnapshot(); } while (after.counts.pending !== before.counts.pending);
+    assert.equal(after.counts.active, before.counts.active + 1);
+    const processor = await createVerifiedUser(auth, 'monitor-processor@claim-spark.local', 'Synthetic monitor processor');
+    await auth.setCustomUserClaims(processor.uid, { role: 'processor', accountStatus: 'active', organizationId: 'platform' });
+    const processorToken = await signIn(processor.email);
+    const forbidden = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${processorToken}` } });
+    assert.equal(forbidden.status, 403);
+    adminChanged = true;
+    await adminReference.update({ accountStatus: 'suspended' });
+    do { after = await nextSnapshot(); } while (!after.monitorError);
+    assert.equal(after.monitorError, 'PERMISSION_DENIED');
+    console.log('PASS: real Firebase emulator live monitor authentication, full counts, registration/activation push updates, processor denial and immediate administrator revocation.');
+  } finally {
+    controller.abort(); clearTimeout(timer); if (reader) await reader.cancel().catch(() => {});
+    await reference.delete();
+    if (adminChanged) await adminReference.set(adminProfile);
+  }
+}
+
 async function main() {
   assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:9099');
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8080');
@@ -397,6 +456,7 @@ async function main() {
     }
     if (process.argv.includes('--governance-only')) {
       await testRuleGovernance(auth, db, adminToken);
+      await testAdminMonitor(auth, db, adminToken);
       console.log('PASS: complete rule-governance acceptance against local emulators.');
       return;
     }
@@ -406,6 +466,7 @@ async function main() {
     await require('./signup-browser-acceptance').testSignupBrowser({ db, adminToken, callFunction });
     if (process.argv.includes('--onboarding-only')) return;
     await testRuleGovernance(auth, db, adminToken);
+    await testAdminMonitor(auth, db, adminToken);
     console.log('PASS: sponsored and individual licence lifecycles completed against local emulators.');
   } finally {
     await deleteApp(app);
