@@ -1,6 +1,5 @@
 #!/bin/sh
-# Gate every commit on the project's fast validation suite:
-#   matrix coverage + syntax checks + unit tests, then ESLint.
+# Gate the staged tree on matrix coverage, syntax, unit tests and ESLint.
 # Bypass in an emergency with: git commit --no-verify (CI still enforces).
 
 node tools/repository-policy.js current-branch || {
@@ -9,16 +8,4 @@ node tools/repository-policy.js current-branch || {
   exit 1
 }
 
-echo "pre-commit: npm run check"
-npm run check || {
-  echo "" >&2
-  echo "pre-commit: npm run check failed - commit aborted." >&2
-  exit 1
-}
-
-echo "pre-commit: npm run lint"
-npm run lint || {
-  echo "" >&2
-  echo "pre-commit: lint failed - commit aborted. Install dependencies with npm ci if needed." >&2
-  exit 1
-}
+node tools/validate-staged.js

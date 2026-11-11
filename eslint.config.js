@@ -92,6 +92,8 @@ module.exports = [
       'tools/setup-git-hooks.js',
       'tools/repository-health.js',
       'tools/repository-policy.js',
+      'tools/repository-snapshot.js',
+      'tools/validate-staged.js',
       'tools/bootstrap-production-admin.js',
       'scripts/release.js',
       'scripts/verify-artifact.js',
