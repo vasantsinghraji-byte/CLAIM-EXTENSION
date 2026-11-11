@@ -1213,6 +1213,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   };
   let processingBlock = null;
   const processingWarnings = [];
+  const processingComparison = [];
   const tables = collectTables(roots);
   debugLog(`[Claim Auto-Fill] Found ${tables.length} tables on page`);
 
@@ -1392,6 +1393,10 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
 
     // Second pass: audit for unbundling/duplicates before any auto-fill
     const auditedRows = new Set();
+    const comparison = processingRuleSet?.mode === 'compare' && ProcessingRules
+      ? ProcessingRules.evaluate(processingRuleSet, records.map(record => ({ index: record.index,
+        particularText: record.particularText, packageText: record.packageText,
+        claimValue: record.claimValue, approvedValue: record.approvedValue })), processingAreaForPage()) : null;
     if (processingRuleSet?.mode === 'remote-required' && ProcessingRules && records.length > 0) {
       const evaluation = ProcessingRules.evaluate(processingRuleSet, records.map(record => ({
         index: record.index,
@@ -1776,6 +1781,19 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
       }
     }
 
+    if (comparison) {
+      if (!comparison.ok || comparison.blocked) processingComparison.push({ message: 'Central comparison requires policy review; bundled processing remains authoritative.' });
+      else for (const action of comparison.rowActions) {
+        if (action.proposedApproved === null) continue;
+        const record = records.find(item => item.index === action.rowIndex);
+        const baseline = proposals.find(item => item.key === `table-${tableIndex}-row-${action.rowIndex}`);
+        const bundledApproved = baseline?.proposedApproved ?? Core.parseAmount(record.approvedValue) ?? 0;
+        if (Math.abs(bundledApproved - action.proposedApproved) >= 0.005) processingComparison.push({
+          label: record.packageText || record.particularText || `Row ${record.index}`,
+          bundledApproved, centralApproved: action.proposedApproved, ruleIds: action.ruleIds
+        });
+      }
+    }
     debugLog(`[Claim Auto-Fill] Processed ${dataRowNum} data rows from table ${tableIndex + 1}`);
   });
 
@@ -1865,7 +1883,7 @@ function fillAllApprovedAmounts({ apply = true, roots = [document], selectedRowK
   updateAuditBadge(auditFlagged + auditDeducted);
   return {
     count, changedFieldCount: batch.length, approvedCount, remarksCount,
-    auditFlagged, auditDeducted, processingWarnings, proposals, rowElements, rowControls,
+    auditFlagged, auditDeducted, processingWarnings, processingComparison, proposals, rowElements, rowControls,
     _recoveryWrite: recoveryWrite,
     _undoBatch: batch
   };
@@ -1897,6 +1915,7 @@ function formatPreview(raw, createdAt = Date.now()) {
     auditFlagged: raw.auditFlagged,
     auditDeducted: raw.auditDeducted,
     processingWarnings: raw.processingWarnings || [],
+    processingComparison: raw.processingComparison || [],
     proposals: raw.proposals,
     token,
     claimIdentity,

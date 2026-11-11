@@ -134,6 +134,8 @@
       .jump { border:0;border-radius:7px;padding:5px 7px;background:#e0e7ff;color:#3730a3;cursor:pointer;font-size:11px;font-weight:700; }
       .ack { padding:8px;border:1px solid #fecaca;border-radius:9px;background:#fef2f2;color:#991b1b;font-size:11px;font-weight:650; }
       .ack label { display:flex;gap:7px;align-items:flex-start; }
+      .policy-warnings { margin:8px 0;padding:8px;border:1px solid #f59e0b;border-radius:8px;background:#fffbeb;color:#78350f;font-size:12px;overflow-wrap:anywhere; }
+      .policy-warnings p { margin:4px 0; }
       .actions { display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px; }
       .btn { border:0;border-radius:10px;padding:10px 8px;cursor:pointer;font-weight:700;font-size:12px; }
       .preview { background:#dbeafe;color:#1d4ed8; }
@@ -1008,6 +1010,12 @@
     renderingPreview = true;
     decisionRevision++;
     currentPreview = result;
+    const policyWarnings = shadow.querySelector('.policy-warnings');
+    policyWarnings.replaceChildren();
+    const explanations = [...(result.blockDetails || []), ...(result.processingWarnings || []).map(item => `${item.ruleId}: ${item.message}`),
+      ...(result.processingComparison || []).map(item => item.message || `${item.label}: bundled Rs. ${money.format(item.bundledApproved)}; central Rs. ${money.format(item.centralApproved)} (comparison only)`)];
+    for (const text of explanations) { const line = document.createElement('p'); line.textContent = String(text); policyWarnings.appendChild(line); }
+    policyWarnings.hidden = explanations.length === 0;
     actions.highlightDecisionRows({});
     if (result.blocked) {
       selectedKeys.clear();
@@ -1016,6 +1024,7 @@
       summary.hidden = true;
       ack.hidden = true;
       applyButton.disabled = true;
+      safeButton.disabled = true;
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         'claim-unavailable': 'BLOCKED: The current claim identifier is unavailable. Wait for the claim to load, then preview again.',

@@ -227,3 +227,68 @@ test('failed recovery storage rolls back central reviewer overrides', async () =
   assert.equal(f.first.approved.value, '');
   assert.equal(f.snapshots.length, 0);
 });
+
+test('compare mode exposes local differences without letting central rules control writes', async () => {
+  const f = setup({ mode: 'compare' });
+  const preview = f.preview();
+  assert.equal(preview.proposals[0].proposedApproved, 1000);
+  assert.equal(preview.processingComparison[0].bundledApproved, 1000);
+  assert.equal(preview.processingComparison[0].centralApproved, 900);
+  assert.equal(f.first.approved.value, '');
+  assert.equal((await f.apply(preview)).blocked, false);
+  assert.equal(f.first.approved.value, '1000');
+  assert.equal(f.context.undoLastFill(), 1);
+  assert.equal(f.first.approved.value, '');
+});
+
+test('comparison does not report unchanged amounts, remark-only actions or unmatched rules', () => {
+  for (const rules of [[], [centralRule({ actions: [remarkAction] })], [centralRule({ actions: [{
+    type: 'applyDeduction', targetPackageCodes: ['PKG-X'], calculation: { method: 'percentage', basis: 'claimedAmount', value: 0 }
+  }] })], [{ ...centralRule(), conditions: { operator: 'packagePresent', packageCodes: ['NO-MATCH'] } }]]) {
+    const f = setup({ mode: 'compare', rules });
+    const preview = f.preview();
+    assert.equal(preview.blocked, false);
+    assert.equal(preview.processingComparison.length, 0);
+    assert.equal(preview.proposals[0].proposedApproved, 1000);
+    assert.equal(f.first.approved.value, '');
+    assert.equal(f.first.remarks.value, '');
+  }
+});
+
+test('a blocked or invalid central comparison cannot block or modify bundled Apply', async () => {
+  const blocking = centralRule({ actions: [{ type: 'blockProcessing', message: 'Synthetic central block' }] });
+  for (const rules of [[blocking], [{ ...centralRule(), priority: 0 }]]) {
+    const f = setup({ mode: 'compare', rules });
+    const preview = f.preview();
+    assert.equal(preview.blocked, false);
+    assert.match(preview.processingComparison[0].message, /bundled processing remains authoritative/);
+    assert.equal((await f.apply(preview)).blocked, false);
+    assert.equal(f.first.approved.value, '1000');
+  }
+});
+
+test('comparison preserves existing approvals when bundled processing has no amount proposal', () => {
+  const f = setup({ mode: 'compare', approved: '950' });
+  const preview = f.preview();
+  assert.equal(preview.proposals.length, 0);
+  assert.equal(preview.processingComparison[0].bundledApproved, 950);
+  assert.equal(preview.processingComparison[0].centralApproved, 900);
+  assert.equal(f.first.approved.value, '950');
+});
+
+test('comparison does not change proposals or their Apply fingerprint', () => {
+  const bundled = setup({ mode: 'bundled' }).preview();
+  const compared = setup({ mode: 'compare' }).preview();
+  assert.equal(compared.token, bundled.token);
+  assert.equal(JSON.stringify(compared.proposals), JSON.stringify(bundled.proposals));
+  assert.equal(JSON.stringify(compared.reconciliation), JSON.stringify(bundled.reconciliation));
+});
+
+test('remote-required mode still blocks central policy decisions and exposes their explanations', () => {
+  const f = setup({ rules: [centralRule({ actions: [{ type: 'blockProcessing', message: 'Synthetic central block' }] })] });
+  const preview = f.preview();
+  assert.equal(preview.blockReason, 'processing-rule-blocked');
+  assert.match(preview.blockDetails[0], /SYN-10: Synthetic central block/);
+  assert.equal(preview.processingComparison.length, 0);
+  assert.equal(f.first.approved.value, '');
+});
