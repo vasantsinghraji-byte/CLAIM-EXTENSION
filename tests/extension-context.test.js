@@ -293,7 +293,7 @@ test('email verification refreshes the ID token before invitation onboarding', (
   assert.match(flow, /refreshToken: pending\.refreshToken/);
 });
 
-test('sponsored onboarding uses roster credentials while retaining the default path', () => {
+test('sponsored onboarding uses roster credentials and individual access remains a separate choice', () => {
   const background = read('background.js');
   const popup = read('popup.html');
   const popupSource = read('popup.js');
@@ -304,7 +304,7 @@ test('sponsored onboarding uses roster credentials while retaining the default p
   assert.match(popup, /id="sponsoredEmployeeCode"/);
   assert.match(popup, /id="individualPaymentReference"/);
   assert.match(popup, /official QR supplied with Claim Auto-Fill/);
-  assert.match(popupSource, /action: 'authCompleteOnboarding'/);
+  assert.match(popupSource, /action: 'authCheckActivation'/);
 });
 
 test('individual paid onboarding submits only a bounded payment reference', () => {
@@ -343,9 +343,9 @@ test('popup uses email-based signup without an invitation-token field', () => {
   assert.match(popup, /onboardingErrorMessages/);
   assert.doesNotMatch(html, /signUpInvitationToken/);
   assert.doesNotMatch(html, /acceptInvitationToken/);
-  assert.match(html, /Create your account, verify your email once/i);
+  assert.match(html, /Create your account, verify your email, then arrange sponsored or paid access/i);
   assert.doesNotMatch(html, /id="authCompleteOnboarding"/);
-  assert.doesNotMatch(html, /id="authAwaitingActivation"/);
+  assert.match(html, /id="authAwaitingActivation"/);
   assert.doesNotMatch(popup, /Enter your invited email, name, and password/);
 });
 
@@ -369,7 +369,7 @@ test('signed-in individual users can renew and manage their password', () => {
   assert.match(auth, /returnSecureToken: true/);
 });
 
-test('server activates verified self-service registrations under the platform licence', () => {
+test('server records verified self-service registrations for explicit activation', () => {
   const functions = read('functions/index.js');
   assert.match(functions, /exports\.completeInvitationOnboarding = onCall/);
   assert.match(functions, /requireVerifiedEmail\(request\)/);
@@ -381,14 +381,14 @@ test('server activates verified self-service registrations under the platform li
   assert.match(functions, /activeUsers\.size >= maximumUsers/);
 });
 
-test('active onboarding responses can establish the signed-in session immediately', () => {
+test('already-active onboarding can resume a session while new registrations choose access', () => {
   const background = read('background.js');
   const popup = read('popup.js');
   assert.match(background, /if \(!onboarding\.activationRequired\)/);
   assert.match(background, /stage: 'active'/);
-  assert.match(background, /establishActiveSession\(pending, profile\)/);
-  assert.match(popup, /Email verified\. Your account is ready\./);
-  assert.match(popup, /Email verified\. Your account is ready\./);
+  assert.match(background, /establishActiveSession\(pending, profile, epoch\)/);
+  assert.match(background, /onboarding\.accessSelectionRequired \? 'choose-access'/);
+  assert.match(popup, /Email verified\. Choose your access option to continue\./);
 });
 
 test('all popup authentication fields use the full-width accessible input style', () => {
@@ -436,7 +436,7 @@ test('individual licence controls remain server-enforced while organisation acce
   assert.match(functions, /user\.license_updated/);
   assert.match(functions, /const organizationEntitlement = license\?\.type === 'organisation'/);
   assert.match(functions, /access = organisationAccess/);
-  assert.match(functions, /license\.status === 'inactive'/);
+  assert.match(functions, /inactiveUserLicenceDecision\(user\)/);
   assert.match(functions, /latestUser\.data\(\)\.accountStatus === 'invited'/);
 });
 

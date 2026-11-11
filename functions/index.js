@@ -26,6 +26,7 @@ const {
   invitationToken,
   individualPlan,
   licenceAccessDecision,
+  inactiveUserLicenceDecision,
   normalizedEmail,
   normalizedPaymentReference,
   requiredString,
@@ -325,17 +326,8 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     }
     const now = Date.now();
     const userExpiryMs = timestampMillis(license?.expiresAt);
-    if (!organizationEntitlement && license.status === 'inactive') {
-      return {
-        status: license.type === 'individual' && license.paymentStatus === 'pending_verification'
-          ? 'payment-pending'
-          : 'inactive',
-        licenseType: license.type,
-        paymentStatus: license.paymentStatus,
-        previewAllowed: false,
-        applyAllowed: false
-      };
-    }
+    const inactive = inactiveUserLicenceDecision(user);
+    if (inactive) return inactive;
     const configSnapshot = await db.doc('appConfig/production').get();
     const config = configSnapshot.exists ? configSnapshot.data() : {};
     const minimumVersion = configSnapshot.exists
@@ -374,8 +366,8 @@ exports.verifyLicence = onCall(callableOptions, async request => {
         now,
         gracePeriodMs: GRACE_PERIOD_MS
       });
-      // Organisation membership is established by invitation and account approval.
-      // Do not add a second, per-user licence gate for processors or administrators.
+      // Organization term remains authoritative after the explicit per-user
+      // deactivation check above. Renewal must not require updating every member.
       access = organisationAccess;
       expiryMs = organisationExpiryMs;
     }
@@ -431,7 +423,8 @@ exports.getActiveProcessingRules = onCall(callableOptions, async request => {
     assertKeys(data, ['knownVersionId', 'extensionVersion', 'supportedRuleSchemaVersions'], ['extensionVersion']);
     const auth = requireVerifiedEmail(request);
     await enforceRateLimit(auth.uid, 'processingRules', 240, 60 * 60 * 1000);
-    await activeUser(auth.uid);
+    const user = await activeUser(auth.uid);
+    if (inactiveUserLicenceDecision(user)) fail('permission-denied', 'User licence is inactive');
     requiredString(data.extensionVersion, 'extensionVersion', 32);
     const supported = data.supportedRuleSchemaVersions === undefined
       ? []
@@ -621,141 +614,61 @@ exports.acceptInvitation = onCall(callableOptions, async request => {
   }
 });
 
-// Normal sign-up is self-service after email verification. Access is still
-// enforced server-side by the active platform licence and its user limit.
-// The exported name remains for backward compatibility with installed clients.
+// Registration records identity only. Email verification never purchases or
+// inherits a licence; sponsorship or verified individual payment and explicit
+// administrator activation grant access through their separate endpoints.
+// Retain the exported name for installed clients.
 exports.completeInvitationOnboarding = onCall(callableOptions, async request => {
   try {
     const auth = requireVerifiedEmail(request);
-    await enforceRateLimit(auth.uid, 'completeInvitationOnboarding', 10, 60 * 60 * 1000);
+    await enforceRateLimit(auth.uid, 'completeInvitationOnboarding', 30, 60 * 60 * 1000);
     const data = callableData(request);
     assertKeys(data, ['displayName'], ['displayName']);
     const displayName = requiredString(data.displayName, 'displayName', 120);
     const authenticatedEmail = normalizedEmail(auth.token.email);
     const userReference = db.doc(`users/${auth.uid}`);
-    const organizationReference = db.doc(`organizations/${SELF_SERVICE_ORGANIZATION_ID}`);
-    const licenceReference = db.doc(`licences/${SELF_SERVICE_ORGANIZATION_ID}`);
-    const activeUsersQuery = db.collection('users')
-      .where('organizationId', '==', SELF_SERVICE_ORGANIZATION_ID)
-      .where('accountStatus', '==', 'active');
-    const registrationAuditReference = db.collection('auditLogs').doc();
+    const auditReference = db.collection('auditLogs').doc();
     let onboarding;
-    let role = SELF_SERVICE_ROLE;
     let alreadyAccepted = false;
-
-    function createRegistrationAudit(transaction) {
-      transaction.create(registrationAuditReference, {
-        actorId: auth.uid,
-        actorRole: SELF_SERVICE_ROLE,
-        action: 'user.registration_completed',
-        targetType: 'user',
-        targetId: auth.uid,
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(userReference);
+      if (snapshot.exists) {
+        const user = snapshot.data();
+        if (user.email !== authenticatedEmail) fail('failed-precondition', 'Existing user profile does not match authenticated email');
+        if (!['invited', 'active'].includes(user.accountStatus)) fail('permission-denied', 'Existing account requires administrator action');
+        // Retrying registration cannot overwrite a payment, sponsored membership
+        // or an administrator's licence decision.
+        onboarding = user;
+        alreadyAccepted = true;
+        return;
+      }
+      onboarding = {
+        email: authenticatedEmail, displayName,
+        organizationId: SELF_SERVICE_ORGANIZATION_ID,
+        role: SELF_SERVICE_ROLE, accountStatus: 'invited',
+        license: { ...DEFAULT_LICENSE }, onboardingSource: 'self-registration'
+      };
+      transaction.create(userReference, {
+        ...onboarding, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
+      });
+      transaction.create(auditReference, {
+        actorId: auth.uid, actorRole: SELF_SERVICE_ROLE,
+        action: 'user.registration_completed', targetType: 'user', targetId: auth.uid,
         details: { organizationId: SELF_SERVICE_ORGANIZATION_ID, onboardingSource: 'self-registration' },
         timestamp: FieldValue.serverTimestamp()
       });
-    }
-
-    await db.runTransaction(async transaction => {
-      const userSnapshot = await transaction.get(userReference);
-      if (userSnapshot.exists) {
-        const user = userSnapshot.data();
-        if (user.email !== authenticatedEmail) {
-          fail('failed-precondition', 'Existing user profile does not match authenticated email');
-        }
-        if (user.accountStatus === 'active') {
-          onboarding = user;
-          role = user.role;
-          alreadyAccepted = true;
-          return;
-        }
-        // Self-service registration cannot undo an administrator decision or
-        // replace an invitation, sponsored membership, or individual purchase.
-        if (user.accountStatus !== 'invited'
-            || user.onboardingSource !== 'self-registration'
-            || user.organizationId !== SELF_SERVICE_ORGANIZATION_ID
-            || user.role !== SELF_SERVICE_ROLE
-            || user.license?.status !== 'inactive'
-            || user.license?.paymentStatus !== 'not_required') {
-          fail('permission-denied', 'Existing account requires administrator action');
-        }
-      }
-      const [organizationSnapshot, licenceSnapshot, activeUsers] = await Promise.all([
-        transaction.get(organizationReference),
-        transaction.get(licenceReference),
-        transaction.get(activeUsersQuery)
-      ]);
-      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
-        fail('failed-precondition', 'Organization is not active');
-      }
-      const platformExpiryMs = licenceSnapshot.exists ? timestampMillis(licenceSnapshot.data().expiryDate) : NaN;
-      if (!licenceSnapshot.exists || licenceSnapshot.data().status !== 'active'
-          || !Number.isFinite(platformExpiryMs) || platformExpiryMs <= Date.now()) {
-        fail('failed-precondition', 'Organization licence is not active');
-      }
-      const maximumUsers = boundedInteger(licenceSnapshot.data().maximumUsers, 'maximumUsers', 1, 500);
-      if (userSnapshot.exists) {
-        const user = userSnapshot.data();
-        onboarding = user;
-        if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
-        const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
-        role = user.role || SELF_SERVICE_ROLE;
-        transaction.update(userReference, {
-          accountStatus: 'active',
-          license: {
-            ...DEFAULT_LICENSE,
-            ...(user.license || {}),
-            type: 'organisation',
-            status: 'active',
-            organizationId: SELF_SERVICE_ORGANIZATION_ID,
-            expiresAt: licenceSnapshot.data().expiryDate,
-            durationWeeks: Math.max(1, Math.ceil((expiryMs - Date.now()) / (7 * 24 * 60 * 60 * 1000))),
-            paymentStatus: 'not_required'
-          },
-          updatedAt: FieldValue.serverTimestamp()
-        });
-        createRegistrationAudit(transaction);
-        return;
-      }
-      if (activeUsers.size >= maximumUsers) fail('resource-exhausted', 'Licence user limit reached');
-      const expiryMs = timestampMillis(licenceSnapshot.data().expiryDate);
-      onboarding = {
-        organizationId: SELF_SERVICE_ORGANIZATION_ID,
-        role: SELF_SERVICE_ROLE
-      };
-      transaction.create(userReference, {
-        email: authenticatedEmail,
-        displayName,
-        organizationId: SELF_SERVICE_ORGANIZATION_ID,
-        role: SELF_SERVICE_ROLE,
-        accountStatus: 'active',
-        license: {
-          ...DEFAULT_LICENSE,
-          type: 'organisation',
-          status: 'active',
-          organizationId: SELF_SERVICE_ORGANIZATION_ID,
-          expiresAt: licenceSnapshot.data().expiryDate,
-          durationWeeks: Math.max(1, Math.ceil((expiryMs - Date.now()) / (7 * 24 * 60 * 60 * 1000))),
-          paymentStatus: 'not_required'
-        },
-        onboardingSource: 'self-registration',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
-      createRegistrationAudit(transaction);
     });
     await getAuth().setCustomUserClaims(auth.uid, {
-      organizationId: onboarding.organizationId,
-      role,
-      accountStatus: 'active'
+      organizationId: onboarding.organizationId, role: onboarding.role, accountStatus: onboarding.accountStatus
     });
     return {
-      status: 'active',
-      activationRequired: false,
+      status: onboarding.accountStatus,
+      activationRequired: onboarding.accountStatus !== 'active',
+      accessSelectionRequired: onboarding.accountStatus === 'invited'
+        && onboarding.license?.type === 'individual' && !onboarding.license.paymentReference,
       alreadyAccepted
     };
-  } catch (error) {
-    translateValidation(error);
-  }
+  } catch (error) { translateValidation(error); }
 });
 
 exports.completeOrganizationSponsoredOnboarding = onCall(callableOptions, async request => {
@@ -791,22 +704,31 @@ exports.completeOrganizationSponsoredOnboarding = onCall(callableOptions, async 
       role = enumValue(roster.role, 'role', INVITABLE_ROLES);
       if (userSnapshot.exists) {
         const user = userSnapshot.data();
-        if (user.email !== authenticatedEmail || user.organizationId !== organizationId
-            || user.onboardingSource !== 'organisation-roster') {
+        const unassignedRegistration = user.email === authenticatedEmail
+          && user.accountStatus === 'invited' && user.role === SELF_SERVICE_ROLE
+          && user.organizationId === SELF_SERVICE_ORGANIZATION_ID
+          && user.onboardingSource === 'self-registration'
+          && user.license?.type === 'individual' && user.license.status === 'inactive'
+          && user.license.paymentStatus === 'not_required' && !user.license.paymentReference;
+        if (!unassignedRegistration && (user.email !== authenticatedEmail || user.organizationId !== organizationId
+            || user.onboardingSource !== 'organisation-roster')) {
           fail('failed-precondition', 'Existing user profile belongs to a different onboarding path');
         }
-        if (roster.status !== 'claimed' || roster.claimedByUid !== auth.uid) {
+        if (!unassignedRegistration && (roster.status !== 'claimed' || roster.claimedByUid !== auth.uid)) {
           fail('failed-precondition', 'Employee code is not assigned to this user');
         }
-        role = user.role;
-        accountStatus = user.accountStatus;
-        alreadyCompleted = true;
-        return;
+        if (!unassignedRegistration) {
+          if (!['invited', 'active'].includes(user.accountStatus)) fail('permission-denied', 'Existing account requires administrator action');
+          role = user.role;
+          accountStatus = user.accountStatus;
+          alreadyCompleted = true;
+          return;
+        }
       }
       if (roster.status !== 'available' || roster.email !== authenticatedEmail) {
         fail('permission-denied', 'Sponsorship credentials are invalid');
       }
-      transaction.create(userReference, {
+      const sponsoredProfile = {
         email: authenticatedEmail,
         displayName,
         organizationId,
@@ -815,9 +737,11 @@ exports.completeOrganizationSponsoredOnboarding = onCall(callableOptions, async 
         onboardingSource: 'organisation-roster',
         employeeCode,
         license: { ...DEFAULT_LICENSE, type: 'organisation', organizationId },
-        createdAt: FieldValue.serverTimestamp(),
+        ...(!userSnapshot.exists ? { createdAt: FieldValue.serverTimestamp() } : {}),
         updatedAt: FieldValue.serverTimestamp()
-      });
+      };
+      if (userSnapshot.exists) transaction.update(userReference, sponsoredProfile);
+      else transaction.create(userReference, sponsoredProfile);
       transaction.update(rosterReference, {
         status: 'claimed',
         claimedByUid: auth.uid,
@@ -1427,11 +1351,8 @@ exports.setUserLicense = onCall(callableOptions, async request => {
       const user = snapshot.data();
       if (user.accountStatus === 'deleted') fail('failed-precondition', 'Deleted users cannot hold a license');
       const current = { ...DEFAULT_LICENSE, ...(user.license || {}) };
-      const legacyActiveIndividual = current.type === 'individual'
-        && current.status === 'active'
-        && current.paymentStatus === 'not_required';
       if (current.type === 'individual' && action !== 'deactivate'
-          && current.paymentStatus !== 'verified' && !legacyActiveIndividual) {
+          && current.paymentStatus !== 'verified') {
         fail('failed-precondition', 'Individual payment must be verified before license activation');
       }
       if (current.type === 'individual' && action !== 'deactivate' && current.requestedDurationWeeks
@@ -1465,6 +1386,10 @@ exports.setUserLicense = onCall(callableOptions, async request => {
         };
       } else {
         next = { ...current, status: 'inactive' };
+      }
+      if (current.type === 'individual' && action !== 'deactivate') {
+        next.activatedPaymentReference = current.paymentReference;
+        next.activatedPaymentVerifiedAt = current.verifiedAt;
       }
       transaction.update(reference, { license: next, updatedAt: FieldValue.serverTimestamp() });
       const expiresAtMs = timestampMillis(next.expiresAt);
@@ -1528,6 +1453,10 @@ exports.submitPaymentProof = onCall(callableOptions, async request => {
       transaction.update(userReference, {
         license: {
           ...current,
+          ...(current.status === 'active' && current.paymentStatus === 'verified' ? {
+            activatedPaymentReference: current.activatedPaymentReference || current.paymentReference,
+            activatedPaymentVerifiedAt: current.activatedPaymentVerifiedAt || current.verifiedAt
+          } : {}),
           paymentStatus: 'pending_verification',
           paymentReference,
           paymentProvider: 'upi',

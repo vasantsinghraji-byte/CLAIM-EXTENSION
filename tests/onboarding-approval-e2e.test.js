@@ -8,20 +8,20 @@ const test = require('node:test');
 const root = path.join(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('verified registration activates immediately under an audited platform licence check', () => {
+test('verified registration records a pending identity without inheriting platform licence access', () => {
   const functions = read('functions/index.js');
   const dashboard = read('hosting/admin.js');
   const background = read('background.js');
 
   const registration = functions.slice(
     functions.indexOf('exports.completeInvitationOnboarding'),
-    functions.indexOf('async function resolveUid')
+    functions.indexOf('exports.completeOrganizationSponsoredOnboarding')
   );
-  assert.match(registration, /accountStatus: 'active'/);
+  assert.match(registration, /accountStatus: 'invited'/);
   assert.match(registration, /user\.registration_completed/);
-  assert.match(registration, /transaction\.get\(activeUsersQuery\)/);
-  assert.match(registration, /activeUsers\.size >= maximumUsers/);
-  assert.match(registration, /Organization licence is not active/);
+  assert.doesNotMatch(registration, /type: 'organisation'|status: 'active'/);
+  assert.match(registration, /license: \{ \.\.\.DEFAULT_LICENSE \}/);
+  assert.match(registration, /activationRequired: onboarding.accountStatus !== 'active'/);
 
   const approval = functions.slice(
     functions.indexOf('exports.activateUser'),
@@ -42,7 +42,7 @@ test('verified registration activates immediately under an audited platform lice
   assert.match(dashboard, /pendingUsersList/);
   assert.match(dashboard, /action\('activateUser', \{ uid \}, 'Registration approved\.'\)/);
   assert.match(background, /profile\?\.accountStatus !== 'active'/);
-  assert.match(background, /establishActiveSession\(pending, profile\)/);
+  assert.match(background, /establishActiveSession\(pending, profile, epoch\)/);
 });
 
 test('administrator rejection disables the pending identity and is audited end to end', () => {

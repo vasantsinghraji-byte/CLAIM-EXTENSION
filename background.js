@@ -97,6 +97,13 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
     next.then(cleanup, cleanup);
     return next;
   };
+  // Session, entitlement and policy writes share one queue. A sign-out must
+  // finish after earlier writes, and obsolete network responses must not write.
+  const writeAuthState = (key, value, guard) => enqueue('auth-state', async () => {
+    if (guard && !guard()) throw new Error('SESSION_CHANGED');
+    await storageSet(storage, { [key]: value });
+    return value;
+  });
 
   return {
     append(key, incoming) {
@@ -175,41 +182,23 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         return Array.isArray(config?.rules) ? config.rules.length : 0;
       });
     },
-    setProcessingRuleSet(ruleSet) {
-      return enqueue('processingRuleSet', async () => {
-        await storageSet(storage, { processingRuleSet: ruleSet });
-        return ruleSet;
-      });
+    setProcessingRuleSet(ruleSet, guard) {
+      return writeAuthState('processingRuleSet', ruleSet, guard);
     },
-    setAuthSession(session) {
-      return enqueue('authSession', async () => {
-        await storageSet(storage, { authSession: session });
-        return session;
-      });
+    setAuthSession(session, guard) {
+      return writeAuthState('authSession', session, guard);
     },
-    clearAuthSession() {
-      return enqueue('authSession', async () => {
-        await storageSet(storage, { authSession: null });
-        return null;
-      });
+    clearAuthSession(guard) {
+      return writeAuthState('authSession', null, guard);
     },
-    setLicenceState(state) {
-      return enqueue('licenceState', async () => {
-        await storageSet(storage, { licenceState: state });
-        return state;
-      });
+    setLicenceState(state, guard) {
+      return writeAuthState('licenceState', state, guard);
     },
-    setPendingAuth(pending) {
-      return enqueue('pendingAuth', async () => {
-        await storageSet(storage, { pendingAuth: pending });
-        return pending;
-      });
+    setPendingAuth(pending, guard) {
+      return writeAuthState('pendingAuth', pending, guard);
     },
-    clearPendingAuth() {
-      return enqueue('pendingAuth', async () => {
-        await storageSet(storage, { pendingAuth: null });
-        return null;
-      });
+    clearPendingAuth(guard) {
+      return writeAuthState('pendingAuth', null, guard);
     }
   };
 }
@@ -278,7 +267,31 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     }
   }
 
-  async function handleAuthSignIn(email, password) {
+  let authEpoch = 0;
+  let ruleRefreshInFlight = null;
+  let signUpInFlight = null;
+  function guardedWriter(epoch) {
+    return Object.fromEntries(['setAuthSession', 'clearAuthSession', 'setLicenceState',
+      'setPendingAuth', 'clearPendingAuth', 'setProcessingRuleSet'].map(name =>
+      [name, (...args) => storageWriter[name](...args, () => epoch === authEpoch)]));
+  }
+  function clearSessionState() {
+    return Promise.all([storageWriter.clearAuthSession(), storageWriter.clearPendingAuth(),
+      storageWriter.setLicenceState(null), storageWriter.setProcessingRuleSet(null)]);
+  }
+  async function startAuthFlow(work) {
+    const epoch = ++authEpoch;
+    ruleRefreshInFlight = null;
+    return withReviewIdentityReset(async () => {
+      if (epoch !== authEpoch) throw new Error('SESSION_CHANGED');
+      await clearSessionState();
+      if (epoch !== authEpoch) throw new Error('SESSION_CHANGED');
+      return work(epoch);
+    });
+  }
+
+  async function handleAuthSignIn(email, password, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const session = await AuthCore.signInWithPassword({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
     let profile = null;
     let requiresEmailVerification = false;
@@ -312,17 +325,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       signedInAt: Date.now()
     };
     if (requiresEmailVerification) {
-      await storageWriter.setAuthSession(localSession);
-      await storageWriter.setLicenceState({
-        status: 'unverified',
-        previewAllowed: false,
-        applyAllowed: false,
-        expiresAt: null,
-        graceEndsAt: null,
-        minimumVersion: null,
-        checkedAt: Date.now(),
-        source: 'server'
-      });
+      await writer.setPendingAuth({ ...localSession, stage: 'verify-email', lastError: null });
       return { success: true, requiresEmailVerification: true };
     }
     if (requiresProfileRecovery) {
@@ -332,15 +335,15 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         lastError: null
       };
       const afterCompletion = pending.displayName
-        ? await attemptCompleteOnboarding(pending)
+        ? await attemptCompleteOnboarding(pending, epoch)
         : pending;
       if (afterCompletion.stage === 'active') return { success: true };
-      await storageWriter.setPendingAuth(afterCompletion);
+      await writer.setPendingAuth(afterCompletion);
       await Promise.all([
-        storageWriter.clearAuthSession(),
-        storageWriter.setLicenceState(null)
+        writer.clearAuthSession(),
+        writer.setLicenceState(null)
       ]);
-      return afterCompletion.stage === 'awaiting-activation'
+      return ['choose-access', 'awaiting-activation'].includes(afterCompletion.stage)
         ? { success: true, awaitingActivation: true }
         : { success: true, requiresProfileRecovery: true, error: afterCompletion.lastError };
     }
@@ -350,17 +353,17 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         displayName: profile.displayName || '',
         stage: 'complete-onboarding',
         lastError: null
-      });
+      }, epoch);
       if (activated.stage === 'active') return { success: true };
-      await storageWriter.setPendingAuth(activated);
+      await writer.setPendingAuth(activated);
       await Promise.all([
-        storageWriter.clearAuthSession(),
-        storageWriter.setLicenceState(null)
+        writer.clearAuthSession(),
+        writer.setLicenceState(null)
       ]);
       return { success: true, awaitingActivation: true, error: activated.lastError };
     }
-    await storageWriter.setAuthSession(localSession);
-    await storageWriter.clearPendingAuth();
+    await writer.setAuthSession(localSession);
+    await writer.clearPendingAuth();
     const licence = await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
       name: 'verifyLicence',
@@ -368,13 +371,14 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       data: { extensionVersion: chrome.runtime.getManifest().version },
       fetchImpl: fetch
     });
-    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    await writer.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
     if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
-    refreshProcessingRules().catch(() => undefined);
+    refreshProcessingRules(epoch).catch(() => undefined);
     return { success: true };
   }
 
-  async function refreshPendingIfStale(pending) {
+  async function refreshPendingIfStale(pending, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     if (AuthCore.isTokenFresh(pending)) return pending;
     const refreshed = await AuthCore.refreshIdToken({
       apiKey: FIREBASE_WEB_API_KEY,
@@ -382,12 +386,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       fetchImpl: fetch
     });
     const next = { ...pending, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
-    await storageWriter.setPendingAuth(next);
+    await writer.setPendingAuth(next);
     return next;
   }
 
-  async function establishActiveSession(session, profile) {
-    await storageWriter.setAuthSession({
+  async function establishActiveSession(session, profile, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
+    await writer.setAuthSession({
       uid: session.uid,
       email: session.email,
       displayName: profile?.displayName || session.displayName || '',
@@ -405,14 +410,15 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       data: { extensionVersion: chrome.runtime.getManifest().version },
       fetchImpl: fetch
     });
-    await storageWriter.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
-    await storageWriter.clearPendingAuth();
+    await writer.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    await writer.clearPendingAuth();
     if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
-    refreshProcessingRules().catch(() => undefined);
+    refreshProcessingRules(epoch).catch(() => undefined);
   }
 
   // Completes normal self-service registration after email verification.
-  async function attemptCompleteOnboarding(pending) {
+  async function attemptCompleteOnboarding(pending, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     try {
       const onboarding = await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -421,8 +427,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         data: { displayName: pending.displayName },
         fetchImpl: fetch
       });
-      const next = { ...pending, stage: 'awaiting-activation', lastError: null };
-      await storageWriter.setPendingAuth(next);
+      const next = { ...pending, stage: onboarding.accessSelectionRequired ? 'choose-access' : 'awaiting-activation', lastError: null };
+      await writer.setPendingAuth(next);
       if (!onboarding.activationRequired) {
         const profile = await AuthCore.callFunction({
           functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -431,57 +437,63 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
           data: {},
           fetchImpl: fetch
         });
-        await establishActiveSession(pending, profile);
+        await establishActiveSession(pending, profile, epoch);
         return { ...pending, stage: 'active', lastError: null };
       }
       return next;
     } catch (error) {
       const next = { ...pending, stage: 'complete-onboarding', lastError: String(error.status || error.message || error) };
-      await storageWriter.setPendingAuth(next);
+      await writer.setPendingAuth(next);
       return next;
     }
   }
 
-  async function handleAuthSignUp(email, password, displayName) {
+  async function handleAuthSignUp(email, password, displayName, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const session = await AuthCore.signUp({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
     const normalizedDisplayName = String(displayName || '').trim();
-    await AuthCore.updateProfile({
+    // Persist recovery before optional profile/email requests. A sent email or
+    // failed profile update must never leave a created identity stranded.
+    const pending = {
+      ...session, displayName: normalizedDisplayName, stage: 'verify-email', lastError: null
+    };
+    await writer.setPendingAuth(pending);
+    try { await AuthCore.updateProfile({
       apiKey: FIREBASE_WEB_API_KEY,
       idToken: session.idToken,
       displayName: normalizedDisplayName,
       fetchImpl: fetch
-    });
-    await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: session.idToken, fetchImpl: fetch });
-    await storageWriter.setPendingAuth({
-      uid: session.uid,
-      email: session.email,
-      idToken: session.idToken,
-      refreshToken: session.refreshToken,
-      expiresAt: session.expiresAt,
-      displayName: normalizedDisplayName,
-      stage: 'verify-email',
-      lastError: null
-    });
-    return { success: true };
+    }); } catch (error) {
+      if (epoch !== authEpoch) throw error;
+      // The pending record retains the supplied display name for onboarding.
+    }
+    try {
+      await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: session.idToken, fetchImpl: fetch });
+      return { success: true };
+    } catch (error) {
+      await writer.setPendingAuth({ ...pending, lastError: String(error.code || error.message) });
+      return { success: true, verificationEmailSent: false, error: String(error.code || error.message) };
+    }
   }
 
-  async function handleResendVerification() {
+  async function handleResendVerification(epoch = authEpoch) {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    const pending = await refreshPendingIfStale(pendingAuth, epoch);
     await AuthCore.sendEmailVerification({ apiKey: FIREBASE_WEB_API_KEY, idToken: pending.idToken, fetchImpl: fetch });
     return { success: true };
   }
 
-  // The normal production path is self-service: verified users are activated
-  // against the server-side platform licence and user limit.
-  async function handleCheckEmailVerified() {
+  // Verification establishes identity; access selection and administrator
+  // activation remain separate steps.
+  async function handleCheckEmailVerified(epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
-    if (!pendingAuth) throw new Error('No pending sign-up');
-    let pending = await refreshPendingIfStale(pendingAuth);
+    if (!pendingAuth) throw Object.assign(new Error('Sign in again to resume verification.'), { code: 'PENDING_AUTH_MISSING' });
+    let pending = await refreshPendingIfStale(pendingAuth, epoch);
     const info = await AuthCore.accountInfo({ apiKey: FIREBASE_WEB_API_KEY, idToken: pending.idToken, fetchImpl: fetch });
     if (!info.emailVerified) {
-      await storageWriter.setPendingAuth(pending);
+      await writer.setPendingAuth(pending);
       return { success: true, emailVerified: false };
     }
     // Email verification happens outside the extension. Even a non-expired ID
@@ -498,16 +510,16 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       refreshToken: refreshed.refreshToken,
       expiresAt: refreshed.expiresAt
     };
-    await storageWriter.setPendingAuth(pending);
+    await writer.setPendingAuth(pending);
     const afterVerification = {
       ...pending,
       displayName: pending.displayName || info.displayName || '',
       stage: 'complete-onboarding',
       lastError: null
     };
-    const completed = await attemptCompleteOnboarding(afterVerification);
+    const completed = await attemptCompleteOnboarding(afterVerification, epoch);
     return {
-      success: !completed.lastError,
+      success: true,
       emailVerified: true,
       stage: completed.stage,
       error: completed.lastError
@@ -516,21 +528,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
 
   // Manual retry is only needed for legacy accounts that lost their local
   // display name or a temporary licence/organization failure.
-  async function handleCompleteOnboarding(displayName) {
+  async function handleCompleteOnboarding(displayName, epoch = authEpoch) {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    const pending = await refreshPendingIfStale(pendingAuth, epoch);
     const result = await attemptCompleteOnboarding({
       ...pending,
       displayName: String(displayName || pending.displayName || '').trim()
-    });
+    }, epoch);
     return { success: !result.lastError, stage: result.stage, error: result.lastError };
   }
 
-  async function handleOrgSponsoredOnboarding(organizationId, employeeCode) {
+  async function handleOrgSponsoredOnboarding(organizationId, employeeCode, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    const pending = await refreshPendingIfStale(pendingAuth, epoch);
     const onboarding = await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
       name: 'completeOrganizationSponsoredOnboarding',
@@ -543,7 +556,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       fetchImpl: fetch
     });
     const next = { ...pending, stage: 'awaiting-activation', lastError: null };
-    await storageWriter.setPendingAuth(next);
+    await writer.setPendingAuth(next);
     if (!onboarding.activationRequired) {
       const profile = await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -552,16 +565,17 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         data: {},
         fetchImpl: fetch
       });
-      await establishActiveSession(pending, profile);
+      await establishActiveSession(pending, profile, epoch);
       return { success: true, stage: 'active' };
     }
     return { success: true, stage: 'awaiting-activation' };
   }
 
-  async function handleIndividualPaidOnboarding(paymentReference, durationWeeks) {
+  async function handleIndividualPaidOnboarding(paymentReference, durationWeeks, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    const pending = await refreshPendingIfStale(pendingAuth, epoch);
     await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
       name: 'completeInvitationOnboarding',
@@ -579,7 +593,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       },
       fetchImpl: fetch
     });
-    await storageWriter.setPendingAuth({
+    await writer.setPendingAuth({
       ...pending,
       stage: 'awaiting-activation',
       lastError: null
@@ -601,7 +615,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  async function freshAuthenticatedSession() {
+  async function freshAuthenticatedSession(epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { authSession } = await storageGet(chrome.storage.local, 'authSession');
     if (!authSession) throw new Error('Sign in first');
     if (AuthCore.isTokenFresh(authSession)) return authSession;
@@ -616,11 +631,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       refreshToken: refreshed.refreshToken,
       expiresAt: refreshed.expiresAt
     };
-    await storageWriter.setAuthSession(session);
+    await writer.setAuthSession(session);
     return session;
   }
 
-  async function handleChangePassword(password) {
+  async function handleChangePassword(password, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const session = await freshAuthenticatedSession();
     const updated = await AuthCore.updatePassword({
       apiKey: FIREBASE_WEB_API_KEY,
@@ -628,7 +644,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       password: String(password || ''),
       fetchImpl: fetch
     });
-    await storageWriter.setAuthSession({
+    await writer.setAuthSession({
       ...session,
       idToken: updated.idToken,
       refreshToken: updated.refreshToken || session.refreshToken,
@@ -637,7 +653,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     return { success: true };
   }
 
-  async function handleIndividualRenewal(paymentReference, durationWeeks) {
+  async function handleIndividualRenewal(paymentReference, durationWeeks, epoch = authEpoch) {
     const session = await freshAuthenticatedSession();
     const result = await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -649,16 +665,16 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       },
       fetchImpl: fetch
     });
-    const licenceState = await performLicenceRecheck();
+    const licenceState = await performLicenceRecheck(epoch);
     return { success: true, result, licenceState };
   }
 
   // Both ordinary registrations and explicit invitations require administrator
   // approval before the user becomes active.
-  async function handleCheckActivation() {
+  async function handleCheckActivation(epoch = authEpoch) {
     const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
     if (!pendingAuth) throw new Error('No pending sign-up');
-    const pending = await refreshPendingIfStale(pendingAuth);
+    const pending = await refreshPendingIfStale(pendingAuth, epoch);
     let profile;
     try {
       profile = await AuthCore.callFunction({
@@ -675,11 +691,16 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     if (profile?.accountStatus !== 'active') {
       return { success: true, active: false, rejected: profile?.accountStatus === 'rejected' };
     }
-    await establishActiveSession(pending, profile);
+    const licence = await AuthCore.callFunction({ functionsBaseUrl: FUNCTIONS_BASE_URL,
+      name: 'verifyLicence', idToken: pending.idToken,
+      data: { extensionVersion: chrome.runtime.getManifest().version }, fetchImpl: fetch });
+    if (licence.applyAllowed !== true) return { success: true, active: false, licenceStatus: licence.status };
+    await establishActiveSession(pending, profile, epoch);
     return { success: true, active: true };
   }
 
-  async function performLicenceRecheck() {
+  async function performLicenceRecheck(epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { authSession } = await storageGet(chrome.storage.local, 'authSession');
     if (!authSession) return null;
     try {
@@ -691,7 +712,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
           fetchImpl: fetch
         });
         session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
-        await storageWriter.setAuthSession(session);
+        await writer.setAuthSession(session);
       }
       const licence = await AuthCore.callFunction({
         functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -701,9 +722,10 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         fetchImpl: fetch
       });
       const state = { ...licence, checkedAt: Date.now(), source: 'server' };
-      await storageWriter.setLicenceState(state);
+      await writer.setLicenceState(state);
       return state;
     } catch (error) {
+      if (epoch !== authEpoch) return null;
       const { licenceState: previous } = await storageGet(chrome.storage.local, 'licenceState');
       const lastCheckedAt = previous?.checkedAt;
       const transportFailure = error?.code === 'NETWORK_ERROR';
@@ -721,12 +743,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
           checkedAt: lastCheckedAt ?? Date.now(),
           source: 'error'
         };
-      await storageWriter.setLicenceState(state);
+      await writer.setLicenceState(state);
       return state;
     }
   }
 
-  async function refreshProcessingRules() {
+  function refreshProcessingRules(epoch = authEpoch) {
+    if (ruleRefreshInFlight?.epoch === epoch) return ruleRefreshInFlight.promise;
+    const entry = { epoch, promise: fetchProcessingRules(epoch) };
+    ruleRefreshInFlight = entry;
+    const finish = () => { if (ruleRefreshInFlight === entry) ruleRefreshInFlight = null; };
+    entry.promise.then(finish, finish);
+    return entry.promise;
+  }
+
+  async function fetchProcessingRules(epoch) {
+    const writer = guardedWriter(epoch);
     const { authSession, processingRuleSet: cached } = await new Promise((resolve, reject) =>
       chrome.storage.local.get(['authSession', 'processingRuleSet'], result => {
         const error = chrome.runtime.lastError;
@@ -742,7 +774,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         fetchImpl: fetch
       });
       session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
-      await storageWriter.setAuthSession(session);
+      await writer.setAuthSession(session);
     }
     const response = await AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -760,7 +792,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     }
     if (response.unchanged && response.checksum && cached?.versionId === response.versionId
         && (cached.checksum !== response.checksum || !(await ProcessingRules.verifyPublishedRuleSet(cached)))) {
-      await storageWriter.setProcessingRuleSet(null);
+      await writer.setProcessingRuleSet(null);
       throw new Error('Cached processing rule checksum is invalid');
     }
     const ruleSet = response.unchanged && cached?.versionId === response.versionId
@@ -776,14 +808,15 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
           source: 'server'
         };
     if (!response.unchanged && response.checksum && !(await ProcessingRules.verifyPublishedRuleSet(ruleSet))) {
-      await storageWriter.setProcessingRuleSet(null);
+      await writer.setProcessingRuleSet(null);
       throw new Error('Published processing rule checksum is invalid');
     }
-    await storageWriter.setProcessingRuleSet(ruleSet);
+    await writer.setProcessingRuleSet(ruleSet);
     return ruleSet;
   }
 
-  async function submitProcessingRuleFeedback(data) {
+  async function submitProcessingRuleFeedback(data, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const { authSession } = await storageGet(chrome.storage.local, 'authSession');
     if (!authSession) throw new Error('Sign in first');
     let session = authSession;
@@ -794,7 +827,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         fetchImpl: fetch
       });
       session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
-      await storageWriter.setAuthSession(session);
+      await writer.setAuthSession(session);
     }
     return AuthCore.callFunction({
       functionsBaseUrl: FUNCTIONS_BASE_URL,
@@ -824,7 +857,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
     adminListAuditEvents: 'listAuditEvents'
   });
 
-  async function handleAdminAction(action, data) {
+  async function handleAdminAction(action, data, epoch = authEpoch) {
+    const writer = guardedWriter(epoch);
     const functionName = ADMIN_FUNCTIONS[action];
     if (!functionName) throw new Error('Unsupported administrator action');
     const { authSession } = await storageGet(chrome.storage.local, 'authSession');
@@ -839,7 +873,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         fetchImpl: fetch
       });
       session = { ...session, idToken: refreshed.idToken, refreshToken: refreshed.refreshToken, expiresAt: refreshed.expiresAt };
-      await storageWriter.setAuthSession(session);
+      await writer.setAuthSession(session);
     }
 
     const result = await AuthCore.callFunction({
@@ -850,7 +884,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       fetchImpl: fetch
     });
     const licenceState = action === 'adminActivateLicence'
-      ? await performLicenceRecheck()
+      ? await performLicenceRecheck(epoch)
       : undefined;
     return { success: true, result, licenceState };
   }
@@ -858,7 +892,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   if (chrome.alarms) {
     chrome.alarms.onAlarm.addListener(alarm => {
       if (alarm.name === LICENCE_RECHECK_ALARM) {
-        performLicenceRecheck();
+        performLicenceRecheck().catch(() => undefined);
         refreshProcessingRules().catch(() => undefined);
       }
     });
@@ -1010,7 +1044,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignIn') {
-      withReviewIdentityReset(() => handleAuthSignIn(request.email, request.password))
+      startAuthFlow(epoch => handleAuthSignIn(request.email, request.password, epoch))
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;
@@ -1038,12 +1072,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignOut') {
-      withReviewIdentityReset(() => Promise.all([
-        storageWriter.clearAuthSession(),
-        storageWriter.clearPendingAuth(),
-        storageWriter.setLicenceState(null),
-        storageWriter.setProcessingRuleSet(null)
-      ]))
+      const epoch = ++authEpoch;
+      ruleRefreshInFlight = null;
+      withReviewIdentityReset(() => {
+        if (epoch !== authEpoch) throw new Error('SESSION_CHANGED');
+        return clearSessionState();
+      })
         .then(() => {
           if (chrome.alarms) chrome.alarms.clear(LICENCE_RECHECK_ALARM);
           sendResponse({ success: true });
@@ -1058,9 +1092,25 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignUp') {
-      handleAuthSignUp(request.email, request.password, request.displayName)
-        .then(sendResponse)
-        .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
+      if (signUpInFlight) {
+        sendResponse({ success: false, error: 'AUTH_IN_PROGRESS' });
+        return undefined;
+      }
+      const signup = (async () => {
+        const { pendingAuth } = await storageGet(chrome.storage.local, 'pendingAuth');
+        if (pendingAuth?.email?.toLowerCase() === String(request.email || '').trim().toLowerCase()) {
+          throw Object.assign(new Error('Account already created. Sign in to resume.'), { code: 'EMAIL_EXISTS' });
+        }
+        return startAuthFlow(epoch => handleAuthSignUp(request.email, request.password, request.displayName, epoch));
+      })();
+      signUpInFlight = signup;
+      signup.then(result => {
+        if (signUpInFlight === signup) signUpInFlight = null;
+        sendResponse(result);
+      }, error => {
+        if (signUpInFlight === signup) signUpInFlight = null;
+        sendResponse({ success: false, error: String(error.code || error.status || error.message || error) });
+      });
       return true;
     }
     if (request?.action === 'authResendVerification') {
@@ -1100,6 +1150,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authCancelSignUp') {
+      ++authEpoch;
       storageWriter.clearPendingAuth()
         .then(() => sendResponse({ success: true }))
         .catch(error => sendResponse({ success: false, error: String(error.message || error) }));

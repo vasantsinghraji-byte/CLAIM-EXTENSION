@@ -179,6 +179,32 @@ function licenceAccessDecision({ status, expiryMs, now, gracePeriodMs }) {
   return { status: 'expired', previewAllowed: false, applyAllowed: false };
 }
 
+function inactiveUserLicenceDecision(user) {
+  const license = user?.license;
+  if (!license || !LICENSE_TYPES.includes(license.type)) return null;
+  // Legacy platform administrators can inherit organization access without a
+  // commercial individual plan. An explicit organization-user disable wins.
+  if (user.role === 'platformAdmin' && user.organizationId && license.type !== 'organisation') return null;
+  const unactivatedSelfRegistration = license.type === 'organisation'
+    && user.role !== 'platformAdmin' && user.onboardingSource === 'self-registration' && !license.activatedAt;
+  // A renewal can be pending while the already-paid term remains usable.
+  // A new individual purchase with no prior verification cannot grant access,
+  // even if an inconsistent record happens to say active.
+  const paidTerm = license.paymentStatus === 'verified'
+    || license.paymentStatus === 'pending_verification' && Boolean(license.activatedAt)
+      && (Boolean(license.activatedPaymentVerifiedAt) && Boolean(license.activatedPaymentReference)
+        || Boolean(license.verifiedAt));
+  if (license.status !== 'inactive' && !unactivatedSelfRegistration && (license.type !== 'individual' || paidTerm)) return null;
+  return {
+    status: license.type === 'individual' && license.paymentStatus === 'pending_verification'
+      ? 'payment-pending' : 'inactive',
+    licenseType: license.type,
+    paymentStatus: license.paymentStatus || 'not_required',
+    previewAllowed: false,
+    applyAllowed: false
+  };
+}
+
 function rosterDocumentId(organizationId, employeeCode) {
   const organization = safeDocumentId(organizationId, 'organizationId');
   const code = safeDocumentId(String(employeeCode).toUpperCase(), 'employeeCode');
@@ -217,6 +243,7 @@ module.exports = {
   enumValue,
   invitationToken,
   licenceAccessDecision,
+  inactiveUserLicenceDecision,
   normalizedEmail,
   normalizedPaymentReference,
   individualPlan,

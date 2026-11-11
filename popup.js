@@ -5,6 +5,7 @@ const authPasswordReset = document.getElementById('authPasswordReset');
 const authSignUpPanel = document.getElementById('authSignUpPanel');
 const authVerifyEmail = document.getElementById('authVerifyEmail');
 const authChoosePath = document.getElementById('authChoosePath');
+const authAwaitingActivation = document.getElementById('authAwaitingActivation');
 const authSignedIn = document.getElementById('authSignedIn');
 const authEmailInput = document.getElementById('authEmail');
 const authPasswordInput = document.getElementById('authPassword');
@@ -77,7 +78,8 @@ const submitPaymentReferenceBtn = document.getElementById('submitPaymentReferenc
 const continueDefaultAccessLink = document.getElementById('continueDefaultAccessLink');
 const cancelSignUpLinks = [
   document.getElementById('cancelSignUpLink1'),
-  document.getElementById('cancelSignUpLink4')
+  document.getElementById('cancelSignUpLink4'),
+  document.getElementById('cancelSignUpLink5')
 ];
 let showingSignUp = false;
 let showingPasswordReset = false;
@@ -96,11 +98,13 @@ let previewToken = null;
 let previewRowKeys = [];
 let clearArmed = false;
 let statusHideTimer = null;
+let claimAccessAllowed = false;
+let fillInProgress = false;
 document.getElementById('versionLabel').textContent = `Version ${chrome.runtime.getManifest().version}`;
 
 function setFillButton(label = 'Preview Fill') {
-  fillNowBtn.disabled = false;
-  fillNowBtn.textContent = label;
+  fillNowBtn.disabled = !claimAccessAllowed;
+  fillNowBtn.textContent = claimAccessAllowed ? label : 'Claim tools locked';
 }
 
 async function sendToActiveTab(message) {
@@ -134,12 +138,17 @@ const authErrorMessages = {
   EMAIL_EXISTS: 'An account already exists for that email. Try signing in instead.',
   WEAK_PASSWORD: 'Password must be at least 6 characters.',
   INVALID_EMAIL: 'Enter a valid email address.',
-  OPERATION_NOT_ALLOWED: 'Account creation is currently disabled. Contact your administrator.'
+  OPERATION_NOT_ALLOWED: 'Account creation is currently disabled. Contact your administrator.',
+  PENDING_AUTH_MISSING: 'Your account may already exist. Sign in with the same email to resume verification.',
+  INVALID_ID_TOKEN: 'Your session expired. Sign in again to resume verification.',
+  TOKEN_EXPIRED: 'Your session expired. Sign in again to resume verification.',
+  INVALID_REFRESH_TOKEN: 'Your session expired. Sign in again to resume verification.',
+  AUTH_IN_PROGRESS: 'Account creation is already in progress. Wait for it to finish before trying again.'
 };
 
 const onboardingErrorMessages = {
   NOT_FOUND: 'Account setup could not be completed. Please try again.',
-  FAILED_PRECONDITION: 'Account setup is unavailable because the service licence is not active.',
+  FAILED_PRECONDITION: 'Account setup could not finish. Sign in again, or contact your administrator.',
   DEADLINE_EXCEEDED: 'Account setup took too long. Please try again.',
   PERMISSION_DENIED: 'Account setup could not be authorized. Please sign in again.',
   DISPLAY_NAME_REQUIRED: 'Enter your name to finish setup.'
@@ -151,6 +160,15 @@ const renewalErrorMessages = {
   RESOURCE_EXHAUSTED: 'Too many renewal attempts. Try again later.',
   UNAUTHENTICATED: 'Sign in again before submitting a renewal.'
 };
+
+function authStatus(id, text, type = 'info') {
+  const node = document.getElementById(id);
+  node.textContent = text;
+  node.className = `auth-status ${type}`;
+  node.hidden = false;
+  node.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  if (node.checkVisibility()) node.scrollIntoView({ block: 'nearest' });
+}
 
 function describeLicenceStatus(state) {
   if (!state) return '';
@@ -180,7 +198,13 @@ function describeLicenceStatus(state) {
 }
 
 function renderAuthState(authSession, licenceState, pendingAuth) {
-  const pendingStage = ['accept-invitation', 'complete-onboarding', 'awaiting-activation'].includes(pendingAuth?.stage)
+  claimAccessAllowed = Boolean(authSession && licenceState?.previewAllowed === true);
+  document.getElementById('claimAccessStatus').hidden = claimAccessAllowed;
+  if (!claimAccessAllowed) {
+    previewCount = 0; previewToken = null; previewRowKeys = [];
+    setFillButton();
+  } else if (!fillInProgress) setFillButton(previewCount > 0 ? `Apply ${previewCount} Changes` : 'Preview Fill');
+  const pendingStage = ['accept-invitation', 'complete-onboarding'].includes(pendingAuth?.stage)
     ? 'verify-email'
     : pendingAuth?.stage;
   const stage = authSession
@@ -193,7 +217,8 @@ function renderAuthState(authSession, licenceState, pendingAuth) {
   authPasswordReset.hidden = stage !== 'password-reset';
   authSignUpPanel.hidden = stage !== 'sign-up';
   authVerifyEmail.hidden = stage !== 'verify-email';
-  authChoosePath.hidden = true;
+  authChoosePath.hidden = stage !== 'choose-access';
+  authAwaitingActivation.hidden = stage !== 'awaiting-activation';
   authSignedIn.hidden = stage !== 'signed-in';
   adminPanel.hidden = stage !== 'signed-in' || authSession?.role !== 'platformAdmin';
 
@@ -288,25 +313,28 @@ signUpBtn.addEventListener('click', () => {
   const confirmPassword = signUpConfirmPasswordInput.value;
   const displayName = signUpDisplayNameInput.value.trim();
   if (!email || !password || !displayName) {
-    showStatus('Enter your email, name, and password', 'warning');
+    authStatus('signUpStatus', 'Enter your email, name, and password', 'warning');
     return;
   }
   if (password !== confirmPassword) {
-    showStatus('Passwords do not match', 'warning');
+    authStatus('signUpStatus', 'Passwords do not match', 'warning');
     return;
   }
   signUpBtn.disabled = true;
+  authStatus('signUpStatus', 'Creating account...');
   signUpBtn.textContent = 'Creating account...';
   chrome.runtime.sendMessage({ action: 'authSignUp', email, password, displayName }, response => {
     signUpBtn.disabled = false;
     signUpBtn.textContent = 'Create Account';
     if (!response?.success) {
-      showStatus(authErrorMessages[response?.error] || 'Could not create account. Try again.', 'error');
+      authStatus('signUpStatus', authErrorMessages[response?.error] || 'Could not create account. Try again.', 'error');
       return;
     }
     signUpPasswordInput.value = '';
     signUpConfirmPasswordInput.value = '';
-    showStatus('Account created. Check your email to verify it.', 'success');
+    authStatus('verificationStatus', response.verificationEmailSent === false
+      ? 'Your account was created, but the verification email could not be sent. Use Resend Email; do not create another account.'
+      : 'Account created. Open the verification link in your email, then continue.', response.verificationEmailSent === false ? 'warning' : 'success');
     loadAuthState();
   });
 });
@@ -315,30 +343,28 @@ resendVerificationBtn.addEventListener('click', () => {
   resendVerificationBtn.disabled = true;
   chrome.runtime.sendMessage({ action: 'authResendVerification' }, response => {
     resendVerificationBtn.disabled = false;
-    showStatus(response?.success ? 'Verification email sent' : 'Unable to resend right now', response?.success ? 'success' : 'error');
+    authStatus('verificationStatus', response?.success ? 'Verification email sent' : authErrorMessages[response?.error] || 'Unable to resend right now. Please try again.', response?.success ? 'success' : 'error');
   });
 });
 
 checkVerifiedBtn.addEventListener('click', () => {
   checkVerifiedBtn.disabled = true;
   checkVerifiedBtn.textContent = 'Checking...';
+  authStatus('verificationStatus', 'Checking your verified email and account setup...');
   chrome.runtime.sendMessage({ action: 'authCheckEmailVerified' }, response => {
     checkVerifiedBtn.disabled = false;
     checkVerifiedBtn.textContent = "I've Verified — Continue";
     if (!response?.success) {
-      showStatus('Unable to check verification status right now', 'error');
+      authStatus('verificationStatus', authErrorMessages[response?.error] || 'Could not reach the verification service. Check your connection and try again.', 'error');
       return;
     }
     if (!response.emailVerified) {
-      showStatus('Not verified yet. Check your inbox (and spam) for the link.', 'warning');
+      authStatus('verificationStatus', 'Not verified yet. Check your inbox (and spam) for the link.', 'warning');
       return;
     }
-    showStatus(
-      response.error
-        ? 'Email verified, but setup needs attention.'
-        : 'Email verified. Your account is ready.',
-      response.error ? 'warning' : 'success'
-    );
+    authStatus('verificationStatus', response.error
+      ? `Your email is verified. ${onboardingErrorMessages[response.error] || 'Account setup could not finish. Try Continue again; do not sign up again.'}`
+      : 'Email verified. Choose your access option to continue.', response.error ? 'error' : 'success');
     loadAuthState();
   });
 });
@@ -347,7 +373,7 @@ sponsoredOnboardingBtn.addEventListener('click', () => {
   const organizationId = sponsoredOrganizationId.value.trim();
   const employeeCode = sponsoredEmployeeCode.value.trim();
   if (!organizationId || !employeeCode) {
-    showStatus('Enter your organisation ID and employee code', 'warning');
+    authStatus('accessSelectionStatus', 'Enter your organisation ID and employee code', 'warning');
     return;
   }
   sponsoredOnboardingBtn.disabled = true;
@@ -360,7 +386,7 @@ sponsoredOnboardingBtn.addEventListener('click', () => {
     if (!response?.success) {
       const message = onboardingErrorMessages[response?.error]
         || 'The organisation or employee code could not be verified.';
-      showStatus(message, 'error');
+      authStatus('accessSelectionStatus', message, 'error');
       return;
     }
     showStatus(
@@ -381,7 +407,7 @@ individualAccessBtn.addEventListener('click', () => {
 submitPaymentReferenceBtn.addEventListener('click', () => {
   const paymentReference = individualPaymentReference.value.trim();
   if (!paymentReference) {
-    showStatus('Enter the UPI transaction ID (UTR) from your completed payment', 'warning');
+    authStatus('paymentSubmissionStatus', 'Enter the UPI transaction ID (UTR) from your completed payment', 'warning');
     return;
   }
   submitPaymentReferenceBtn.disabled = true;
@@ -392,26 +418,34 @@ submitPaymentReferenceBtn.addEventListener('click', () => {
   }, response => {
     submitPaymentReferenceBtn.disabled = false;
     if (!response?.success) {
-      showStatus(onboardingErrorMessages[response?.error] || 'Unable to submit the payment reference.', 'error');
+      authStatus('paymentSubmissionStatus', onboardingErrorMessages[response?.error] || 'Unable to submit the payment reference.', 'error');
       return;
     }
     individualPaymentReference.value = '';
-    showStatus('Payment reference submitted. Waiting for administrator verification and activation.', 'success');
+    authStatus('activationStatus', 'Payment reference submitted. Waiting for administrator verification and licence activation.', 'success');
     loadAuthState();
   });
 });
 
-continueDefaultAccessLink.addEventListener('click', event => {
+function checkAccountActivation(event) {
   event.preventDefault();
-  chrome.runtime.sendMessage({ action: 'authCompleteOnboarding' }, response => {
+  const checkingButton = document.getElementById('checkActivationBtn');
+  checkingButton.disabled = true;
+  const target = authChoosePath.hidden ? 'activationStatus' : 'accessSelectionStatus';
+  chrome.runtime.sendMessage({ action: 'authCheckActivation' }, response => {
+    checkingButton.disabled = false;
     if (!response?.success) {
-      showStatus('Unable to continue setup right now', 'error');
+      authStatus(target, authErrorMessages[response?.error] || 'Unable to check activation right now. Please try again.', 'error');
       return;
     }
-    showStatus('Setup complete. Waiting for administrator approval.', 'success');
+    authStatus(target, response.active ? 'Account and licence activated.'
+      : response.rejected ? 'Registration was rejected. Contact your administrator.'
+        : 'Access is still locked. Your account and licence must both be activated by an administrator.', response.active ? 'success' : 'warning');
     loadAuthState();
   });
-});
+}
+continueDefaultAccessLink.addEventListener('click', checkAccountActivation);
+document.getElementById('checkActivationBtn').addEventListener('click', checkAccountActivation);
 
 authSignInBtn.addEventListener('click', () => {
   const email = authEmailInput.value.trim();
@@ -981,7 +1015,7 @@ function blockedMessage(reason) {
     'overlapping-ipd-rules': 'Different IPD adjustments propose conflicting amounts. Ask your administrator to review the applicable policy.',
     'mandatory-action-required': 'All centrally mandatory actions must be applied together.',
     'mandatory-action-override': 'Centrally mandatory deductions and remarks cannot be overridden.',
-    'signed-out': 'Sign in to Claim Spark to apply changes.',
+    'signed-out': 'Sign in with a verified, activated account to use claim tools.',
     'licence-unverified': 'Verify your email to continue — check your inbox for a link from Firebase.',
     'licence-apply-blocked': 'Your licence does not currently allow Apply. Preview remains available if allowed.',
     'licence-preview-blocked': 'Your licence does not currently allow Preview. Contact your administrator.',
@@ -994,6 +1028,8 @@ function blockedMessage(reason) {
 
 // Handle Fill Now button
 fillNowBtn.addEventListener('click', async () => {
+  if (!claimAccessAllowed || fillInProgress) return;
+  fillInProgress = true;
   fillNowBtn.disabled = true;
   fillNowBtn.textContent = previewCount > 0 ? 'Applying...' : 'Previewing...';
 
@@ -1054,6 +1090,9 @@ fillNowBtn.addEventListener('click', async () => {
     previewRowKeys = [];
     setFillButton();
     showStatus('Open a supported claim page, then refresh and try again', 'error');
+  } finally {
+    fillInProgress = false;
+    fillNowBtn.disabled = !claimAccessAllowed;
   }
 });
 
