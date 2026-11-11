@@ -318,6 +318,7 @@
         for (const weeks of [1, 2, 4, 12]) {
           const option = element('option', '', `${weeks} week${weeks === 1 ? '' : 's'}`);
           option.value = String(weeks);
+          option.selected = weeks === license.requestedDurationWeeks;
           durationPreset.append(option);
         }
         const durationCustom = document.createElement('input');
@@ -327,11 +328,19 @@
         durationCustom.placeholder = 'Custom weeks';
         durationCustom.dataset.licenseDurationCustom = user.uid;
         durationCustom.setAttribute('aria-label', `Custom license duration in weeks for ${user.email}`);
+        const activate = button('Activate license', 'license-activate', { uid: user.uid });
+        const extend = button('Extend license', 'license-extend', { uid: user.uid });
+        const needsPaymentVerification = license.type === 'individual' && license.paymentStatus !== 'verified';
+        activate.disabled = needsPaymentVerification;
+        extend.disabled = needsPaymentVerification;
+        if (needsPaymentVerification) record.append(element('p', 'meta', license.paymentReference
+          ? 'Verify this payment before activating or extending the licence.'
+          : 'No individual payment has been submitted. Ask the user to choose a plan and submit their UPI reference.'));
         controls.append(
           durationPreset,
           durationCustom,
-          button('Activate license', 'license-activate', { uid: user.uid }),
-          button('Extend license', 'license-extend', { uid: user.uid }),
+          activate,
+          extend,
           button('Deactivate license', 'license-deactivate', { uid: user.uid }, true)
         );
         if (user.uid === profile.uid) {

@@ -32,8 +32,9 @@
         <input type="password" id="signUpPassword" name="signUpPassword" placeholder="Password (min 6 characters)" autocomplete="new-password">
         <input type="password" id="signUpConfirmPassword" name="signUpConfirmPassword" placeholder="Confirm password" autocomplete="new-password">
         <input type="text" id="signUpDisplayName" name="signUpDisplayName" placeholder="Your name">
-        <p class="auth-help">Create your account, verify your email once, then start using Claim Auto-Fill.</p>
+        <p class="auth-help">Create your account, verify your email, then arrange sponsored or paid access. Claim tools remain locked until activation.</p>
         <button id="signUpBtn" class="btn btn-primary">Create Account</button>
+        <p id="signUpStatus" class="auth-status" role="status" aria-live="polite" hidden></p>
         <p class="auth-link"><a href="#" id="showSignInLink">Already have an account? Sign in</a></p>
       </div>
       <div id="authVerifyEmail" class="auth-section" hidden>
@@ -43,6 +44,7 @@
           <button id="resendVerificationBtn" class="btn btn-secondary btn-small">Resend Email</button>
           <button id="checkVerifiedBtn" class="btn btn-primary btn-small">I've Verified &mdash; Continue</button>
         </div>
+        <p id="verificationStatus" class="auth-status" role="status" aria-live="polite" hidden></p>
         <p class="auth-link"><a href="#" id="cancelSignUpLink1">Start over</a></p>
       </div>
       <div id="authChoosePath" class="auth-section" hidden>
@@ -65,10 +67,19 @@
           <p class="auth-help"><strong>Use only the official QR supplied with Claim Auto-Fill.</strong> Never enter a UPI PIN, OTP, card number, password, or bank-account credentials in Claim Auto-Fill.</p>
           <input type="text" id="individualPaymentReference" name="individualPaymentReference" maxlength="160" placeholder="UPI transaction ID (UTR)">
           <button id="submitPaymentReferenceBtn" class="btn btn-primary" type="button">Submit UPI Reference</button>
+          <p id="paymentSubmissionStatus" class="auth-status" role="status" aria-live="polite" hidden></p>
           <p class="auth-help">Refund requests must be made within 3 calendar days of payment. See the published terms for eligibility.</p>
         </div>
-        <p class="auth-link"><a href="#" id="continueDefaultAccessLink">Continue without organisation sponsorship</a></p>
+        <p id="accessSelectionStatus" class="auth-status" role="status" aria-live="polite" hidden></p>
+        <p class="auth-link"><a href="#" id="continueDefaultAccessLink">Check administrator activation</a></p>
         <p class="auth-link"><a href="#" id="cancelSignUpLink4">Start over</a></p>
+      </div>
+      <div id="authAwaitingActivation" class="auth-section" hidden>
+        <p><strong>Email verified. Access is awaiting activation.</strong></p>
+        <p class="auth-help">Your administrator must approve your account and activate its licence. Individual payments must be verified first. Claim tools remain locked.</p>
+        <button id="checkActivationBtn" class="btn btn-primary" type="button">Check activation</button>
+        <p id="activationStatus" class="auth-status" role="status" aria-live="polite" hidden></p>
+        <p class="auth-link"><a href="#" id="cancelSignUpLink5">Back to sign in</a></p>
       </div>
       <div id="authSignedIn" class="auth-section" hidden>
         <p id="authEmailLabel"></p>
@@ -214,7 +225,8 @@
       </div>
 
       <div class="button-section">
-        <button id="fillNowBtn" class="btn btn-primary">
+        <p id="claimAccessStatus" class="auth-status warning">Claim tools stay locked until email verification and licence activation are complete.</p>
+        <button id="fillNowBtn" class="btn btn-primary" disabled>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M13.5 3.5L6 11L2.5 7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>

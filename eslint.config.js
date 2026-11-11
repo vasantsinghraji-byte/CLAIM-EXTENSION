@@ -99,6 +99,7 @@ module.exports = [
       'scripts/verify-artifact.js',
       'scripts/browser-smoke-e2e.js',
       'scripts/extension-browser-e2e.js',
+      'scripts/signup-browser-acceptance.js',
       'scripts/hosting-smoke.js',
       'scripts/license-lifecycle-acceptance.js',
       'scripts/run-lifecycle-emulators.js',

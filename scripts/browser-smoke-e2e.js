@@ -100,8 +100,11 @@ function investigationFixtureHtml() {
           onMessage: { addListener() {} }, onConnect: { addListener() {} },
           sendMessage(request, callback) {
             if (request.action === 'ensureRuleOverridesMigration') return;
+            if (request.action === 'authRefreshLicence') return callback({ success: true,
+              licenceState: { status: 'active', previewAllowed: true, applyAllowed: true } });
             if (request.action === 'refreshProcessingRules') return callback(window.ruleRefreshEnabled
-              ? { success: true, ruleSet: window.centralRuleSet || processingRuleSet } : { success: false });
+              ? { success: true, ruleSet: window.centralRuleSet || processingRuleSet }
+              : { success: false, error: 'NETWORK_ERROR' });
             callback?.({ success: window.recoveryAllowed });
           }
         }

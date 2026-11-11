@@ -886,23 +886,38 @@ chrome.runtime.onConnect.addListener(port => {
 
 function refreshProcessingRules() {
   return new Promise(resolve => {
-    try {
-      chrome.runtime.sendMessage({ action: 'refreshProcessingRules' }, response => {
-        if (chrome.runtime.lastError || !response?.success) {
-          resolve({ ok: processingRuleSet?.mode !== 'remote-required', error: response?.error || 'network' });
-          return;
-        }
-        const normalized = ProcessingRules?.normalizeRuleSet(response.ruleSet);
-        if (!normalized || normalized.errors.length) {
-          resolve({ ok: false, error: 'invalid-processing-rule-set' });
-          return;
-        }
-        processingRuleSet = { ...response.ruleSet, rules: normalized.rules };
-        resolve({ ok: true });
-      });
-    } catch {
-      resolve({ ok: processingRuleSet?.mode !== 'remote-required', error: 'network' });
-    }
+    // Recheck entitlement for each new preview/Apply. Cached rules and a stale
+    // active badge cannot substitute for a licence that the server has denied.
+    chrome.runtime.sendMessage({ action: 'authRefreshLicence' }, response => {
+      if (chrome.runtime.lastError || !response?.success) {
+        licenceState = { status: 'unknown', previewAllowed: false, applyAllowed: false };
+        resolve({ ok: false, blockReason: 'licence-preview-blocked', error: 'licence-check-failed' });
+        return;
+      }
+      licenceState = response.licenceState || null;
+      const gate = evaluateLicenceGate(licenceState, false);
+      if (gate.blocked) { resolve({ ok: false, blockReason: gate.reason }); return; }
+      try {
+        chrome.runtime.sendMessage({ action: 'refreshProcessingRules' }, response => {
+          if (chrome.runtime.lastError || !response?.success) {
+            // Only transport errors can use bundled rules. Authorization denial
+            // must remain a denial even when this client has bundled policies.
+            resolve({ ok: ['NETWORK_ERROR', 'UNAVAILABLE'].includes(response?.error)
+              && processingRuleSet?.mode !== 'remote-required', error: response?.error || 'network' });
+            return;
+          }
+          const normalized = ProcessingRules?.normalizeRuleSet(response.ruleSet);
+          if (!normalized || normalized.errors.length) {
+            resolve({ ok: false, error: 'invalid-processing-rule-set' });
+            return;
+          }
+          processingRuleSet = { ...response.ruleSet, rules: normalized.rules };
+          resolve({ ok: true });
+        });
+      } catch {
+        resolve({ ok: false, error: 'network' });
+      }
+    });
   });
 }
 
@@ -1127,12 +1142,10 @@ function getPortalCompatibilityDetails() {
   };
 }
 
-// Preview stays local-first: a fresh install or signed-out session (state
-// is null) never blocks preview, only a real Apply requires a signed-in,
-// licensed session. Once signed in, previewAllowed can still gate Preview
-// for hard-blocked states (expired/suspended/unlicensed).
+// Claim tools require a checked licence. Recovery/Undo remain available to
+// restore prior edits even when current access has expired or been removed.
 function evaluateLicenceGate(state, apply) {
-  if (!state) return apply ? { blocked: true, reason: 'signed-out' } : { blocked: false };
+  if (!state) return { blocked: true, reason: 'signed-out' };
   if (state.status === 'update-required') return { blocked: true, reason: 'update-required' };
   if (state.status === 'maintenance') return { blocked: true, reason: 'maintenance' };
   if (apply && state.applyAllowed !== true) {

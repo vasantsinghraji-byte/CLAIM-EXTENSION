@@ -491,3 +491,7 @@ input:checked + .slider:before {
   font-size: 11px;
   color: #999;
 }
+.auth-status { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid #dce4ef; border-radius: 6px; background: #f5f8fc; color: #42536c; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.auth-status.error { color: #991b1b; border-color: #fecaca; background: #fff5f5; }
+.auth-status.warning { color: #854d0e; border-color: #f3d99f; background: #fffbeb; }
+.auth-status.success { color: #166534; border-color: #bbdfc8; background: #f0fdf4; }

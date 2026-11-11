@@ -27,14 +27,14 @@ test('real RGHS process sheets are preflighted before any fill processing', () =
   assert.match(fillStart, /invalid-rule-set/);
 });
 
-test('licence gate blocks Apply when signed out or unlicensed, but never blocks a signed-out Preview', () => {
+test('licence gate locks claim tools when signed out or unlicensed and retains preview-only expiry grace', () => {
   const gateSource = content.slice(
     content.indexOf('function evaluateLicenceGate'),
     content.indexOf('function blockedFillResult')
   ).trim();
   const evaluateLicenceGate = Function(`return (${gateSource})`)();
 
-  assert.deepEqual(evaluateLicenceGate(null, false), { blocked: false });
+  assert.deepEqual(evaluateLicenceGate(null, false), { blocked: true, reason: 'signed-out' });
   assert.deepEqual(evaluateLicenceGate(null, true), { blocked: true, reason: 'signed-out' });
   assert.deepEqual(
     evaluateLicenceGate({ status: 'active', previewAllowed: true, applyAllowed: true }, true),
