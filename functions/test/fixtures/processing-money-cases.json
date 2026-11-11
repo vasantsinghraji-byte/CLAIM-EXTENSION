@@ -1,0 +1,15 @@
+[
+  { "name": "80 percent deduction on a partially approved claim", "claim": 1000, "approved": 600, "method": "percentage", "value": 80, "expected": 200 },
+  { "name": "full deduction on a partially approved claim", "claim": 1000, "approved": 400, "method": "fullAmount", "value": 100, "expected": 0 },
+  { "name": "fixed deduction greater than the remaining approval", "claim": 1000, "approved": 400, "method": "fixedAmount", "value": 900, "expected": 100 },
+  { "name": "minimum total deduction on a partially approved claim", "claim": 1000, "approved": 600, "method": "minimumAmount", "value": 800, "expected": 200 },
+  { "name": "a smaller deduction cannot increase an existing approval", "claim": 1000, "approved": 400, "method": "percentage", "value": 10, "expected": 400 },
+  { "name": "deduction cannot exceed the entire claim", "claim": 1000, "approved": 400, "method": "fixedAmount", "value": 1500, "expected": 0 },
+  { "name": "explicit zero remains zero", "claim": 1000, "approved": 0, "method": "percentage", "value": 10, "expected": 0 },
+  { "name": "blank approval starts from the claim", "claim": 1000, "approved": "", "method": "percentage", "value": 10, "expected": 900 },
+  { "name": "cumulative claimed-amount deduction uses the remaining balance", "claim": 1000, "approved": 600, "method": "percentage", "value": 10, "cumulative": true, "expected": 500 },
+  { "name": "cumulative approved-amount deduction uses the approved basis", "claim": 1000, "approved": 600, "method": "percentage", "basis": "currentApprovedAmount", "value": 10, "cumulative": true, "expected": 540 },
+  { "name": "cumulative minimum deduction only fills the existing shortfall", "claim": 1000, "approved": 600, "method": "minimumAmount", "value": 800, "cumulative": true, "expected": 200 },
+  { "name": "cumulative full deduction clears the remaining balance", "claim": 1000, "approved": 400, "method": "fullAmount", "value": 100, "cumulative": true, "expected": 0 },
+  { "name": "money is rounded to paise after calculation", "claim": 100.05, "approved": "", "method": "percentage", "value": 10, "expected": 90.05 }
+]

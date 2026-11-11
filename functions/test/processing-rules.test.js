@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { normalizeRule, normalizeRuleSet, runScenarios } = require('../lib/processing-rules');
+const moneyCases = require('./fixtures/processing-money-cases.json');
 
 const validRule = {
   ruleId: 'IPD-X-10',
@@ -80,3 +81,18 @@ test('server reports failed synthetic expectations without publishing side effec
   assert.equal(report.passed, false);
   assert.match(report.results[0].errors[0], /expected PKG-X approved amount 950/);
 });
+
+for (const item of moneyCases) {
+  test(`publication amount regression: ${item.name}`, () => {
+    const normalized = normalizeRule({ ...validRule, actions: [{
+      type: 'applyDeduction', targetPackageCodes: ['PKG-X'], cumulative: item.cumulative === true,
+      calculation: { method: item.method, basis: item.basis || 'claimedAmount', value: item.value }
+    }], scenarios: [{ scenarioId: 'MONEY-CHECK', name: item.name, processingArea: 'IPD',
+      lines: [{ packageCodes: ['PKG-X'], claimAmount: item.claim,
+        ...(item.approved === '' ? {} : { approvedAmount: item.approved }) }],
+      expected: { matchedRuleIds: ['IPD-X-10'], blocked: false, approvedAmounts: { 'PKG-X': item.expected } }
+    }] });
+    const result = runScenarios([normalized]);
+    assert.equal(result.passed, true, JSON.stringify(result.results));
+  });
+}

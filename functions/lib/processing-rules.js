@@ -266,6 +266,7 @@ function evaluateRuleSet(rules, scenarioValue) {
     outcome: scenarioValue.outcome
   };
   const amounts = new Map(lines.map(line => [line.index, line.approvedAmount]));
+  const excluded = new Set();
   const matchedRuleIds = [];
   let blocked = false;
   for (const rule of rules) {
@@ -275,15 +276,19 @@ function evaluateRuleSet(rules, scenarioValue) {
       if (item.type === 'blockProcessing' || (item.type === 'requireValidation' && rule.enforcement === 'manualReview')) blocked = true;
       for (const line of relevantLines(context, item.targetPackageCodes || [])) {
         const current = amounts.get(line.index);
-        if (item.type === 'excludePackage') amounts.set(line.index, 0);
-        if (item.type === 'applyDeduction' && current > 0) {
-          const deduction = Math.min(current, Math.max(0, deductionFor(item, { ...line, approvedAmount: current })));
+        if (item.type === 'excludePackage') {
+          amounts.set(line.index, 0);
+          excluded.add(line.index);
+        }
+        if (item.type === 'applyDeduction' && !excluded.has(line.index)) {
+          const deduction = Math.min(item.cumulative ? current : line.claimAmount, Math.max(0, deductionFor(item, { ...line, approvedAmount: current })));
           const next = item.cumulative ? current - deduction : Math.min(current, line.claimAmount - deduction);
           amounts.set(line.index, Math.max(0, Math.round(next * 100) / 100));
         }
       }
     }
-    context.outcome = blocked ? 'blocked' : lines.some(line => amounts.get(line.index) < line.claimAmount) ? 'deducted' : 'approved';
+    context.outcome = blocked ? 'blocked' : excluded.size ? 'rejected'
+      : lines.some(line => amounts.get(line.index) < line.claimAmount) ? 'deducted' : 'approved';
   }
   const approvedAmounts = {};
   for (const line of lines) for (const code of line.packageCodes) approvedAmounts[code] = amounts.get(line.index);

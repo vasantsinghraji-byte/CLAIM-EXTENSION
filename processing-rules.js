@@ -47,6 +47,17 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  // Accept ungrouped, western-grouped and Indian-grouped portal money without
+  // stripping arbitrary characters into a different, apparently valid amount.
+  function parseMoney(value) {
+    if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
+    if (typeof value !== 'string') return null;
+    const text = value.trim().replace(/^(?:₹|Rs\.?|INR)\s*/i, '');
+    if (!/^(?:\d+|[1-9]\d{0,2}(?:,\d{3})+|[1-9]\d?(?:,\d{2})*,\d{3})(?:\.\d+)?$/.test(text)) return null;
+    const amount = Number(text.replace(/,/g, ''));
+    return Number.isFinite(amount) ? amount : null;
+  }
+
   function validateTemplate(template, errors, field) {
     const text = cleanText(template, 1000);
     if (String(template ?? '').length > 1000) errors.push(`${field} is too long`);
@@ -327,16 +338,23 @@
     const normalized = normalizeRuleSet(ruleSetValue);
     if (normalized.errors.length) return { ok: false, errors: normalized.errors, blocked: true, rowActions: [] };
     const area = cleanText(processingArea, 20).toUpperCase();
+    const errors = [];
     const lines = (Array.isArray(linesValue) ? linesValue : []).map(line => {
-      const claimAmount = Math.max(0, finiteNumber(line.claimAmount ?? line.claimValue) || 0);
-      const approved = finiteNumber(line.approvedAmount ?? line.approvedValue);
+      const claimAmount = parseMoney(line.claimAmount ?? line.claimValue);
+      const approvedValue = line.approvedAmount ?? line.approvedValue;
+      const emptyApproval = approvedValue === undefined || approvedValue === null
+        || typeof approvedValue === 'string' && approvedValue.trim() === '';
+      const approved = emptyApproval ? claimAmount : parseMoney(approvedValue);
+      if (claimAmount === null) errors.push(`Row ${line.index}: invalid claimed amount`);
+      if (approved === null && !emptyApproval) errors.push(`Row ${line.index}: invalid approved amount`);
       return {
         ...line,
         claimAmount,
-        currentApproved: approved === null || approved <= 0 ? claimAmount : approved,
+        currentApproved: approved,
         _processingCodes: extractLineCodes(line)
       };
     });
+    if (errors.length) return { ok: false, errors, blocked: true, rowActions: [] };
     const context = {
       lines,
       packageCodes: new Set(lines.flatMap(line => [...line._processingCodes])),
@@ -381,7 +399,9 @@
             row.proposedApproved = 0;
             row.excluded = true;
           } else if (action.type === 'applyDeduction' && !row.excluded) {
-            const deduction = Math.min(row.proposedApproved, Math.max(0, deductionFor(action, {
+            // A non-cumulative deduction is subtracted from the claim, so its
+            // cap must use the claim too. Cumulative deductions use the balance.
+            const deduction = Math.min(action.cumulative ? row.proposedApproved : line.claimAmount, Math.max(0, deductionFor(action, {
               ...line,
               currentApproved: row.proposedApproved
             })));
@@ -442,6 +462,7 @@
     COLUMN_KEYS,
     FEEDBACK_CATEGORIES,
     normalizeCode,
+    parseMoney,
     normalizeRuleSet,
     verifyPublishedRuleSet,
     validateRule,
