@@ -15,6 +15,7 @@
     "test": "node --test \"tests/*.test.js\"",
     "test:browser": "node scripts/browser-smoke-e2e.js",
     "test:extension": "node scripts/extension-browser-e2e.js",
+    "test:dashboard": "node scripts/admin-dashboard-e2e.js",
     "test:firebase": "firebase emulators:exec --only firestore \"node --test tests/firebase/firestore-rules.test.js\" --project claimextension-test",
     "test:lifecycle": "node scripts/run-lifecycle-emulators.js",
     "test:staging": "node scripts/staging-smoke.js",

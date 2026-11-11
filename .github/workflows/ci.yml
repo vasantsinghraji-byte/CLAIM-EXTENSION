@@ -67,6 +67,9 @@ jobs:
       - name: Actual extension Apply and review recovery acceptance
         run: npm run test:extension
 
+      - name: Hosted administrator dashboard acceptance
+        run: npm run test:dashboard
+
       - name: Firestore security rules tests
         run: npm run test:firebase
 
