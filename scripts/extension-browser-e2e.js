@@ -144,7 +144,7 @@ async function main() {
       if (state.offline) { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { status: 'UNAVAILABLE' } })); return; }
       if (!state.governed) return json(response, { result: { schemaVersion: 2, mode: 'bundled', versionId: '', unchanged: true } });
       const checksum = crypto.createHash('sha256').update(canonicalJson({ schemaVersion: 2, rules: state.rules })).digest('hex');
-      return json(response, { result: { schemaVersion: 2, mode: 'remote-required', versionId: 'synthetic-policy-v1',
+      return json(response, { result: { schemaVersion: 2, mode: state.mode || 'remote-required', versionId: state.versionId || 'synthetic-policy-v1',
         rules: state.rules, bundledFallbackEnabled: false, checksum: `sha256:${checksum}:central` } });
     }
     if (request.url === '/functions/verifyLicence') {
@@ -213,6 +213,12 @@ async function main() {
     // Interact with the actual closed widget through DOM/CDP, not a replacement
     // UI or substituted Chrome APIs. Saving a deselection must survive Preview.
     const widget = await widgetRoot(page, world);
+    const waitForRecovery = (id, after, before) => until(async () => {
+      const saved = await options.evaluate(`chrome.storage.local.get('claimRecoverySnapshots')`);
+      return saved.claimRecoverySnapshots?.some(snapshot => snapshot.tid === 'SYN-A'
+        && snapshot.entries.some(entry => entry.id === id && entry.after === after && entry.before === before))
+        && await widget(`root=>!root.querySelector('.preview').disabled`);
+    }, 'saved recovery and completed widget Apply');
     await widget(`root=>{root.querySelector('.mascot').click();root.querySelector('.preview').click();return true;}`);
     await until(() => widget(`root=>Boolean(root.querySelector('input[data-row-key]'))`), 'widget preview');
     await widget(`root=>{root.querySelector('input[data-row-key]').click();return true;}`);
@@ -253,7 +259,7 @@ async function main() {
     assert.equal(await widget(`root=>root.querySelector('.ack-check').checked`), false);
     await widget(`root=>{root.querySelector('.ack-check').click();root.querySelector('.apply').click();return true;}`);
     await until(() => evaluate(`document.getElementById('packageFinalAmount_1').value==='200'`), 'reviewed remaining Apply');
-    await until(() => widget(`root=>root.querySelector('.status').textContent.includes('Recovery was saved')`), 'remaining recovery persistence');
+    await waitForRecovery('packageFinalAmount_1', '200', '0');
     state.offline = true;
     assert.equal((await evaluate('ClaimAutoFillActions.previewFresh()')).blockReason, 'processing-rules-unavailable');
     assert.equal((await evaluate('ClaimAutoFillActions.undo()')).count, 1);
@@ -262,6 +268,51 @@ async function main() {
     assert.equal((await evaluate('ClaimAutoFillActions.restoreRecovery()')).count, 1);
     assert.equal(await evaluate(`document.getElementById('packageFinalAmount_0').value`), '0');
     state.offline = false;
+    await evaluate(`document.getElementById('packageFinalAmount_1').value=''`);
+    state.mode = 'compare'; state.versionId = 'synthetic-comparison-v1';
+    await widget(`root=>{root.querySelector('.preview').click();return true;}`);
+    await until(() => widget(`root=>root.querySelector('.policy-warnings').textContent.includes('central Rs. 180')`), 'local amount comparison');
+    assert.equal(await widget(`root=>root.querySelector('.policy-warnings').textContent.includes('bundled Rs. 200') && root.querySelector('.policy-warnings').textContent.includes('(comparison only)')`), true);
+    assert.equal(await evaluate(`document.getElementById('packageFinalAmount_1').value`), '', 'comparison rendering cannot write an approval');
+    if (process.env.COMPARISON_SCREENSHOT_PATH) {
+      await page.send('Page.bringToFront');
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false });
+      await widget(`root=>{root.querySelector('.mascot').click();root.querySelector('.mascot').click();return new Promise(resolve=>requestAnimationFrame(()=>resolve(true)));}`);
+      const screenshot = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      fs.writeFileSync(path.resolve(process.env.COMPARISON_SCREENSHOT_PATH), Buffer.from(screenshot.data, 'base64'));
+    }
+    await widget(`root=>{root.querySelector('.safe').click();return true;}`);
+    await until(() => evaluate(`document.getElementById('packageFinalAmount_1').value==='200'`), 'compare mode applies the bundled amount');
+    await waitForRecovery('packageFinalAmount_1', '200', '');
+    assert.equal((await evaluate('ClaimAutoFillActions.undo()')).count, 2);
+    assert.equal(await evaluate(`document.getElementById('packageFinalAmount_1').value`), '');
+    const policyText = '<img src=x onerror=alert(1)> Synthetic central review required.';
+    const policyRule = actions => require('../functions/lib/processing-rules').normalizeRule({
+      ruleId: 'SYN-MESSAGE', name: 'Synthetic policy message', processingArea: 'IPD', enabled: true, priority: 100,
+      enforcement: actions.some(action => action.type === 'blockProcessing') ? 'blocking' : 'advisory',
+      conditions: { operator: 'packagePresent', packageCodes: ['INV-RISK'] }, actions });
+    state.rules = [policyRule([{ type: 'blockProcessing', message: policyText }])];
+    state.versionId = 'synthetic-comparison-block';
+    await widget(`root=>{root.querySelector('.preview').click();return true;}`);
+    await until(() => widget(`root=>root.querySelector('.policy-warnings').textContent.includes('bundled processing remains authoritative')`), 'comparison policy review message');
+    assert.equal(await widget(`root=>root.querySelector('.safe').disabled`), false, 'comparison blocks remain informational');
+    state.mode = 'remote-required'; state.versionId = 'synthetic-authoritative-block';
+    await widget(`root=>{root.querySelector('.preview').click();return true;}`);
+    await until(() => widget(`root=>root.querySelector('.policy-warnings').textContent.includes('Synthetic central review required.')`), 'authoritative block explanation');
+    const blockedView = await widget(`root=>({text:root.querySelector('.policy-warnings').textContent,images:root.querySelectorAll('.policy-warnings img').length,applyDisabled:root.querySelector('.apply').disabled,safeDisabled:root.querySelector('.safe').disabled})`);
+    assert(blockedView.text.includes('<img src=x onerror=alert(1)>'), 'policy message is shown literally');
+    assert.equal(blockedView.images, 0, 'policy message cannot create HTML nodes');
+    assert.equal(blockedView.applyDisabled, true);
+    assert.equal(blockedView.safeDisabled, true);
+    state.rules = [policyRule([{ type: 'warn', message: policyText }])];
+    state.versionId = 'synthetic-authoritative-warning';
+    await widget(`root=>{root.querySelector('.preview').click();return true;}`);
+    await until(() => widget(`root=>root.querySelector('.status').textContent.includes('1 central warning(s)')`), 'central warning presentation');
+    assert.equal(await widget(`root=>root.querySelector('.policy-warnings').textContent.includes('SYN-MESSAGE: <img') && !root.querySelector('.policy-warnings img')`), true);
+    state.mode = 'compare'; state.versionId = 'synthetic-empty-comparison'; state.rules = [];
+    await widget(`root=>{root.querySelector('.preview').click();return true;}`);
+    await until(() => widget(`root=>root.querySelector('.status').textContent.includes('2 safe row(s)') && root.querySelector('.status').textContent.includes('0 central warning(s)') && root.querySelector('.policy-warnings').hidden`), 'new comparison preview without messages');
+    assert.equal(await widget(`root=>root.querySelector('.policy-warnings').hidden && !root.querySelector('.policy-warnings').textContent`), true, 'a new preview clears stale explanations');
     state.holdLicence = true;
     await options.evaluate(`window.pendingLicence=chrome.runtime.sendMessage({action:'authRefreshLicence'});true`);
     await until(() => state.held.length, 'pending verification');
