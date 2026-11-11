@@ -14,6 +14,8 @@
 ## Claims-safety checklist
 
 - [ ] `npm run check` and `npm run lint` pass locally
+- [ ] `npm run check:staged` passes for the exact staged change (including Functions tests)
+- [ ] The branch and commits contain one reviewable task; unrelated work is separate
 - [ ] No rule gains `autoDeductEligible: true` without shadow-mode evidence (FP stats from the options page)
 - [ ] `audit-rules.js` was regenerated (not hand-edited) if `tools/rule-curation.json` or the workbook changed
 - [ ] Changes that touch amount-writing paths were exercised on `test-page.html` (and the live smoke test where applicable)

@@ -71,9 +71,14 @@ Rules of thumb:
 - Body explains **why**; the diff already shows how.
 - `git commit` (no `-m`) opens the pre-filled `.gitmessage` template.
 
-The `pre-commit` hook runs `npm run check` (matrix coverage validation, syntax
-checks, all unit tests) and `npm run lint`. A red suite blocks the commit.
-Missing lint dependencies also block the commit; restore them with `npm ci`.
+The `pre-commit` hook runs `npm run check:staged`: matrix coverage, syntax,
+root unit tests, ESLint, and Functions unit tests against a temporary export
+of the Git index. Unstaged fixes and untracked dependencies cannot mask an
+incomplete commit. Partial staging with `git add -p` remains supported;
+validation leaves the index and working files unchanged, including on failure.
+Installed root and Functions dependencies are shared with the temporary export.
+Missing dependencies block the commit; restore both with `npm ci` and
+`npm --prefix functions ci`. CI independently installs from both lockfiles.
 Local `fixup!` and `squash!` commits are allowed while working, but the PR gate
 rejects them until autosquashed. CI recognizes merge subjects only on actual
 merge commits, so a subject beginning with `Merge` cannot bypass validation.
@@ -132,6 +137,41 @@ Use `git add -p` and `git diff --cached` to stage and inspect one logical change
 After merging, remove only a clean worktree with `git worktree remove <path>`,
 then use `git branch -d <branch>` for a branch confirmed merged into main.
 Keep unmerged safety snapshots until their changes have been reconciled.
+
+### Preserve a mixed worktree before sorting it
+
+Run `npm run repo:snapshot` before reorganizing existing uncommitted work.
+It writes an ignored directory under `artifacts/repository-snapshots/` with
+the base commit and branch, separate binary-capable staged and unstaged
+patches, and copies of nonignored untracked files with SHA-256 checksums.
+It does not stage, stash, commit, switch branches, or discard anything.
+A snapshot is usable only when its `manifest.json` has `complete: true`;
+the command refuses unresolved merges and fails if it detects concurrent edits.
+Ignored files, installed dependencies, and local Firebase configuration are
+excluded. Keep those local settings separately when needed. These local
+snapshots protect against editing mistakes; they are not off-machine backups.
+
+To recover, create a new worktree at the manifest's `base` commit:
+
+```bash
+git worktree add ../claim-recovery -b chore/recovery <base-sha>
+git -C ../claim-recovery apply --index <absolute-snapshot-path>/staged.patch
+git -C ../claim-recovery apply <absolute-snapshot-path>/unstaged.patch
+```
+
+Skip a patch command when its file is empty. Copy the contents of the
+snapshot's `untracked/` directory into that new worktree, preserving relative
+paths. Inspect `git status` and `git diff --cached` there before continuing.
+Recovery was tested with partial staging, deletions, binary content, spaces,
+and Unicode filenames. Do not apply recovery patches over the original dirty tree.
+
+After taking the snapshot, inventory changes by behavior and dependency.
+Create one dedicated branch/worktree per reviewable task; move only that task's
+files or hunks and run `npm run check:staged` before committing. Shared files
+such as `background.js`, `package.json`, and CI often need hunk-level splitting.
+Keep version bumps, release manifests, and changelog preparation together in a
+final release PR after the underlying fixes and features merge. Never treat a
+mixed recovery snapshot as a release candidate.
 
 ## CI
 
