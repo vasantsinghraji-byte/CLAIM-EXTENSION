@@ -138,6 +138,17 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
         return snapshots.length;
       });
     },
+    markRecoveryEntriesRestored(id, restoredIds) {
+      return enqueue('claimRecoverySnapshots', async () => {
+        const result = await storageGet(storage, 'claimRecoverySnapshots');
+        const ids = new Set(restoredIds);
+        const snapshots = (result.claimRecoverySnapshots || []).map(snapshot => snapshot.id !== id ? snapshot
+          : { ...snapshot, entries: snapshot.entries.filter(entry => !ids.has(entry.id)) })
+          .filter(snapshot => snapshot.id !== id || snapshot.entries.length);
+        await storageSet(storage, { claimRecoverySnapshots: snapshots });
+        return snapshots.length;
+      });
+    },
     setRuleOverride(ruleId, autoDeductEligible) {
       return enqueue('ruleOverrides', async () => {
         const result = await storageGet(storage, 'ruleOverrides');
@@ -203,12 +214,69 @@ function createSerializedStorageWriter(storage, now = () => Date.now()) {
   };
 }
 
+function createReviewDecisionStore(storage, now = () => Date.now()) {
+  let chain = Promise.resolve();
+  const run = work => { const next = chain.catch(() => {}).then(work); chain = next; return next; };
+  const keyFor = context => JSON.stringify([context.uid, context.tid, context.url]);
+  async function entries() {
+    const result = await storageGet(storage, 'claimReviewDecisions');
+    return (Array.isArray(result.claimReviewDecisions) ? result.claimReviewDecisions : [])
+      .filter(item => Number.isFinite(item.savedAt) && now() - item.savedAt < 24 * 60 * 60 * 1000);
+  }
+  return {
+    save(context, value) {
+      return run(async () => {
+        if (!value || !/^[a-f0-9]{8}$/.test(value.previewToken || '')) throw new Error('Invalid review identity');
+        const selectedKeys = value.selectedKeys;
+        if (!Array.isArray(selectedKeys) || selectedKeys.length > 1000 || selectedKeys.some(key => typeof key !== 'string' || key.length > 200)) throw new Error('Invalid review selection');
+        for (const [key, amount] of Object.entries(value.approvedOverrides || {})) {
+          if (!selectedKeys.includes(key) || !Number.isFinite(amount) || amount < 0) throw new Error('Invalid saved amount decision');
+        }
+        for (const [key, remark] of Object.entries(value.remarkOverrides || {})) {
+          if (!selectedKeys.includes(key) || typeof remark !== 'string' || remark.length > 2000) throw new Error('Invalid saved remark decision');
+        }
+        if (!Array.isArray(value.exceptionalGroups) || value.exceptionalGroups.some(id => typeof id !== 'string' || id.length > 200)) throw new Error('Invalid saved review groups');
+        const saved = { previewToken: value.previewToken, ruleSetVersion: String(value.ruleSetVersion || '').slice(0, 128),
+          ruleSetChecksum: String(value.ruleSetChecksum || '').slice(0, 128), selectedKeys: [...new Set(selectedKeys)],
+          approvedOverrides: value.approvedOverrides || {}, remarkOverrides: value.remarkOverrides || {}, exceptionalGroups: value.exceptionalGroups };
+        if (JSON.stringify(saved).length > 250000) throw new Error('Saved review is too large');
+        const key = keyFor(context);
+        await storageSet(storage, { claimReviewDecisions: [...(await entries()).filter(item => item.key !== key), { key, savedAt: now(), value: saved }].slice(-30) });
+        return true;
+      });
+    },
+    get: context => run(async () => (await entries()).find(item => item.key === keyFor(context))?.value || null),
+    clear: context => run(async () => { await storageSet(storage, { claimReviewDecisions: (await entries()).filter(item => item.key !== keyFor(context)) }); return true; }),
+    clearAll: () => run(async () => { await storageSet(storage, { claimReviewDecisions: [] }); return true; })
+  };
+}
+
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage?.local && chrome.storage?.sync) {
   const storageWriter = createSerializedStorageWriter(chrome.storage.local);
   const overrideMigration = migrateRuleOverridesToLocal(chrome.storage.local, chrome.storage.sync)
     .catch(() => false);
   const AuthCore = globalThis.ClaimAuthCore;
   const ProcessingRules = globalThis.ClaimProcessingRules;
+  const reviewDecisions = chrome.storage.session ? createReviewDecisionStore(chrome.storage.session) : null;
+  let reviewEpoch = 0;
+  let reviewIdentityChanging = false;
+  async function withReviewIdentityReset(work) {
+    const epoch = ++reviewEpoch;
+    reviewIdentityChanging = true;
+    let cleared = false;
+    try {
+      try {
+        await reviewDecisions?.clearAll();
+        cleared = true;
+      } catch {
+        // Review-memory errors must not prevent sign-out. Keep the broker
+        // unavailable until a subsequent identity reset clears it successfully.
+      }
+      return await work();
+    } finally {
+      if (epoch === reviewEpoch) reviewIdentityChanging = !cleared;
+    }
+  }
 
   async function handleAuthSignIn(email, password) {
     const session = await AuthCore.signInWithPassword({ apiKey: FIREBASE_WEB_API_KEY, email, password, fetchImpl: fetch });
@@ -797,6 +865,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
   }
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (['saveReviewDecisions', 'getReviewDecisions', 'clearReviewDecisions'].includes(request?.action)) {
+      const epoch = reviewEpoch;
+      (async () => {
+        const { authSession } = await storageGet(chrome.storage.local, 'authSession');
+        const tid = String(request.tid || '');
+        const url = sender.tab?.url || '';
+        const parsed = new URL(url);
+        if (reviewIdentityChanging || !reviewDecisions || !authSession?.uid || epoch !== reviewEpoch || !tid || tid.length > 128
+          || !(parsed.origin === 'https://rghs.rajasthan.gov.in' || parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) throw new Error('Review session unavailable');
+        const context = { uid: authSession.uid, tid, url };
+        const value = request.action === 'saveReviewDecisions' ? await reviewDecisions.save(context, request.data)
+          : request.action === 'clearReviewDecisions' ? await reviewDecisions.clear(context) : await reviewDecisions.get(context);
+        return { success: epoch === reviewEpoch, value: epoch === reviewEpoch ? value : null };
+      })().then(sendResponse).catch(error => sendResponse({ success: false, error: String(error.message || error) }));
+      return true;
+    }
     if (request?.action === 'registerInvestigationChecklist' && sender.tab?.id !== undefined && request.tid) {
       chrome.storage.session.set({ [investigationSheetStorageKey(request.tid)]: {
         tabId: sender.tab.id,
@@ -926,7 +1010,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignIn') {
-      handleAuthSignIn(request.email, request.password)
+      withReviewIdentityReset(() => handleAuthSignIn(request.email, request.password))
         .then(sendResponse)
         .catch(error => sendResponse({ success: false, error: String(error.code || error.status || error.message || error) }));
       return true;
@@ -954,12 +1038,12 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       return true;
     }
     if (request?.action === 'authSignOut') {
-      Promise.all([
+      withReviewIdentityReset(() => Promise.all([
         storageWriter.clearAuthSession(),
         storageWriter.clearPendingAuth(),
         storageWriter.setLicenceState(null),
         storageWriter.setProcessingRuleSet(null)
-      ])
+      ]))
         .then(() => {
           if (chrome.alarms) chrome.alarms.clear(LICENCE_RECHECK_ALARM);
           sendResponse({ success: true });
@@ -1035,6 +1119,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       mutation = storageWriter.append(request.key, request.entries);
     } else if (request?.action === 'removeRecoverySnapshot') {
       mutation = storageWriter.removeRecoverySnapshot(request.id);
+    } else if (request?.action === 'markRecoveryEntriesRestored') {
+      mutation = storageWriter.markRecoveryEntriesRestored(request.id, Array.isArray(request.restoredIds) ? request.restoredIds : []);
     } else if (request?.action === 'ensureRuleOverridesMigration') {
       mutation = overrideMigration.then(() => 0);
     }
@@ -1057,6 +1143,7 @@ if (typeof module === 'object' && module.exports) {
     STORAGE_POLICIES,
     auditLogEntryKey,
     createSerializedStorageWriter,
+    createReviewDecisionStore,
     ignoreMissingTabError,
     migrateRuleOverridesToLocal,
     setTabBadge

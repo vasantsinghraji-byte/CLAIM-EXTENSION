@@ -158,6 +158,7 @@
         <div class="investigation-checklist" hidden aria-live="polite"></div>
         <div class="query-checklist" hidden aria-live="polite"></div>
         <div class="review-list" hidden aria-label="Proposed row changes"></div>
+        <div class="policy-warnings" hidden role="status" aria-live="polite"></div>
         <div class="ack" hidden><label><input type="checkbox" class="ack-check" />I reviewed the selected high-risk audit findings and accept applying them.</label></div>
         </div>
         <div class="actions">
@@ -207,6 +208,9 @@
   const ack = shadow.querySelector('.ack');
   const ackCheck = shadow.querySelector('.ack-check');
   let currentPreview = null;
+  let renderingPreview = false;
+  let decisionRevision = 0;
+  let applyInFlight = false;
   let selectedKeys = new Set();
   let approvedOverrides = {};
   let remarkOverrides = {};
@@ -317,31 +321,48 @@
 
   function decisionMemoryKey() {
     const tid = actions.getCurrentTid?.();
-    return tid ? `claimSparkDecisionMemory:${tid}` : '';
+    return tid || '';
   }
 
   function saveDecisionMemory() {
     const key = decisionMemoryKey();
-    if (!key || !currentPreview) return;
-    withValidExtensionContext(() => chrome.storage.session.set({ [key]: {
-      selectedKeys: [...selectedKeys], approvedOverrides, remarkOverrides, exceptionalGroups: [...exceptionalGroups]
-    } }));
+    if (!key || !currentPreview || renderingPreview) return;
+    decisionRevision++;
+    reviewMemory('saveReviewDecisions', { previewToken: currentPreview.token,
+      ruleSetVersion: currentPreview.ruleSetVersion || '', ruleSetChecksum: currentPreview.ruleSetChecksum || '',
+      selectedKeys: [...selectedKeys], approvedOverrides, remarkOverrides, exceptionalGroups: [...exceptionalGroups] });
   }
 
-  function restoreDecisionMemory() {
+  function reviewMemory(action, data, tid = decisionMemoryKey()) {
+    return new Promise(resolve => {
+      if (!tid || !hasValidExtensionContext()) return resolve(null);
+      chrome.runtime.sendMessage({ action, tid, data }, response => {
+        void chrome.runtime.lastError;
+        resolve(response?.success ? response.value : null);
+      });
+    });
+  }
+
+  function useReviewDecisions(saved) {
+    if (!saved) return false;
+    selectedKeys = new Set(saved.selectedKeys);
+    approvedOverrides = saved.approvedOverrides;
+    remarkOverrides = saved.remarkOverrides;
+    exceptionalGroups = new Set(saved.exceptionalGroups);
+    ackCheck.checked = false;
+    for (const input of reviewList.querySelectorAll('input[data-row-key]')) input.checked = selectedKeys.has(input.dataset.rowKey);
+    actions.highlightDecisionRows(approvedOverrides);
+    updateReviewState();
+    return true;
+  }
+
+  async function restoreDecisionMemory() {
     const key = decisionMemoryKey();
     if (!key || !currentPreview) return;
-    withValidExtensionContext(() => chrome.storage.session.get(key, result => {
-      const saved = result[key];
-      if (!saved || !currentPreview) return;
-      const available = new Set(currentPreview.proposals.map(proposal => proposal.key));
-      selectedKeys = new Set((saved.selectedKeys || []).filter(key => available.has(key)));
-      approvedOverrides = Object.fromEntries(Object.entries(saved.approvedOverrides || {}).filter(([key]) => available.has(key)));
-      remarkOverrides = Object.fromEntries(Object.entries(saved.remarkOverrides || {}).filter(([key]) => available.has(key)));
-      exceptionalGroups = new Set(saved.exceptionalGroups || []);
-      updateReviewState();
-      showStatus('Restored saved review decisions for this claim.', 'success');
-    }));
+    const preview = currentPreview, revision = decisionRevision;
+    const saved = await reviewMemory('getReviewDecisions');
+    if (currentPreview !== preview || decisionRevision !== revision) return;
+    if (useReviewDecisions(Review.resumeDecisions(preview, saved))) showStatus('Restored saved review decisions for this claim. Review selected findings before Apply.', 'success');
   }
 
   function setPanelScale(value, { persist = true } = {}) {
@@ -875,7 +896,7 @@
     const fill = document.createElement('button');
     fill.type = 'button';
     fill.textContent = `Fill selected ${IPD_ACTION_LABELS[selectedAction]} remarks`;
-    fill.addEventListener('click', () => {
+    fill.addEventListener('click', async () => {
       const remarks = [...queryChecklist.querySelectorAll('.query-option')]
         .filter(row => row.querySelector('input')?.checked)
         .map(row => row.querySelector('textarea')?.value.trim())
@@ -884,11 +905,21 @@
         showStatus(`Select at least one ${IPD_ACTION_LABELS[selectedAction]} remark first.`, 'warning');
         return;
       }
-      const result = actions.appendIpdActionRemarks?.(selectedAction, remarks);
+      fill.disabled = true;
+      let result;
+      try { result = await actions.appendIpdActionRemarks?.(selectedAction, remarks); }
+      catch (_) { showStatus('Unable to save IPD remark recovery. Preview the claim and try again.', 'error'); return; }
+      finally { fill.disabled = false; }
       if (!result?.ok) {
-        showStatus(`Select Action: ${IPD_ACTION_LABELS[selectedAction]} on the Main IPD page first, then try again.`, 'warning');
+        const reasons = { 'autofill-disabled': 'Turn on Claim Extension before adding remarks.',
+          'signed-out': 'Sign in before adding remarks.', 'licence-apply-blocked': 'Your licence does not allow remark changes.',
+          'claim-unavailable': 'Wait for the claim identifier to load before adding remarks.',
+          'recovery-save-failed': 'Remark changes were rolled back because recovery could not be saved.' };
+        showStatus(reasons[result?.blockReason] || `Select Action: ${IPD_ACTION_LABELS[selectedAction]} on the Main IPD page first, then try again.`, 'warning');
         return;
       }
+      undoButton.disabled = !result.hasUndo;
+      recoverButton.disabled = !result.recoverySaved;
       showStatus(`${result.addedCount} selected ${IPD_ACTION_LABELS[selectedAction]} remark${result.addedCount === 1 ? ' was' : 's were'} added.`, 'success');
     });
     actionsRow.append(add, fill);
@@ -974,6 +1005,8 @@
   }
 
   function renderPreview(result) {
+    renderingPreview = true;
+    decisionRevision++;
     currentPreview = result;
     actions.highlightDecisionRows({});
     if (result.blocked) {
@@ -985,6 +1018,7 @@
       applyButton.disabled = true;
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
+        'claim-unavailable': 'BLOCKED: The current claim identifier is unavailable. Wait for the claim to load, then preview again.',
         'unsupported-layout': 'BLOCKED: The claim process-sheet layout is not compatible with this extension version.',
         'invalid-rule-set': 'BLOCKED: The bundled audit rules failed validation. Reload a verified extension build.',
         'invalid-processing-rule-set': 'BLOCKED: The published processing rules failed validation. Contact an administrator.',
@@ -1000,6 +1034,7 @@
         'recovery-save-failed': 'BLOCKED: Changes were rolled back because recovery could not be saved.'
       };
       showStatus(messages[result.blockReason] || 'Preview was blocked by a compatibility check.', 'error');
+      renderingPreview = false;
       return;
     }
     selectedKeys = new Set(result.proposals.filter(proposal => proposal.risk !== 'high').map(proposal => proposal.key));
@@ -1023,6 +1058,7 @@
       checkbox.checked = selectedKeys.has(proposal.key);
       checkbox.disabled = proposal.mandatory === true;
       checkbox.setAttribute('aria-label', `Select ${proposal.label}`);
+      checkbox.dataset.rowKey = proposal.key;
       checkbox.addEventListener('change', () => {
         checkbox.checked ? selectedKeys.add(proposal.key) : selectedKeys.delete(proposal.key);
         updateReviewState();
@@ -1104,6 +1140,7 @@
         select.checked = selectedKeys.has(proposal.key);
         select.disabled = proposal.mandatory === true;
         select.setAttribute('aria-label', `Select ${proposal.label} on row ${rowLabel}`);
+        select.dataset.rowKey = proposal.key;
         select.addEventListener('change', () => {
           select.checked ? selectedKeys.add(proposal.key) : selectedKeys.delete(proposal.key);
           if (group.proposals.some(item => selectedKeys.has(item.key))) exceptionalGroups.add(group.id);
@@ -1196,8 +1233,10 @@
       }
     }
     ackCheck.checked = false;
+    renderingPreview = false;
     undoButton.disabled = !result.hasUndo;
     updateReviewState();
+    restoreDecisionMemory();
     const warningCount = result.processingWarnings?.length || 0;
     showStatus(result.proposals.length
       ? `${safeProposals.length} safe row(s); ${Review.groupProposals(result.proposals).length} decision group(s); ${warningCount} central warning(s).`
@@ -1364,7 +1403,15 @@
       details.compatible ? 'success' : 'warning');
   });
   ackCheck.addEventListener('change', updateReviewState);
-  async function applySelection(keys, overrides, remarks, acknowledgedHighRisk) {
+  async function applySelection(...args) {
+    if (applyInFlight) return;
+    applyInFlight = true;
+    previewButton.disabled = safeButton.disabled = applyButton.disabled = true;
+    try { await commitSelection(...args); }
+    finally { applyInFlight = false; previewButton.disabled = false; }
+  }
+
+  async function commitSelection(keys, overrides, remarks, acknowledgedHighRisk) {
     if (!currentPreview) {
       showStatus('Preview the current sheet before applying changes.', 'warning');
       return;
@@ -1374,6 +1421,9 @@
       return;
     }
     let result;
+    const previous = currentPreview;
+    const saved = { selectedKeys: [...selectedKeys], approvedOverrides: { ...approvedOverrides }, remarkOverrides: { ...remarkOverrides } };
+    const originalTid = decisionMemoryKey();
     if (!hasValidExtensionContext()) return invalidateStaleWidget();
     try {
       const applyAction = actions.applyFresh || actions.apply;
@@ -1393,6 +1443,7 @@
       const messages = {
         'autofill-disabled': 'BLOCKED: Claim Extension is OFF. Turn it on, then preview again.',
         stale: 'BLOCKED: The process sheet changed after Preview. Preview again.',
+        'claim-unavailable': 'BLOCKED: The current claim identifier is unavailable. Wait for the claim to load, then preview again.',
         expired: 'BLOCKED: Preview expired. Preview again.',
         'empty-selection': 'BLOCKED: Select at least one row.',
         'high-risk-unacknowledged': 'BLOCKED: Acknowledge selected high-risk findings.',
@@ -1413,8 +1464,7 @@
       return;
     }
     currentPreview = null;
-    const memoryKey = decisionMemoryKey();
-    if (memoryKey) withValidExtensionContext(() => chrome.storage.session.remove(memoryKey));
+    await reviewMemory('clearReviewDecisions', undefined, originalTid);
     selectedKeys.clear();
     approvedOverrides = {};
     remarkOverrides = {};
@@ -1428,6 +1478,17 @@
     undoButton.disabled = !result.hasUndo;
     recoverButton.disabled = false;
     showStatus(`Applied ${result.count} field action(s). Recovery was saved locally.`, 'success');
+    if (previous.proposals.some(row => !keys.includes(row.key))) {
+      try {
+        const remaining = await (actions.previewFresh ? actions.previewFresh() : actions.preview());
+        renderPreview(remaining);
+        if (!remaining.blocked) {
+          useReviewDecisions(Review.carryDecisions(previous, remaining, saved));
+          saveDecisionMemory();
+          showStatus(`Applied ${result.count} field action(s). ${remaining.proposals.length} row(s) remain for review.`, 'success');
+        }
+      } catch (_) { showStatus('Changes were applied and recovery saved. Preview again to review the remaining rows.', 'warning'); }
+    }
   }
 
   safeButton.addEventListener('click', () => {
@@ -1452,8 +1513,9 @@
   undoButton.addEventListener('click', () => {
     let result;
     if (!withValidExtensionContext(() => { result = actions.undo(); })) return;
-    undoButton.disabled = true;
-    showStatus(result.count ? `Restored ${result.count} field(s).` : 'Nothing in this page session to undo.', result.count ? 'warning' : '');
+    undoButton.disabled = !result.hasUndo;
+    showStatus(result.count ? `Restored ${result.count} field(s).${result.hasUndo ? ' Unresolved fields remain available for Undo.' : ''}`
+      : result.hasUndo ? 'Undo remains available on the original claim when its fields match the applied values.' : 'Nothing in this page session to undo.', result.count ? 'warning' : '');
   });
   recoverButton.addEventListener('click', async () => {
     if (!recoveryArmed) {
@@ -1479,7 +1541,8 @@
       }
       throw error;
     }
-    showStatus(result.count ? `Restored ${result.count} field(s) from the saved snapshot.` : 'No matching recovery snapshot.', result.count ? 'warning' : '');
+    recoverButton.disabled = !result.hasRecovery;
+    showStatus(`Restored ${result.count || 0} field(s). ${result.conflicts || 0} changed field(s); ${result.missing || 0} unavailable control(s).${result.hasRecovery ? ' Saved recovery remains available for retry.' : ''}`, result.hasRecovery ? 'warning' : 'success');
   });
 
   shadow.addEventListener('keydown', event => { if (event.key === 'Escape') setOpen(false); });

@@ -39,6 +39,7 @@ function setup() {
   });
   vm.runInContext([
     section('function evaluateLicenceGate(', '// Fill all approved amounts'),
+    section('function currentClaimContext(', 'function persistRecoverySnapshot('),
     section('function investigationRuleIdentity()', 'function findIpdActionSelect()'),
     section('async function finalizeRecovery(', 'function getMatchingRecoverySnapshot('),
     section('function restoreFillBatch(', 'function undoLastFill(')

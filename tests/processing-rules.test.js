@@ -215,6 +215,25 @@ for (const item of moneyCases) {
   });
 }
 
+test('remark-only rules never request an amount write, including explicit zero approvals', () => {
+  const remarkOnly = rule({ actions: [rule().actions[1]] });
+  for (const approvedValue of ['', '0', '400']) {
+    const result = ProcessingRules.evaluate({ schemaVersion: 2, rules: [remarkOnly] }, [
+      { index: 1, packageText: 'PKG-X', claimValue: 1000, approvedValue }
+    ], 'IPD');
+    assert.equal(result.ok, true);
+    assert.equal(result.rowActions[0].proposedApproved, null);
+    assert.equal(result.rowActions[0].writesApproved, false);
+    assert.ok(result.rowActions[0].remarks.remarks);
+  }
+  const serverRule = ServerRules.normalizeRule({ ...remarkOnly, scenarios: [{
+    scenarioId: 'ZERO-REMARK', name: 'A remark does not reapprove a zero amount', processingArea: 'IPD',
+    lines: [{ packageCodes: ['PKG-X'], claimAmount: 1000, approvedAmount: 0 }],
+    expected: { matchedRuleIds: [remarkOnly.ruleId], blocked: false, approvedAmounts: { 'PKG-X': 0 } }
+  }] });
+  assert.equal(ServerRules.runScenarios([serverRule]).passed, true);
+});
+
 test('browser and server agree on rejected outcomes after package exclusion', () => {
   const exclude = rule({ actions: [{ type: 'excludePackage', targetPackageCodes: ['PKG-X'] }], scenarios: [{
     scenarioId: 'EXCLUSION-OUTCOME', name: 'Rejected outcome triggers subsequent blocking', processingArea: 'IPD',

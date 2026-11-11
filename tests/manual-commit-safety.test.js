@@ -27,7 +27,7 @@ test('enabling claim tools never applies claim changes', () => {
 
 test('writes remain behind explicit fillNow and Apply actions', () => {
   assert.match(source, /request\.action === 'fillNow'[\s\S]*?applyFreshPreview\(request\)/);
-  assert.match(source, /apply\(options\)\s*{[\s\S]*?applyReviewedPreview\(options\)/);
+  assert.match(source, /apply\(options\)\s*{[\s\S]*?applyFreshPreview\(options\)/);
   assert.match(source, /function applyReviewedPreview[\s\S]*?fillAllApprovedAmounts\(\{\s*apply: true/);
 });
 
@@ -59,15 +59,15 @@ test('failed persistent recovery keeps the only saved snapshot', () => {
     source.indexOf('function restorePersistentSnapshot'),
     source.indexOf('function hasPersistentRecovery')
   );
-  assert.match(recovery, /if \(!element\?\.isConnected\) continue;/);
-  assert.match(recovery, /if \(count === 0\) return resolve\(\{ count: 0, hasRecovery: true \}\);/);
+  assert.match(recovery, /if \(!element\?\.isConnected\)/);
+  assert.match(recovery, /if \(count === 0\) return resolve\(\{ count: 0, conflicts, missing, hasRecovery: true \}\);/);
   assert.ok(
     recovery.indexOf('count === 0') < recovery.indexOf("action: 'removeRecoverySnapshot'"),
     'the zero-restore guard must run before snapshot removal'
   );
   assert.match(recovery, /const fullyRestored = count === snapshot\.entries\.length;/);
   assert.match(recovery, /getElementValue\(element\) !== String\(entry\.after \?\? ''\)/);
-  assert.match(recovery, /resolve\(\{ count, conflicts, hasRecovery: !fullyRestored \}\)/);
+  assert.match(recovery, /resolve\(\{ count, conflicts, missing, hasRecovery: !fullyRestored \}\)/);
 });
 
 test('session undo restores only connected controls and preserves recovery after partial failure', () => {
@@ -77,7 +77,7 @@ test('session undo restores only connected controls and preserves recovery after
   );
   assert.match(undo, /if \(!element\?\.isConnected\) continue;/);
   assert.match(undo, /appendClaimActivity\('undo', \{ fieldCount: count \}\)/);
-  assert.match(undo, /if \(removeRecovery && count === batch\.length\)[\s\S]*?removeRecoverySnapshot/);
+  assert.match(undo, /if \(removeRecovery && batch\.recoveryId\)[\s\S]*?markRecoveryEntriesRestored/);
   assert.match(undo, /return count;/);
   assert.match(source, /restoreFillBatch\(resultUndoBatch, \{ removeRecovery: false \}\)/);
 });

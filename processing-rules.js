@@ -364,6 +364,7 @@
       rowIndex: line.index,
       packageCode: [...line._processingCodes][0] || '',
       proposedApproved: line.currentApproved,
+      writesApproved: false,
       remarks: {},
       remarkModes: {},
       ruleIds: [],
@@ -397,6 +398,7 @@
           if (matchedTargetCode) row.packageCode = matchedTargetCode;
           if (action.type === 'excludePackage') {
             row.proposedApproved = 0;
+            row.writesApproved = true;
             row.excluded = true;
           } else if (action.type === 'applyDeduction' && !row.excluded) {
             // A non-cumulative deduction is subtracted from the claim, so its
@@ -409,6 +411,7 @@
               ? row.proposedApproved - deduction
               : Math.min(row.proposedApproved, line.claimAmount - deduction);
             row.proposedApproved = Math.max(0, Math.round(nextApproved * 100) / 100);
+            row.writesApproved = true;
           } else if (action.type === 'writeRemark' && action.target.sheet === area) {
             const deduction = Math.max(0, line.claimAmount - row.proposedApproved);
             const remark = formatTemplate(action.template, {
@@ -449,7 +452,7 @@
       validations,
       matchedRuleIds: [...new Set(matchedRuleIds)],
       rowActions: [...state.values()].filter(row => row.ruleIds.length)
-        .map(row => ({ ...row, ruleIds: [...new Set(row.ruleIds)] }))
+        .map(row => ({ ...row, proposedApproved: row.writesApproved ? row.proposedApproved : null, ruleIds: [...new Set(row.ruleIds)] }))
     };
   }
 
