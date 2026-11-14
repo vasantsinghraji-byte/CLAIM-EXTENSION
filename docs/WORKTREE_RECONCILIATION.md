@@ -1,66 +1,104 @@
-# Existing worktree reconciliation
+# Final worktree reconciliation
 
-Recorded November 10, 2026 (America/Los_Angeles).
+Reviewed November 11, 2026 against main after PR #50 (`d03a0c2`).
+The release branch is `release/1.12.1`; the original checkout remains on
+`fix/claim-apply-safety` at `b03685d18894ed9feec1d24da2ef29e40b643956`.
+Its index, tracked working files and nonignored untracked files are preserved.
 
-The original checkout is on `fix/claim-apply-safety`, based on
-`b03685d18894ed9feec1d24da2ef29e40b643956`. Its application changes are
-uncommitted and span several tasks. The workflow safeguards are isolated on
-`chore/workflow-safeguards` in `artifacts/worktrees/workflow-safeguards`.
-The original files and index were preserved.
+PRs #42–#50 extracted the application and workflow changes into reviewed branches.
+This release preparation accounts for all **62 original changed/untracked files**:
+21 match merged main after CRLF normalization, 26 retain the reviewed main version,
+10 are reconciled into release documentation/metadata, and 5 remain archived
+historical QA material. No remaining runtime change requires another feature PR.
 
-A local recovery snapshot is available under
-`artifacts/repository-snapshots/2026-11-11T04-15-22-410Z-CFd2Wi` in the
-original checkout. Its manifest records the base and untracked-file hashes.
-Follow CONTRIBUTING.md to recover into a new worktree. This ignored snapshot
-is local and is not part of the repository or a deployment artifact.
+## Recovery evidence
 
-## Suggested application PR boundaries
+The fresh local snapshot is
+`artifacts/repository-snapshots/2026-11-11T12-36-59-585Z-cbasXh` in the original
+checkout. It contains staged/unstaged binary patches, every nonignored untracked
+file and its SHA-256, the original branch/base and a completed manifest.
+Snapshot contents are ignored and never enter a package. Follow CONTRIBUTING.md
+to recover them in a new worktree; do not apply the old aggregate patch to main.
+The original local `artifacts/verify-auth-extraction-source.cjs` can compare the
+checkout against this snapshot, using its directory basename as the argument.
 
-These are review boundaries inferred from the current diffs and tests.
-Review shared files by hunk before moving anything; the table does not imply
-that a whole file belongs to exactly one task.
+The comparison inventory is retained locally at
+`artifacts/release-reconciliation-inventory.json`, with individual source/main
+diffs in `artifacts/release-reconciliation-diffs/`. These are review evidence,
+not shipped assets. The tracked tables below account for every inventory path.
 
-| Task / suggested branch | Main paths and evidence | Validation |
-| --- | --- | --- |
-| Claim Apply correctness: `fix/claim-apply-safety` | `claim-core.js`, `content.js`, `processing-rules.js`, server processing rules, amount parsing and deduction tests, `docs/CLAIM_APPLY_SAFETY_FIXES.md` | Root and Functions tests; browser Apply/Undo acceptance |
-| Authentication and recovery: `fix/auth-review-recovery` | `background.js`, `review-core.js`, `popup.js`, authentication race, review resume, recovery and IPD remark tests | Root tests; actual extension acceptance, including sign-out races |
-| Signup and licence activation: `fix/signup-licence-activation` | `functions/index.js`, `functions/lib/contracts.js`, deactivation tests, signup acceptance scripts, `docs/SIGNUP_LICENCE_HOTFIX_1.12.1.md` | Functions tests; emulator lifecycle and synthetic signup acceptance |
-| Administrator dashboard: `feat/admin-control-tower` | `hosting/admin*`, `hosting/firebase-client.js`, `functions/lib/admin-monitor.js`, monitor/client tests, dashboard scripts and documentation | Root and Functions tests; hosted dashboard acceptance |
-| Release preparation: `release/1.12.1` | Version hunks in `manifest.json`, `package.json`, `package-lock.json`, plus `CHANGELOG.md` and `release-manifest.json` | All relevant CI gates, reproducible build, artifact verification |
+## Original files already merged unchanged (21)
 
-`README.md`, `DEVELOPMENT.md`, `PRIVACY_POLICY.md`, `eslint.config.js`,
-`package.json`, and `.github/workflows/ci.yml` contain supporting changes
-that should accompany their corresponding task. Several acceptance scripts
-are currently untracked; stage each script with its package-script and CI
-integration so the commit can run independently. Keep any prerequisites
-together or use explicitly dependent PRs.
+| Paths | Merged scope |
+| --- | --- |
+| `claim-core.js`, `processing-rules.js`, `functions/lib/processing-rules.js`, `functions/test/processing-rules.test.js`, `functions/test/fixtures/processing-money-cases.json` | #44 calculations/parity and #49 count parser |
+| `functions/index.js`, `scripts/run-lifecycle-emulators.js` | #46 signup/licence and #47 monitoring/lifecycle integration |
+| `hosting/admin.css`, `hosting/admin.html`, `hosting/admin.js`, `popup.css`, `popup.html` | #46 activation controls and #47 administrator UI |
+| `investigation-companion.html`, `tests/extension-context.test.js`, `tests/manual-commit-safety.test.js`, `tests/onboarding-approval-e2e.test.js`, `tests/processing-rules.test.js`, `tests/safety-interlocks.test.js` | Merged calculation, auth, count and safety contracts |
+| `tests/ipd-remark-recovery.test.js`, `tests/recovery-safety.test.js`, `tests/review-core.test.js` | #45 recovery and review safeguards |
 
-For each task, start from fetched `origin/main` (or a documented dependency),
-move the selected hunks into its worktree, inspect `git diff --cached`, and
-run `npm run check:staged`. Commit one behavior change at a time using
-Conventional Commits. Open a PR after inspecting `git diff <base>...HEAD`.
-Regenerate release metadata only after the behavior changes are merged.
+## Retain reviewed main versions (26)
 
-## Existing safeguards and remaining administration
+The original aggregate WIP predates safeguards added during extraction. Copying
+these files wholesale would remove reviewed improvements. The unique remaining
+differences were inspected; their disposition is recorded here.
 
-GitHub Flow, branch/commit policy enforcement, versioned Git hooks, both npm
-lockfiles, `npm ci`, dependency download caches, CI concurrency cancellation,
-and a ten-minute CI timeout already exist. Retain those checks and the
-current application CI additions when merging this workflow branch.
+| Paths | Reason to retain main |
+| --- | --- |
+| `.github/workflows/ci.yml`, `eslint.config.js` | Keep dependent-PR CI scope, staged-validation lint coverage and current acceptance registrations. Production-only helper registrations are unnecessary. |
+| `background.js`, `review-core.js` | Keep review identity reset/sign-out protection and claim-bound carryover from #45. The original extra argument to `callFunction` has no effect. |
+| `content.js`, `floating-widget.js`, `investigation-companion.js` | Keep malformed-count guards, companion validation/revision checks and both blocked Apply buttons from #49/#50. Other content differences are indentation. |
+| `functions/lib/contracts.js`, `popup.js` | Remaining differences are formatting only. |
+| `functions/lib/admin-monitor.js`, `hosting/admin-monitor.js`, `hosting/firebase-client.js` | Keep newest-first attention, generation-safe stale timers, full sign-out clearing and pre-fetch session guard from #47. |
+| `functions/test/admin-monitor.test.js`, `functions/test/user-licence-deactivation.test.js` | Keep deterministic monitor/deactivation coverage; the original extra monitor assertions are covered by the merged monitor test. |
+| `tests/admin-client.test.js`, `tests/auth-race.test.js`, `tests/review-resume.test.js` | Keep additional hosted mutation-cancellation, signup-failure/cancellation and cross-claim regressions. |
+| `tests/claim-apply-safety.test.js`, `tests/claim-core.test.js`, `tests/investigation-safety.test.js` | Keep expanded comparison, malformed-input and invalidation regressions from #49/#50. |
+| `scripts/admin-dashboard-e2e.js`, `scripts/signup-browser-acceptance.js`, `scripts/extension-browser-e2e.js` | Keep graceful browser shutdown, async guarded cleanup, stronger acceptance and persisted recovery waits from #46–#50. |
+| `scripts/browser-smoke-e2e.js`, `scripts/license-lifecycle-acceptance.js` | Keep companion browser coverage and corrected auth fixtures; the remaining lifecycle console-message difference has no behavioral effect. |
+| `docs/ADMIN_CONTROL_TOWER.md` | Keep reviewed #47 access, monitoring cost, bounded payload and rollout documentation. Original production acceptance claims are archived below. |
 
-An administrator must verify the server-side `main` protection described in
-CONTRIBUTING.md: PRs, at least one approval, stale-review dismissal, resolved
-conversations, required `validate` checks, and blocked force pushes/deletion.
-This local change does not assert that those GitHub settings are enabled.
+Files newly added on main but absent from the old checkout, including broker and
+monitor regressions, staged-validation tools, contribution safeguards and scoped
+PR documentation, also remain intact. They are not original WIP entries.
 
-The cached branch inventory identifies `chore/version-control-workflow`,
-`feat/investigation-companion`, `fix/pr40-release-safety`, and `release/1.12.0`
-as merged candidates. Refresh remote references and check for associated work
-before deleting any of them. Retain `agent/worktree-safety-20260812` until
-its snapshot has been reconciled. No existing branch was deleted.
+## Reconciled release files (10)
 
-Node 22 is required by `.nvmrc`, CI, and Functions. This workstation defaults
-to Node 24 but already has Node 22 at `.tools/node22`; select that toolchain
-for CI-equivalent checks. Docker and `act` are not currently on PATH, so the
-documented local Actions run was not performed. Do not add blanket retries
-or increase timeouts without evidence from a specific failing step.
+| Paths | Disposition |
+| --- | --- |
+| `README.md`, `DEVELOPMENT.md`, `PRIVACY_POLICY.md` | Document the merged signup, review/recovery, comparison and count behavior. Describe session-storage retention and full release checks. Distinguish candidate preparation from publication; remove unsupported current Store assertions. |
+| `CHANGELOG.md` | Record all merged 1.12.1 changes rather than only the earlier signup/dashboard subset. |
+| `manifest.json`, `package.json`, `package-lock.json` | Align extension/package/lock versions to 1.12.1 without changing dependencies or dropping the merged snapshot/staged-check npm scripts. |
+| `release-manifest.json` | Regenerate from the merged candidate; discard the stale original timestamp/checksum. |
+| `docs/CLAIM_APPLY_SAFETY_FIXES.md` | Retain the original cross-cutting safety explanation alongside the scoped merged PR docs. |
+| `docs/SIGNUP_LICENCE_HOTFIX_1.12.1.md` | Replace old test counts and unverified deployment claims with reviewed behavior and links to reproducible acceptance/release evidence. |
+
+The new `docs/RELEASE_1.12.1_REVIEW.md` provides candidate identity, validation
+and rollout checkpoints. This reconciliation record replaces the initial
+suggested boundaries, which are now completed.
+
+## Historical QA material preserved locally (5)
+
+| Paths | Disposition |
+| --- | --- |
+| `docs/ADMIN_DASHBOARD_ACCEPTANCE_2026-11-10.md` | Historical production acceptance/deployment claims retained in the snapshot and original checkout. They are not reasserted as this candidate's validation. |
+| `scripts/admin-dashboard-live-acceptance.js`, `scripts/admin-production-smoke.js`, `scripts/admin-review-browser.js`, `scripts/signup-production-acceptance.js` | One-off production/browser tools depend on a particular operator/session and can inspect or mutate live data. Preserved verbatim in the snapshot/original checkout; excluded from the release PR and package. Synthetic dashboard/signup/lifecycle suites already provide reproducible acceptance. |
+
+These five files are accounted for archival material, not pending release code.
+Promoting any of them to supported tooling would require its own scope and review.
+No historical script was executed during this reconciliation.
+
+## Completion and later cleanup
+
+The release worktree contains only the focused PR changes. The original checkout
+remains a recovery source; it is intentionally still dirty. Reconciliation does
+not mean resetting it. Keep the snapshot and original files until the release
+PR is merged and the owner elects to retire that checkout. Continue new work in
+a clean branch/worktree from current main. Before any later deletion, confirm
+the relevant branch is merged and no independent local work or ignored evidence
+is needed. Dependency junctions in review worktrees point to the retained
+calculation worktree; do not remove that installation while they use it.
+
+Main protection was verified during the extraction sequence: strict `validate`,
+one independent approving review, stale-review dismissal, last-push approval,
+resolved conversations and no force pushes/deletion, including administrators.
+The release PR does not change protection settings or bypass these gates.

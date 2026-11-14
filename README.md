@@ -25,8 +25,10 @@ roster code and automatically activates the user's licence when an administrator
 approves the account. Individual users pay against an administrator-supplied
 UPI QR code and submit the resulting UPI transaction ID (UTR) for verification.
 
-Chrome Web Store release: **1.11.1** (August 6, 2026). The local release candidate
-is **1.12.0**; see [review and validation evidence](docs/RELEASE_1.12.0_REVIEW.md).
+The prepared release candidate is **1.12.1**; see the
+[release checklist and validation](docs/RELEASE_1.12.1_REVIEW.md).
+The last Store publication recorded in tracked evidence is **1.11.1**;
+current Store availability must be checked separately before rollout.
 Source, candidate packaging, backend deployment and Store publication are tracked
 separately. Phase 4 adds production-isolated packaging and a
 server-authorized administrator interface for users, invitations,
@@ -52,9 +54,10 @@ directly in the default browser.
 - **Reconciliation**: Review selected claim, proposed approval, and claim-proposed difference totals before Apply
 - **Stale Protection**: Apply is blocked when portal values changed or the preview is older than ten minutes
 - **Recovery Snapshots**: Pre-Apply values are stored locally for up to 24 hours and can be restored after refresh
-- **Verified Self-Service Signup**: Default platform registration activates after
-  email verification when the platform licence and capacity allow it; suspended,
-  rejected and deleted profiles still require administrator action
+- **Verified Signup**: Email verification creates a pending registration.
+  Sponsored access or verified individual payment and explicit administrator
+  activation are required before claim tools unlock; duplicate signup resumes
+  through sign-in instead of creating another account
 - **Investigation Review**: Verify report counts beside the PDF, review amount and
   remark proposals, acknowledge reductions, and Apply with recovery and Undo
 - **Organisation Roster Access**: Platform administrators maintain single-use
@@ -78,7 +81,9 @@ directly in the default browser.
 ## Installation
 
 ### Method 1: Install from Chrome Web Store
-Version 1.11.1 is the recorded public Chrome Web Store release in India.
+The last Store publication recorded in tracked evidence is 1.11.1. Verify the
+current listing before installation; preparing candidate 1.12.1 does not publish
+it or update installed copies.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
 
@@ -296,54 +301,42 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 - The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
 - Use `npm run release -- patch`, `minor`, or `major` to run the isolated licence lifecycle acceptance gate, align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256. Local releases require Node.js 22 and Java 21 or newer.
 
-### Shadow-mode promotion workflow (flag-only to auto-deduct)
-
-Every deduct-eligible rule ships **flag-only**. Promotion to auto-deduct is a
-data-driven decision backed by auditor feedback:
-
-1. Work claims normally in flag mode. Each flagged row shows ✓ / ✗ buttons:
-   **✓ confirms** the finding was correct; **✗ dismisses** it as a false
-   positive (this also clears the highlight and the rule's remark segment).
-   Verdicts are stored locally per rule in `chrome.storage.local`.
-2. Open **Rules & Stats** from the popup (or the extension's Options page). It
-   lists every bundle rule with its flagged/deducted counts, confirmed/dismissed
-   feedback, and the resulting false-positive rate.
-3. When a rule shows a clean record (FP rate green, meaningful sample size),
-   switch its **Auto-deduct** toggle on. The override is stored in
-   `chrome.storage.local` and applied over the generated rules at runtime — no
-   rebuild needed. **Reset all overrides** returns to the generated defaults.
-4. Deductions additionally require the popup mode "Flag + auto-deduct",
-   code-confirmed matches, an empty approved field, and the per-sheet safety cap.
-5. For permanent promotion (survives rule regeneration and applies to other
-   machines), also flip `autoDeductEligible` in `tools/rule-curation.json` and
-   run `python tools/generate-audit-rules.py`.
+### Central rules, comparison and review resumption
 
 The toolbar icon shows a per-tab badge with the number of open audit findings
 on the current process sheet. It is cleared when the tab begins a new navigation,
 so page transitions cannot leave a stale count visible.
 
-### Custom findings and portal remarks
+Processing rules are managed by authorized administrators through the hosted
+Admin Panel. Rules & Stats is a read-only processor view of bundled safety
+statistics and the cached central rule version. Processor Options do not expose
+rule promotion, custom findings or remark editing. Earlier profile-local rule
+configuration is retained for compatibility with bundled operation.
 
-Open **Rules & Stats** and use **Custom findings** to create profile-local
-unbundling or upcoding-review rules without editing the generated
-`audit-rules.js`. Custom rules require a unique ID, an exact code or validated
-name pattern, a plain-language reason, and an optional reference. They always
-start and remain review-only; adding a rule can never silently enable an
-automatic deduction.
+In compare mode, central rules are evaluated locally alongside the bundled
+proposal. The widget shows differing approved amounts without letting the central
+comparison write portal fields. Authoritative rule activation still uses the
+central validation, scenario, approval and rollback workflow in
+[centralized rule governance](docs/CENTRALIZED_RULE_GOVERNANCE.md).
 
-The same page provides decision-specific remark templates for approved,
-deducted, rejected, and held rows. Approved Amount controls remain numeric-only;
-templates are written only to portal Remarks. A blank deducted or hold template
-keeps the specialized built-in wording. Configuration is stored in
-`chrome.storage.local`, applies to open claim tabs, and can be exported/imported
-as schema-versioned JSON without claim or patient data. Built-in generated rules
-remain immutable and the editor can reset all custom configuration safely.
+Review selections are saved through the service worker in Chrome session storage,
+scoped to the signed-in user, claim and page. Preview restores them only when
+proposal values and the rule identity still match; high-risk acknowledgement
+must be given again. Sign-out and browser/extension restart clear saved reviews.
 
-Every generated built-in rule listed on **Rules & Stats** also has an
-**Edit remarks** action. Per-rule text takes precedence over the global template
-only for that rule; for example, CA-01 can use different CAG wording without
-changing BI-01 CBC remarks. **Restore this rule** removes the override and
-immediately returns to the specialized generated wording.
+Apply Safe Rows automatically previews remaining findings and retains decisions
+only for unchanged rows. The widget displays full central warnings and blocking
+explanations. Undo and recovery require the originating claim/page, preserve
+unresolved fields for retry, and report conflicts and unavailable controls.
+IPD action remark edits also save recovery and support Undo.
+
+Investigation report counts accept safe non-negative whole numbers only;
+scientific notation, currency text and fractional counts are rejected.
+
+Run `npm run test:extension` to test the actual unpacked extension, service
+worker and Chrome APIs in an isolated profile with a loopback-only synthetic
+backend. It complements the DOM browser smoke and unit suites; it does not use
+real claim pages, accounts or production services.
 
 ## Contributing
 
@@ -371,7 +364,7 @@ If you encounter any issues or have questions:
 
 ## Version History
 
-### v1.0.0 (Current)
+### v1.0.0 (Initial release)
 - Initial release
 - Automatic claim to approved amount filling
 - Toggle on/off functionality
@@ -385,6 +378,6 @@ Future enhancements:
 - [ ] Custom field mapping configuration
 - [ ] Multiple page template presets
 - [ ] Keyboard shortcuts
-- [ ] Fill history/undo functionality
+- [x] Claim-bound Undo and saved recovery
 - [ ] Export/import settings
 - [ ] Support for more complex form structures

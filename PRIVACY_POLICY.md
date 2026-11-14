@@ -1,8 +1,8 @@
 # Privacy Policy for Claim Amount Auto-Fill
 
-**Effective date:** 4 November 2026
+**Effective date:** 11 November 2026
 
-**Extension version reviewed:** 1.12.0
+**Extension version reviewed:** 1.12.1 candidate
 
 Claim Amount Auto-Fill is a Chrome extension for authorized claim reviewers.
 It helps users preview, audit,
@@ -50,8 +50,6 @@ The extension uses this data only to provide its disclosed purpose:
 - apply only the changes explicitly selected by the user;
 - provide undo and recovery functions;
 - keep local audit, activity, rule-feedback, and configuration records; and
-- require acknowledgement of extension-applied changes before portal
-  submission; and
 - verify an individual user's submitted UPI reference before administrators
   activate paid access.
 
@@ -71,6 +69,13 @@ Data is stored using browser-provided storage:
   days are removed during subsequent writes.
 - Recovery snapshots are limited to 20 and expire after 24 hours during
   subsequent writes. A fully restored snapshot is removed.
+- In-progress review selections, amount/remark decisions and their claim/page
+  identity may be kept in Chrome's in-memory extension session storage. These
+  reviews are scoped to the signed-in account and limited to 30. Reviews become
+  ineligible for resumption after 24 hours; expired entries are removed during
+  subsequent writes. They are cleared on sign-out, extension reload/update or
+  browser restart. Restarting the background service worker alone does not clear
+  this session storage.
 - Audit and feedback records are bounded in size but otherwise remain until
   they are cleared by the user or replaced by normal extension operation.
 - A short-lived submission summary may be stored in the claim portal tab's session
@@ -127,8 +132,7 @@ Users can:
 - preview changes without applying them;
 - select which proposed changes to apply;
 - undo or restore eligible changes;
-- export or clear local audit/activity records;
-- reset local rule overrides and custom configuration; and
+- export or clear local audit/activity records; and
 - uninstall the extension.
 
 Users may request account deletion or access assistance through the support
