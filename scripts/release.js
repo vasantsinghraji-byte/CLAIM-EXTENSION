@@ -53,11 +53,6 @@ function main(args = process.argv.slice(2)) {
   }
   const version = nextVersion(manifest.version, releaseType);
 
-  run(process.execPath, [npmCli, 'run', 'check']);
-  run(process.execPath, [npmCli, 'run', 'lint']);
-  run(process.execPath, [npmCli, 'run', 'test:functions']);
-  run(process.execPath, [npmCli, 'run', 'test:browser']);
-  run(process.execPath, [npmCli, 'run', 'test:lifecycle']);
   try {
     manifest.version = version;
     pkg.version = version;
@@ -72,7 +67,16 @@ function main(args = process.argv.slice(2)) {
     const previous = originals.get(changelogPath)?.toString('utf8') || '# Changelog\n';
     fs.writeFileSync(changelogPath, `${previous.trimEnd()}\n\n## ${version} - ${date}\n\n- ${notes}\n`);
 
+    // Validate the candidate version, including the acceptance gates used in CI.
+    // Every failure restores the original release metadata before packaging.
     run(process.execPath, [npmCli, 'run', 'check']);
+    run(process.execPath, [npmCli, 'run', 'lint']);
+    run(process.execPath, [npmCli, 'run', 'test:functions']);
+    run(process.execPath, [npmCli, 'run', 'test:browser']);
+    run(process.execPath, [npmCli, 'run', 'test:extension']);
+    run(process.execPath, [npmCli, 'run', 'test:dashboard']);
+    run(process.execPath, [npmCli, 'run', 'test:firebase']);
+    run(process.execPath, [npmCli, 'run', 'test:lifecycle']);
     run(process.execPath, [npmCli, 'run', 'build']);
     const zip = fs.readFileSync(path.join(root, 'claim-autofill-extension.zip'));
     const rules = require(path.join(root, 'audit-rules.js'));
