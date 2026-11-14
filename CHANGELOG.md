@@ -198,3 +198,11 @@
 - Reject invalid report counts/row indices and stale companion previews; show local bundled/central comparisons and policy explanations while preserving the selected processing mode.
 - Expand real-Chrome, emulator and regression acceptance, stabilize browser cleanup, and enforce staged-index validation with recovery snapshots and focused PR guidance.
 - Reconcile release documentation and privacy disclosures, align candidate versions and regenerate package metadata. Store publication and backend deployment remain separate rollout steps.
+
+## 1.12.2 - 2026-11-14
+
+- Require current individual/organization entitlement, expiry and deployment policy for hosted rule downloads and feedback, including unchanged-version responses.
+- Check live Firebase session revocation on every authenticated callable and emit controlled rejection metadata.
+- Bound active client decisions to five minutes and deny new processing on licence/rule verification failure while preserving local Undo/recovery.
+- Run all eight acceptance gates against the candidate version before packaging, with release-metadata rollback on failure.
+- Document the confirmed licensing weaknesses, backend-first security rollout and a separate server-calculation proposal. MIT remains unchanged; no claim-data upload is introduced.

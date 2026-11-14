@@ -5,6 +5,11 @@ Store; post-publication installation verification remains operational follow-up.
 
 Date: 26 July 2026
 
+This document retains historical deployment and approval evidence. For the
+1.12.2 security candidate, use the current [release review](RELEASE_1.12.2_REVIEW.md).
+The earlier publication/deployment records below do not establish that the new
+licensing/session controls are deployed.
+
 ## Delivered controls
 
 The primary production administrator interface is the static dashboard under
@@ -72,7 +77,7 @@ configured for development testing.
 | Objective | Target |
 |---|---|
 | Administration API availability | 99.5% monthly during the controlled release |
-| Apply safety during authorization uncertainty | Fail closed after the one-hour cached decision tolerance |
+| Apply safety during authorization uncertainty | The 1.12.2 candidate fails closed on licence/rule verification failure, with no outage tolerance; successful display decisions last at most five minutes and critical actions request fresh checks. Historical deployed behavior must be verified separately. |
 | Audit-event retention | 365 days unless legal review specifies otherwise |
 | Authentication/invitation metadata retention | Account lifetime plus 90 days after deletion, subject to legal approval |
 | Recovery point objective | 24 hours after daily backups are enabled |
