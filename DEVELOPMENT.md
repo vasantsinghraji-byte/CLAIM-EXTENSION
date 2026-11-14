@@ -100,6 +100,15 @@ eligibility, deduction calculations, or the generated `audit-rules.js` source.
 
 The build fails when a required production file is missing. It produces a deterministic `claim-autofill-extension.zip` without another dependency.
 
+For a new version, `npm run release -- patch|minor|major` requires a clean
+worktree, prepares the candidate version/changelog, then runs all eight checks
+above against that candidate before building and verifying the ZIP. A failed
+check stops packaging and restores the original manifest, package, lockfile,
+changelog and release metadata. The release-flow tests use isolated temporary
+files and simulated commands to verify gate failures and rollback; CI also
+executes the actual browser and emulator suites. This command does not deploy
+services or publish to the Store.
+
 Release 1.12.1 preparation, artifact verification and rollout checkpoints are
 documented in [the release review](docs/RELEASE_1.12.1_REVIEW.md). Existing
 uncommitted work is accounted for in [the reconciliation record](docs/WORKTREE_RECONCILIATION.md).
