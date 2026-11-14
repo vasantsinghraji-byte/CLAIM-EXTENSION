@@ -93,6 +93,7 @@ function investigationFixtureHtml() {
     </table><pre id="out">RUNNING</pre>
     <script>
       window.recoveryAllowed = true;
+      window.ruleRefreshEnabled = true;
       const chrome = window.chrome = {
         storage: { sync: { get() {} }, local: { get(keys, callback) { callback({}); } }, onChanged: { addListener() {} } },
         runtime: {
@@ -103,7 +104,7 @@ function investigationFixtureHtml() {
             if (request.action === 'authRefreshLicence') return callback({ success: true,
               licenceState: { status: 'active', previewAllowed: true, applyAllowed: true } });
             if (request.action === 'refreshProcessingRules') return callback(window.ruleRefreshEnabled
-              ? { success: true, ruleSet: window.centralRuleSet || processingRuleSet }
+              ? { success: true, ruleSet: { schemaVersion: 2, mode: 'bundled', rules: [], ...(window.centralRuleSet || processingRuleSet) } }
               : { success: false, error: 'NETWORK_ERROR' });
             callback?.({ success: window.recoveryAllowed });
           }
@@ -119,10 +120,17 @@ function investigationFixtureHtml() {
         const remarks = document.getElementById('packageremarks_0');
         const actions = ClaimAutoFillActions;
         licenceState = { status: 'active', previewAllowed: true, applyAllowed: true };
+        processingRuleSet = { schemaVersion: 2, mode: 'bundled', rules: [] };
         const counts = [{ index: 0, found: '3' }];
         let preview = actions.previewInvestigationVerification(counts);
         assert(preview.proposals.length === 1, 'Actual DOM did not map the investigation');
         assert((await actions.applyInvestigationVerification(preview.token)).blockReason === 'high-risk-unacknowledged', 'Missing acknowledgement was accepted');
+        window.ruleRefreshEnabled = false;
+        assert((await actions.applyInvestigationVerification(preview.token, { acknowledgedHighRisk: true })).blockReason === 'processing-rules-unavailable',
+          'A rule-service outage must block bundled investigation Apply');
+        assert(approved.value === '400' && remarks.value === 'Existing remark', 'Outage changed investigation fields');
+        window.ruleRefreshEnabled = true;
+        preview = actions.previewInvestigationVerification(counts);
         approved.value = '350';
         assert((await actions.applyInvestigationVerification(preview.token, { acknowledgedHighRisk: true })).blocked, 'Changed approval was accepted');
         approved.value = '400';

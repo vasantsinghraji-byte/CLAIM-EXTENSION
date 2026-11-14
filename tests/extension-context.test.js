@@ -258,7 +258,6 @@ test('background wires auth-core, the three auth message actions, and the licenc
   assert.match(background, /request\?\.action === 'authRefreshLicence'/);
   assert.match(background, /chrome\.alarms\.onAlarm\.addListener/);
   assert.match(background, /alarm\.name === LICENCE_RECHECK_ALARM/);
-  assert.match(background, /transportFailure = error\?\.code === 'NETWORK_ERROR'/);
   assert.match(background, /cached\.checksum !== response\.checksum/);
 });
 

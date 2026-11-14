@@ -148,6 +148,7 @@ async function main() {
         rules: state.rules, bundledFallbackEnabled: false, checksum: `sha256:${checksum}:central` } });
     }
     if (request.url === '/functions/verifyLicence') {
+      if (state.offline) { response.writeHead(503, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { status: 'UNAVAILABLE' } })); return; }
       const finish = () => json(response, { result: { status: 'active', applyAllowed: true, previewAllowed: true, expiresAt: new Date(Date.now() + 3600000).toISOString() } });
       if (state.holdLicence) state.held.push(finish); else finish();
       return;
@@ -261,7 +262,7 @@ async function main() {
     await until(() => evaluate(`document.getElementById('packageFinalAmount_1').value==='200'`), 'reviewed remaining Apply');
     await waitForRecovery('packageFinalAmount_1', '200', '0');
     state.offline = true;
-    assert.equal((await evaluate('ClaimAutoFillActions.previewFresh()')).blockReason, 'processing-rules-unavailable');
+    assert.equal((await evaluate('ClaimAutoFillActions.previewFresh()')).blockReason, 'licence-unverified');
     assert.equal((await evaluate('ClaimAutoFillActions.undo()')).count, 1);
     assert.equal(await evaluate(`document.getElementById('packageFinalAmount_1').value`), '0');
     await until(async () => (await options.evaluate(`chrome.storage.local.get('claimRecoverySnapshots')`)).claimRecoverySnapshots?.length === 1, 'completed Undo bookkeeping');

@@ -3,7 +3,7 @@
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { FieldValue, Timestamp, getFirestore } = require('firebase-admin/firestore');
-const { HttpsError, onCall, onRequest } = require('firebase-functions/v2/https');
+const { HttpsError, onCall: firebaseOnCall, onRequest } = require('firebase-functions/v2/https');
 const { createMonitorHandler } = require('./lib/admin-monitor');
 const { logger } = require('firebase-functions');
 const {
@@ -70,8 +70,8 @@ exports.monitorAdminDashboard = onRequest({
 }, createMonitorHandler({ db, verifyToken: token => getAuth().verifyIdToken(token, true),
   authorize: requirePlatformAdmin, projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || '' }));
 
-function fail(code, message) {
-  throw new HttpsError(code, message);
+function fail(code, message, details) {
+  throw new HttpsError(code, message, details);
 }
 
 function translateValidation(error) {
@@ -88,6 +88,41 @@ function requireVerifiedEmail(request) {
   const auth = requireAuth(request);
   if (auth.token.email_verified !== true) fail('failed-precondition', 'Verified email required');
   return auth;
+}
+
+// Callable authentication validates a signed ID token, but revocation requires
+// an explicit live Auth check. Apply it to every authenticated callable, including
+// old clients, onboarding and administrator operations, before entering a handler.
+function onCall(options, handler) {
+  return firebaseOnCall(options, async request => {
+    try {
+      let checkedRequest = request;
+      if (request.auth) {
+        const header = request.rawRequest?.headers?.authorization;
+        const bearer = typeof header === 'string' && /^Bearer ([^\s]+)$/i.exec(header);
+        if (!bearer) fail('unauthenticated', 'Authentication required');
+        let token;
+        try {
+          token = await getAuth().verifyIdToken(bearer[1], true);
+        } catch (error) {
+          const rejected = ['auth/id-token-revoked', 'auth/id-token-expired', 'auth/invalid-id-token',
+            'auth/argument-error', 'auth/user-disabled', 'auth/user-not-found'].includes(error?.code);
+          fail(rejected ? 'unauthenticated' : 'unavailable',
+            rejected ? 'Sign in again to continue' : 'Authentication service unavailable');
+        }
+        if (token.uid !== request.auth.uid) fail('unauthenticated', 'Authentication required');
+        checkedRequest = { ...request, auth: { uid: token.uid, token } };
+      }
+      return await handler(checkedRequest);
+    } catch (error) {
+      // Fixed metadata only: never log bearer/refresh tokens, request bodies,
+      // emails, portal identifiers or arbitrary exception messages.
+      logger.warn('callable_rejected', { uid: request.auth?.uid || null,
+        code: error instanceof HttpsError ? error.code : 'internal' });
+      if (error instanceof HttpsError) throw error;
+      fail('unavailable', 'Service unavailable');
+    }
+  });
 }
 
 async function requirePlatformAdmin(request) {
@@ -318,6 +353,100 @@ exports.getCurrentUserProfile = onCall(callableOptions, async request => {
   };
 });
 
+async function currentLicenceDecision(user, extensionVersion, config) {
+  const license = user.license;
+  const organizationEntitlement = license?.type === 'organisation'
+    || user.role === 'platformAdmin' && Boolean(user.organizationId);
+  if ((!license || !LICENSE_TYPES.includes(license.type)) && !organizationEntitlement) {
+    return { status: 'unlicensed', previewAllowed: false, applyAllowed: false };
+  }
+  const now = Date.now();
+  const userExpiryMs = timestampMillis(license?.expiresAt);
+  const inactive = inactiveUserLicenceDecision(user);
+  if (inactive) return inactive;
+  if (config === undefined) {
+    const snapshot = await db.doc('appConfig/production').get();
+    config = snapshot.exists ? snapshot.data() : {};
+  }
+  const minimumVersion = String(config.minimumSupportedVersion || '0.0.0');
+  if (config.maintenanceMode === true) {
+    return { status: 'maintenance', previewAllowed: false, applyAllowed: false, minimumVersion };
+  }
+  if (compareSemanticVersions(extensionVersion, minimumVersion) < 0) {
+    return { status: 'update-required', previewAllowed: false, applyAllowed: false, minimumVersion };
+  }
+  const userAccess = licenceAccessDecision({
+    status: license?.status,
+    expiryMs: userExpiryMs,
+    now,
+    gracePeriodMs: GRACE_PERIOD_MS
+  });
+  let access = userAccess;
+  let expiryMs = userExpiryMs;
+  if (organizationEntitlement) {
+    const [organizationSnapshot, licenceSnapshot] = await Promise.all([
+      db.doc(`organizations/${user.organizationId}`).get(),
+      db.doc(`licences/${user.organizationId}`).get()
+    ]);
+    if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
+      return { status: 'suspended', previewAllowed: false, applyAllowed: false, minimumVersion };
+    }
+    if (!licenceSnapshot.exists) {
+      return { status: 'unlicensed', previewAllowed: false, applyAllowed: false, minimumVersion };
+    }
+    const organisationLicence = licenceSnapshot.data();
+    const organisationExpiryMs = timestampMillis(organisationLicence.expiryDate);
+    const organisationAccess = licenceAccessDecision({
+      status: organisationLicence.status,
+      expiryMs: organisationExpiryMs,
+      now,
+      gracePeriodMs: GRACE_PERIOD_MS
+    });
+    // Organization term remains authoritative after the explicit per-user
+    // deactivation check above. Renewal must not require updating every member.
+    access = organisationAccess;
+    expiryMs = organisationExpiryMs;
+  }
+  if (access.status === 'active') {
+    return {
+      ...access,
+      licenseType: organizationEntitlement ? 'organisation' : license.type,
+      paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
+      expiringSoon: expiryMs - now <= EXPIRING_SOON_MS,
+      expiresAt: new Date(expiryMs).toISOString(),
+      minimumVersion,
+      checkedVersion: extensionVersion
+    };
+  }
+  if (access.status === 'grace') {
+    return {
+      ...access,
+      licenseType: organizationEntitlement ? 'organisation' : license.type,
+      paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
+      expiresAt: new Date(expiryMs).toISOString(),
+      graceEndsAt: new Date(expiryMs + GRACE_PERIOD_MS).toISOString(),
+      minimumVersion
+    };
+  }
+  return {
+    ...access,
+    licenseType: organizationEntitlement ? 'organisation' : license.type,
+    paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
+    expiresAt: Number.isFinite(expiryMs) ? new Date(expiryMs).toISOString() : null,
+    minimumVersion
+  };
+}
+
+async function requireLicensedService(user, extensionVersion, config) {
+  const decision = await currentLicenceDecision(user, extensionVersion, config);
+  if (decision.applyAllowed !== true) {
+    const policyBlock = ['update-required', 'maintenance'].includes(decision.status);
+    fail(policyBlock ? 'failed-precondition' : 'permission-denied', 'Licensed service access denied',
+      { reason: decision.status, minimumVersion: decision.minimumVersion || null });
+  }
+  return decision;
+}
+
 exports.verifyLicence = onCall(callableOptions, async request => {
   try {
     const data = callableData(request);
@@ -325,88 +454,16 @@ exports.verifyLicence = onCall(callableOptions, async request => {
     const extensionVersion = requiredString(data.extensionVersion, 'extensionVersion', 32);
     const auth = requireVerifiedEmail(request);
     await enforceRateLimit(auth.uid, 'licence', 120, 60 * 60 * 1000);
-    const user = await activeUser(auth.uid);
-    const license = user.license;
-    const organizationEntitlement = license?.type === 'organisation'
-      || user.role === 'platformAdmin' && Boolean(user.organizationId);
-    if ((!license || !LICENSE_TYPES.includes(license.type)) && !organizationEntitlement) {
-      return { status: 'unlicensed', previewAllowed: false, applyAllowed: false };
+    const decision = await currentLicenceDecision(await activeUser(auth.uid), extensionVersion);
+    if (decision.applyAllowed !== true) {
+      logger.warn('licence_access_denied', { uid: auth.uid, status: decision.status });
     }
-    const now = Date.now();
-    const userExpiryMs = timestampMillis(license?.expiresAt);
-    const inactive = inactiveUserLicenceDecision(user);
-    if (inactive) return inactive;
-    const configSnapshot = await db.doc('appConfig/production').get();
-    const config = configSnapshot.exists ? configSnapshot.data() : {};
-    const minimumVersion = configSnapshot.exists
-      ? String(config.minimumSupportedVersion || '0.0.0')
-      : '0.0.0';
-    if (config.maintenanceMode === true) {
-      return { status: 'maintenance', previewAllowed: false, applyAllowed: false, minimumVersion };
+    if (decision.applyAllowed === true) {
+      const now = Date.now();
+      return { ...decision, serverTime: new Date(now).toISOString(), authorizationExpiresAt:
+        new Date(Math.min(now + 5 * 60 * 1000, Date.parse(decision.expiresAt), auth.token.exp * 1000)).toISOString() };
     }
-    if (compareSemanticVersions(extensionVersion, minimumVersion) < 0) {
-      return { status: 'update-required', previewAllowed: false, applyAllowed: false, minimumVersion };
-    }
-    const userAccess = licenceAccessDecision({
-      status: license?.status,
-      expiryMs: userExpiryMs,
-      now,
-      gracePeriodMs: GRACE_PERIOD_MS
-    });
-    let access = userAccess;
-    let expiryMs = userExpiryMs;
-    if (organizationEntitlement) {
-      const [organizationSnapshot, licenceSnapshot] = await Promise.all([
-        db.doc(`organizations/${user.organizationId}`).get(),
-        db.doc(`licences/${user.organizationId}`).get()
-      ]);
-      if (!organizationSnapshot.exists || organizationSnapshot.data().status !== 'active') {
-        return { status: 'suspended', previewAllowed: false, applyAllowed: false, minimumVersion };
-      }
-      if (!licenceSnapshot.exists) {
-        return { status: 'unlicensed', previewAllowed: false, applyAllowed: false, minimumVersion };
-      }
-      const organisationLicence = licenceSnapshot.data();
-      const organisationExpiryMs = timestampMillis(organisationLicence.expiryDate);
-      const organisationAccess = licenceAccessDecision({
-        status: organisationLicence.status,
-        expiryMs: organisationExpiryMs,
-        now,
-        gracePeriodMs: GRACE_PERIOD_MS
-      });
-      // Organization term remains authoritative after the explicit per-user
-      // deactivation check above. Renewal must not require updating every member.
-      access = organisationAccess;
-      expiryMs = organisationExpiryMs;
-    }
-    if (access.status === 'active') {
-      return {
-        ...access,
-        licenseType: organizationEntitlement ? 'organisation' : license.type,
-        paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
-        expiringSoon: expiryMs - now <= EXPIRING_SOON_MS,
-        expiresAt: new Date(expiryMs).toISOString(),
-        minimumVersion,
-        checkedVersion: extensionVersion
-      };
-    }
-    if (access.status === 'grace') {
-      return {
-        ...access,
-        licenseType: organizationEntitlement ? 'organisation' : license.type,
-        paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
-        expiresAt: new Date(expiryMs).toISOString(),
-        graceEndsAt: new Date(expiryMs + GRACE_PERIOD_MS).toISOString(),
-        minimumVersion
-      };
-    }
-    return {
-      ...access,
-      licenseType: organizationEntitlement ? 'organisation' : license.type,
-      paymentStatus: organizationEntitlement ? 'not_required' : license.paymentStatus,
-      expiresAt: Number.isFinite(expiryMs) ? new Date(expiryMs).toISOString() : null,
-      minimumVersion
-    };
+    return decision;
   } catch (error) {
     translateValidation(error);
   }
@@ -432,7 +489,6 @@ exports.getActiveProcessingRules = onCall(callableOptions, async request => {
     const auth = requireVerifiedEmail(request);
     await enforceRateLimit(auth.uid, 'processingRules', 240, 60 * 60 * 1000);
     const user = await activeUser(auth.uid);
-    if (inactiveUserLicenceDecision(user)) fail('permission-denied', 'User licence is inactive');
     requiredString(data.extensionVersion, 'extensionVersion', 32);
     const supported = data.supportedRuleSchemaVersions === undefined
       ? []
@@ -444,9 +500,9 @@ exports.getActiveProcessingRules = onCall(callableOptions, async request => {
       db.doc('processingRuleState/active').get(),
       db.doc('appConfig/production').get()
     ]);
-    const configuredMode = appConfigSnapshot.exists
-      ? String(appConfigSnapshot.data().processingRulesMode || '')
-      : '';
+    const config = appConfigSnapshot.exists ? appConfigSnapshot.data() : {};
+    await requireLicensedService(user, data.extensionVersion, config);
+    const configuredMode = String(config.processingRulesMode || '');
     const mode = configuredMode || (stateSnapshot.exists ? 'remote-required' : 'bundled');
     if (!stateSnapshot.exists) {
       if (mode === 'remote-required') fail('failed-precondition', 'No active processing rule set');
@@ -2026,8 +2082,10 @@ exports.submitProcessingRuleFeedback = onCall(callableOptions, async request => 
     await enforceRateLimit(auth.uid, 'submitProcessingRuleFeedback', 60, 60 * 60 * 1000);
     const user = await activeUser(auth.uid);
     const data = callableData(request);
-    assertKeys(data, ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes'],
-      ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes']);
+    assertKeys(data, ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes', 'extensionVersion'],
+      ['ruleId', 'ruleSetVersion', 'category', 'processingArea', 'packageCodes', 'extensionVersion']);
+    const extensionVersion = requiredString(data.extensionVersion, 'extensionVersion', 32);
+    await requireLicensedService(user, extensionVersion);
     const ruleId = safeDocumentId(String(data.ruleId).toUpperCase(), 'ruleId');
     const ruleSetVersion = safeDocumentId(data.ruleSetVersion, 'ruleSetVersion');
     const category = enumValue(data.category, 'category', FEEDBACK_CATEGORIES);

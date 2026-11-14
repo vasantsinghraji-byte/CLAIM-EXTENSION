@@ -47,6 +47,40 @@ test('a delayed licence verification cannot restore entitlement after sign-out',
   assert.equal(f.data.authSession, null); assert.equal(f.data.licenceState, null); assert.equal(f.data.processingRuleSet, null);
 });
 
+test('outages and authorization failures never reuse cached licence authority', async () => {
+  for (const code of ['NETWORK_ERROR', 'UNAVAILABLE', 'PERMISSION_DENIED', 'UNAUTHENTICATED']) {
+    const f = setup({ callFunction: async () => { throw Object.assign(new Error('Synthetic failure'), { code }); } });
+    f.data.licenceState = { status: 'active', previewAllowed: true, applyAllowed: true,
+      checkedAt: Date.now(), authorizationExpiresAt: new Date(Date.now() + 3600000).toISOString() };
+    f.data.processingRuleSet = { rules: [{ ruleId: 'SYN-PRIVATE' }] };
+    const reply = await f.dispatch({ action: 'authRefreshLicence' });
+    assert.equal(reply.licenceState.applyAllowed, false, code);
+    assert.equal(reply.licenceState.previewAllowed, false, code);
+    assert.equal(f.data.processingRuleSet, null, code);
+    if (code === 'UNAUTHENTICATED') assert.equal(f.data.authSession, null);
+    else assert.equal(f.data.authSession.uid, 'SYN-A');
+  }
+});
+
+test('client licence authority is bounded and rejects expired server decisions', async () => {
+  const now = Date.now();
+  for (const until of [now + 60000, now + 3600000, now - 1000]) {
+    const f = setup({ callFunction: async () => ({ status: 'active', previewAllowed: true, applyAllowed: true,
+      authorizationExpiresAt: new Date(until).toISOString() }) });
+    const reply = await f.dispatch({ action: 'authRefreshLicence' });
+    assert(Date.parse(reply.licenceState.authorizationExpiresAt) <= Math.min(until, Date.now() + 300000));
+    assert.equal(reply.licenceState.applyAllowed, until > now);
+  }
+});
+
+test('a direct rule-service denial clears cached rules and local authority', async () => {
+  const f = setup({ callFunction: async () => { throw Object.assign(new Error('Synthetic rule denial'), { code: 'PERMISSION_DENIED' }); } });
+  f.data.processingRuleSet = { rules: [{ ruleId: 'SYN-PRIVATE' }] };
+  assert.equal((await f.dispatch({ action: 'refreshProcessingRules' })).success, false);
+  assert.equal(f.data.processingRuleSet, null);
+  assert.equal(f.data.licenceState.applyAllowed, false);
+});
+
 test('token refresh and delayed sign-in cannot recreate credentials after sign-out', async () => {
   for (const operation of ['refresh', 'sign-in']) {
     const started = deferred(), response = deferred();

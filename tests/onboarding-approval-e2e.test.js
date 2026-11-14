@@ -138,7 +138,7 @@ test('individual payment submission, verification, and license activation stay s
 test('licence policy and filtered administration queries are enforced server-side', () => {
   const functions = read('functions/index.js');
   const verification = functions.slice(
-    functions.indexOf('exports.verifyLicence'),
+    functions.indexOf('async function currentLicenceDecision'),
     functions.indexOf('exports.getExtensionConfig')
   );
   assert.match(verification, /config\.maintenanceMode === true/);

@@ -97,6 +97,21 @@ function setup({ rules = [centralRule()], mode = 'remote-required', area = 'IPD'
   return { context, first, table, addRow, snapshots, preview, apply };
 }
 
+test('expired or failed licence authority blocks Preview and Apply without changing fields', async () => {
+  for (const state of [
+    { authorizationExpiresAt: new Date(Date.now() - 1000).toISOString() },
+    { authorizationExpiresAt: 'invalid-server-deadline' },
+    { source: 'error', authorizationExpiresAt: new Date(Date.now() + 60000).toISOString() }
+  ]) {
+    const f = setup(); const prepared = f.preview();
+    Object.assign(f.context.licenceState, state);
+    assert.equal(f.preview().blockReason, 'licence-unverified');
+    assert.equal((await f.apply(prepared)).blocked, true);
+    assert.equal(f.first.approved.value, '');
+    assert.equal(f.snapshots.length, 0);
+  }
+});
+
 test('formatted central claim amounts write the reviewed approval and Undo restores the original', async () => {
   const f = setup({ claim: '₹ 1,000.00' });
   const preview = f.preview();
