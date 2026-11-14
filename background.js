@@ -18,10 +18,28 @@ const PROCESSING_RULE_SCHEMA_VERSION = 2;
 function investigationSheetStorageKey(tid) {
   return `investigationSheet:${String(tid || '')}`;
 }
-// How long Apply keeps trusting the last successful licence check if the
-// backend is simply unreachable (not an expired/suspended licence - a
-// network failure). Matches the ID token lifetime.
-const LICENCE_OUTAGE_TOLERANCE_MS = 60 * 60 * 1000;
+const LICENCE_AUTHORITY_TTL_MS = 5 * 60 * 1000;
+
+function serverLicenceState(licence) {
+  const now = Date.now();
+  let deadline = now + LICENCE_AUTHORITY_TTL_MS;
+  for (const value of [licence.authorizationExpiresAt,
+    licence.status === 'active' ? licence.expiresAt : undefined]) {
+    if (value === undefined || value === null) continue;
+    const parsed = Date.parse(value);
+    deadline = Number.isFinite(parsed) ? Math.min(deadline, parsed) : now;
+  }
+  return { ...licence, status: deadline > now ? licence.status : 'unknown',
+    previewAllowed: licence.previewAllowed === true && deadline > now,
+    applyAllowed: licence.applyAllowed === true && deadline > now,
+    authorizationExpiresAt: new Date(deadline).toISOString(), checkedAt: now, source: 'server' };
+}
+
+function unverifiedLicenceState(previous) {
+  return { status: 'unknown', previewAllowed: false, applyAllowed: false,
+    expiresAt: null, graceEndsAt: null, minimumVersion: previous?.minimumVersion || null,
+    checkedAt: previous?.checkedAt ?? Date.now(), authorizationExpiresAt: new Date().toISOString(), source: 'error' };
+}
 
 function auditLogEntryKey(entry) {
   return [entry.url, entry.tid, entry.ruleId, entry.rowNumber, entry.findingType, entry.action].join('|');
@@ -371,8 +389,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       data: { extensionVersion: chrome.runtime.getManifest().version },
       fetchImpl: fetch
     });
-    await writer.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
-    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    await writer.setLicenceState(serverLicenceState(licence));
+    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 5 });
     refreshProcessingRules(epoch).catch(() => undefined);
     return { success: true };
   }
@@ -410,9 +428,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       data: { extensionVersion: chrome.runtime.getManifest().version },
       fetchImpl: fetch
     });
-    await writer.setLicenceState({ ...licence, checkedAt: Date.now(), source: 'server' });
+    await writer.setLicenceState(serverLicenceState(licence));
     await writer.clearPendingAuth();
-    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 15 });
+    if (chrome.alarms) chrome.alarms.create(LICENCE_RECHECK_ALARM, { periodInMinutes: 5 });
     refreshProcessingRules(epoch).catch(() => undefined);
   }
 
@@ -721,28 +739,15 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         data: { extensionVersion: chrome.runtime.getManifest().version },
         fetchImpl: fetch
       });
-      const state = { ...licence, checkedAt: Date.now(), source: 'server' };
+      const state = serverLicenceState(licence);
       await writer.setLicenceState(state);
       return state;
     } catch (error) {
       if (epoch !== authEpoch) return null;
       const { licenceState: previous } = await storageGet(chrome.storage.local, 'licenceState');
-      const lastCheckedAt = previous?.checkedAt;
-      const transportFailure = error?.code === 'NETWORK_ERROR';
-      const withinTolerance = transportFailure && Number.isFinite(lastCheckedAt)
-        && Date.now() - lastCheckedAt <= LICENCE_OUTAGE_TOLERANCE_MS;
-      const state = withinTolerance
-        ? { ...previous, source: 'error' }
-        : {
-          status: 'unknown',
-          previewAllowed: false,
-          applyAllowed: false,
-          expiresAt: null,
-          graceEndsAt: null,
-          minimumVersion: previous?.minimumVersion || null,
-          checkedAt: lastCheckedAt ?? Date.now(),
-          source: 'error'
-        };
+      const state = unverifiedLicenceState(previous);
+      await writer.setProcessingRuleSet(null);
+      if (error?.code === 'UNAUTHENTICATED') await writer.clearAuthSession();
       await writer.setLicenceState(state);
       return state;
     }
@@ -786,6 +791,11 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
         supportedRuleSchemaVersions: [PROCESSING_RULE_SCHEMA_VERSION]
       },
       fetchImpl: fetch
+    }).catch(async error => {
+      await writer.setProcessingRuleSet(null);
+      await writer.setLicenceState(unverifiedLicenceState());
+      if (error?.code === 'UNAUTHENTICATED') await writer.clearAuthSession();
+      throw error;
     });
     if (response.unchanged && response.versionId && cached?.versionId !== response.versionId) {
       throw new Error('Active rule version is not available in the local cache');
@@ -833,7 +843,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage && chrome.storage
       functionsBaseUrl: FUNCTIONS_BASE_URL,
       name: 'submitProcessingRuleFeedback',
       idToken: session.idToken,
-      data,
+      data: { ...data, extensionVersion: chrome.runtime.getManifest().version },
       fetchImpl: fetch
     });
   }

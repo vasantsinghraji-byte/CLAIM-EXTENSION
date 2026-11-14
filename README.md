@@ -2,6 +2,10 @@
 
 Centralized processing-rule governance, publishing, rollback, and processor feedback are documented in [`docs/CENTRALIZED_RULE_GOVERNANCE.md`](docs/CENTRALIZED_RULE_GOVERNANCE.md).
 
+Licensing trust boundaries, server revocation and legacy limitations are documented
+in the [security assessment](docs/LICENSING_SECURITY_ASSESSMENT.md), with a separate
+[server-calculation proposal](docs/SERVER_CALCULATION_PROPOSAL.md).
+
 Fully isolated Auth, Functions, Firestore, Hosting, and extension testing is
 documented in [`docs/LOCAL_EMULATOR_TESTING.md`](docs/LOCAL_EMULATOR_TESTING.md).
 

@@ -124,7 +124,7 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
     ]
   });
   assert.deepEqual(rosterImport, { organizationId: 'acceptance-org', submitted: 2, created: 2, updated: 0 });
-  const sponsoredToken = await signIn(sponsored.email);
+  let sponsoredToken = await signIn(sponsored.email);
   await callFunction('completeInvitationOnboarding', sponsoredToken, { displayName: 'Sponsored Processor' });
   const onboarding = await callFunction('completeOrganizationSponsoredOnboarding', sponsoredToken, {
     organizationId: 'acceptance-org', employeeCode: 'EMP-ACCEPT-01', displayName: 'Sponsored Processor'
@@ -159,6 +159,8 @@ async function testSponsoredLifecycle(auth, db, adminToken, sponsoredExpiry) {
   assert.equal(reactivated.accountStatus, 'active');
   assert.equal(reactivated.license.status, 'inactive',
     'account reactivation must not silently rewrite historical per-user licence state');
+  await callFunction('verifyLicence', sponsoredToken, { extensionVersion: '1.11.1' }, 'UNAUTHENTICATED');
+  sponsoredToken = await signIn(sponsored.email);
   const reactivatedAccess = await callFunction(
     'verifyLicence', sponsoredToken, { extensionVersion: '1.11.1' }
   );
@@ -359,7 +361,7 @@ async function testRuleGovernance(auth, db, adminToken) {
   const unchanged = await callFunction('getActiveProcessingRules', readerToken, {
     extensionVersion: '1.12.0', supportedRuleSchemaVersions: [2], knownVersionId: active.versionId });
   assert.equal(unchanged.unchanged, true);
-  const feedback = await callFunction('submitProcessingRuleFeedback', readerToken, { ruleId: deduction.ruleId,
+  const feedback = await callFunction('submitProcessingRuleFeedback', readerToken, { ruleId: deduction.ruleId, extensionVersion: '1.12.0',
     ruleSetVersion: approved.versionId, category: 'incorrect_deduction', processingArea: 'IPD', packageCodes: ['QA-DEDUCT'] });
   for (const status of ['under_review', 'accepted', 'rejected', 'resolved']) {
     await callFunction('reviewProcessingRuleFeedback', adminToken, { feedbackId: feedback.feedbackId, status,
@@ -439,6 +441,59 @@ async function testAdminMonitor(auth, db, adminToken) {
   }
 }
 
+async function testServerLicenceSecurity(auth, db) {
+  assert.equal(PROJECT_ID, 'demo-claimextension');
+  const identity = await createVerifiedUser(auth, 'licence-security@claim-spark.local', 'Synthetic Security Processor');
+  const reference = db.doc(`users/${identity.uid}`), configReference = db.doc('appConfig/production');
+  const originalConfig = (await configReference.get()).data();
+  const profile = { email: identity.email, role: 'processor', accountStatus: 'active', organizationId: 'platform',
+    license: { ...defaultLicense(), type: 'individual', status: 'active', paymentStatus: 'verified',
+      activatedAt: Timestamp.fromMillis(Date.now()), expiresAt: Timestamp.fromMillis(Date.now() + 180000) } };
+  const request = { extensionVersion: '1.12.1', supportedRuleSchemaVersions: [2] };
+  try {
+    await reference.set(profile);
+    let token = await signIn(identity.email);
+    const policy = await callFunction('getActiveProcessingRules', token, request);
+    const decision = await callFunction('verifyLicence', token, { extensionVersion: request.extensionVersion });
+    assert.equal(decision.applyAllowed, true);
+    assert(Date.parse(decision.authorizationExpiresAt) <= Date.parse(decision.serverTime) + 300000);
+    assert(Date.parse(decision.authorizationExpiresAt) <= profile.license.expiresAt.toMillis());
+    await callFunction('getActiveProcessingRules', 'not-a-valid-token', request, 'UNAUTHENTICATED');
+    await callFunction('getActiveProcessingRules', token, { ...request, applyAllowed: true }, 'INVALID_ARGUMENT');
+    await configReference.update({ minimumSupportedVersion: '99.0.0' });
+    await callFunction('getActiveProcessingRules', token, { ...request, knownVersionId: policy.versionId }, 'FAILED_PRECONDITION');
+    assert.equal((await callFunction('verifyLicence', token, { extensionVersion: request.extensionVersion })).status, 'update-required');
+    await configReference.update({ minimumSupportedVersion: '0.0.0', maintenanceMode: true });
+    await callFunction('getActiveProcessingRules', token, request, 'FAILED_PRECONDITION');
+    await configReference.set(originalConfig);
+    await reference.update({ license: { ...profile.license, expiresAt: Timestamp.fromMillis(Date.now() - 1000) } });
+    assert.equal((await callFunction('verifyLicence', token, { extensionVersion: request.extensionVersion })).applyAllowed, false);
+    await callFunction('getActiveProcessingRules', token, request, 'PERMISSION_DENIED');
+    await reference.set({ ...profile, license: null });
+    await callFunction('getActiveProcessingRules', token, request, 'PERMISSION_DENIED');
+    await reference.set(profile);
+    await callFunction('getActiveProcessingRules', token, request);
+    await reference.update({ license: { ...profile.license, status: 'inactive' } });
+    await callFunction('getActiveProcessingRules', token, { ...request, extensionVersion: '999.0.0' }, 'PERMISSION_DENIED');
+    await reference.set(profile);
+    // Revocation timestamps have second precision; ensure the sign-in predates it.
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    await auth.revokeRefreshTokens(identity.uid);
+    for (const name of ['verifyLicence', 'getActiveProcessingRules', 'getCurrentUserProfile']) {
+      await callFunction(name, token, name === 'getCurrentUserProfile' ? {} : request, 'UNAUTHENTICATED');
+    }
+    token = await signIn(identity.email);
+    await callFunction('getActiveProcessingRules', token, request);
+    await auth.updateUser(identity.uid, { disabled: true });
+    await callFunction('getActiveProcessingRules', token, request, 'UNAUTHENTICATED');
+    console.log('PASS: server licence security: forged token/local flags, missing/expired/revoked licences, old versions, maintenance, bounded decisions, current-session revocation and disabled Auth identities. Emulator only.');
+  } finally {
+    await configReference.set(originalConfig);
+    await reference.delete();
+    await auth.deleteUser(identity.uid);
+  }
+}
+
 async function main() {
   assert.equal(process.env.FIREBASE_AUTH_EMULATOR_HOST, '127.0.0.1:9099');
   assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8080');
@@ -456,6 +511,7 @@ async function main() {
     }
     if (process.argv.includes('--governance-only')) {
       await testRuleGovernance(auth, db, adminToken);
+      await testServerLicenceSecurity(auth, db);
       await testAdminMonitor(auth, db, adminToken);
       console.log('PASS: complete rule-governance acceptance against local emulators.');
       return;
@@ -466,6 +522,7 @@ async function main() {
     await require('./signup-browser-acceptance').testSignupBrowser({ db, adminToken, callFunction });
     if (process.argv.includes('--onboarding-only')) return;
     await testRuleGovernance(auth, db, adminToken);
+    await testServerLicenceSecurity(auth, db);
     await testAdminMonitor(auth, db, adminToken);
     console.log('PASS: sponsored and individual licence lifecycles completed against local emulators.');
   } finally {
