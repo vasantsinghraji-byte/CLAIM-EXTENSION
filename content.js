@@ -900,10 +900,7 @@ function refreshProcessingRules() {
       try {
         chrome.runtime.sendMessage({ action: 'refreshProcessingRules' }, response => {
           if (chrome.runtime.lastError || !response?.success) {
-            // Only transport errors can use bundled rules. Authorization denial
-            // must remain a denial even when this client has bundled policies.
-            resolve({ ok: ['NETWORK_ERROR', 'UNAVAILABLE'].includes(response?.error)
-              && processingRuleSet?.mode !== 'remote-required', error: response?.error || 'network' });
+            resolve({ ok: false, error: response?.error || 'network' });
             return;
           }
           const normalized = ProcessingRules?.normalizeRuleSet(response.ruleSet);
@@ -1148,6 +1145,10 @@ function evaluateLicenceGate(state, apply) {
   if (!state) return { blocked: true, reason: 'signed-out' };
   if (state.status === 'update-required') return { blocked: true, reason: 'update-required' };
   if (state.status === 'maintenance') return { blocked: true, reason: 'maintenance' };
+  if (state.source === 'error' || state.authorizationExpiresAt !== undefined
+      && (!Number.isFinite(Date.parse(state.authorizationExpiresAt)) || Date.parse(state.authorizationExpiresAt) <= Date.now())) {
+    return { blocked: true, reason: 'licence-unverified' };
+  }
   if (apply && state.applyAllowed !== true) {
     return { blocked: true, reason: state.status === 'unverified' ? 'licence-unverified' : 'licence-apply-blocked' };
   }

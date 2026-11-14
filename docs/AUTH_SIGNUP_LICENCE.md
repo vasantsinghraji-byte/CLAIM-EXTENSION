@@ -1,5 +1,11 @@
 # Authentication, signup, and licence enforcement
 
+The [November licensing security assessment](LICENSING_SECURITY_ASSESSMENT.md)
+documents the current server session/entitlement guard, five-minute client
+decision deadline, fail-closed outage policy and legacy/local-code limitations.
+The [server-calculation proposal](SERVER_CALCULATION_PROPOSAL.md) describes the
+separately reviewed migration for protecting hosted calculations.
+
 Signup saves the newly created identity as pending before profile updates or
 verification-email requests. Those optional requests cannot strand the account.
 Duplicate or concurrent signup requests retain the first pending identity.
