@@ -29,8 +29,8 @@ roster code and automatically activates the user's licence when an administrator
 approves the account. Individual users pay against an administrator-supplied
 UPI QR code and submit the resulting UPI transaction ID (UTR) for verification.
 
-The prepared release candidate is **1.12.1**; see the
-[release checklist and validation](docs/RELEASE_1.12.1_REVIEW.md).
+The prepared security release candidate is **1.12.2**; see the
+[release checklist and validation](docs/RELEASE_1.12.2_REVIEW.md).
 The last Store publication recorded in tracked evidence is **1.11.1**;
 current Store availability must be checked separately before rollout.
 Source, candidate packaging, backend deployment and Store publication are tracked
@@ -86,7 +86,7 @@ directly in the default browser.
 
 ### Method 1: Install from Chrome Web Store
 The last Store publication recorded in tracked evidence is 1.11.1. Verify the
-current listing before installation; preparing candidate 1.12.1 does not publish
+current listing before installation; preparing candidate 1.12.2 does not publish
 it or update installed copies.
 
 ### Method 2: Load as Unpacked Extension (For Development/Testing)
@@ -303,7 +303,7 @@ The smoke test previews, applies only non-high-risk proposals, immediately undoe
 - Documentation-dependent upcoding risks (fracture extent, radical hysterectomy, fusion/fixation, burns severity, radiotherapy fractions, multi-trauma extent, cataract/SFIOL technique, and pacemaker/CRT configuration) create review-only proposals even when no second billed component is present.
 - Portal Submit controls are left untouched after extension-applied changes, so IPD, OPD, and Pharmacy claims retain their normal one-click submission behavior.
 - The local claim activity trail retains at most 500 events for 30 days. It records TID, route, counts, totals, rule IDs, and versions—never patient names, diagnoses, treatment, or free-text remarks.
-- Use `npm run release -- patch`, `minor`, or `major` to run the isolated licence lifecycle acceptance gate, align versions, update the changelog, validate, rebuild, and generate `release-manifest.json` with the distribution SHA-256. Local releases require Node.js 22 and Java 21 or newer.
+- Use `npm run release -- patch`, `minor`, or `major` from a clean worktree to prepare the candidate version/changelog, run all eight acceptance gates, build the ZIP, and generate/verify `release-manifest.json` with its distribution SHA-256. Local releases require Node.js 22 and Java 21 or newer.
 
 ### Central rules, comparison and review resumption
 

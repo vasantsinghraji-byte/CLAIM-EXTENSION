@@ -109,8 +109,9 @@ files and simulated commands to verify gate failures and rollback; CI also
 executes the actual browser and emulator suites. This command does not deploy
 services or publish to the Store.
 
-Release 1.12.1 preparation, artifact verification and rollout checkpoints are
-documented in [the release review](docs/RELEASE_1.12.1_REVIEW.md). Existing
+Security release 1.12.2 preparation, artifact verification and rollout checkpoints are
+documented in [the release review](docs/RELEASE_1.12.2_REVIEW.md). The earlier
+[1.12.1 review](docs/RELEASE_1.12.1_REVIEW.md) remains historical evidence. Existing
 uncommitted work is accounted for in [the reconciliation record](docs/WORKTREE_RECONCILIATION.md).
 Use a dedicated worktree from current main and retain the original recovery
 snapshot until reconciliation and review are complete. Release packaging does

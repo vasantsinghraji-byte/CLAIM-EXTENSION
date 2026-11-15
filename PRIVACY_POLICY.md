@@ -1,8 +1,8 @@
 # Privacy Policy for Claim Amount Auto-Fill
 
-**Effective date:** 11 November 2026
+**Effective date:** 14 November 2026
 
-**Extension version reviewed:** 1.12.1 candidate
+**Extension version reviewed:** 1.12.2 candidate
 
 Claim Amount Auto-Fill is a Chrome extension for authorized claim reviewers.
 It helps users preview, audit,
@@ -96,6 +96,13 @@ receives the minimum account and access data listed above. The extension does
 not send patient names, TIDs or claim identifiers, diagnoses, treatment text,
 claim/approved/deduction amounts, claim portal URLs, medical documents, or portal
 remarks to Firebase.
+
+For service security, rejected authenticated operations can produce a log with
+the Firebase UID, a controlled error or licence-status code, and service-provided
+function/timestamp metadata. These application events exclude request bodies,
+authentication tokens and claim-page content. They help operators investigate
+access failures and abuse; they do not establish that a particular installation
+is an official or unmodified copy.
 
 The extension does not include advertising or third-party analytics code.
 
